@@ -3,13 +3,12 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <LangVersion>latest</LangVersion>
-    <NoWarn>$(NoWarn);CA1416</NoWarn>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <OutputType>Library</OutputType>
-    <RootNamespace>AgoraIn.ClassIslandPlugin</RootNamespace>
-    <AssemblyVersion>2.4.3.0</AssemblyVersion>
+    <RootNamespace>CallPlugin</RootNamespace>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -21,8 +20,6 @@
     <PackageReference Include="ClassIsland.PluginSdk" Version="$(ClassIslandPluginSdkVersion)">
       <ExcludeAssets>runtime; native</ExcludeAssets>
     </PackageReference>
-    <!-- Windows 中文 TTS 朗读（System.Speech 为微软官方 Windows 专用包） -->
-    <PackageReference Include="System.Speech" Version="8.0.0" />
   </ItemGroup>
 
   <!-- SDK targets 末尾导入时会重置 PowershellBinaryName=pwsh，这里在打包前覆盖为系统自带的 Windows PowerShell -->

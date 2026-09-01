@@ -1,7 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using AgoraIn.ClassIslandPlugin.Models;
-using AgoraIn.ClassIslandPlugin.Views;
+using AgoraIn.ClassIslandPlugin.Services.NotificationProviders;
 
 namespace AgoraIn.ClassIslandPlugin.Services;
 
@@ -70,8 +70,13 @@ public class CallPoller
                 uuid = _settings.DeviceUuid,
                 password = _settings.Password
             });
-            if (!res.IsSuccessStatusCode) return;
+            if (!res.IsSuccessStatusCode)
+            {
+                CallStatusStore.SetStatus("无法连接集控平台");
+                return;
+            }
 
+            CallStatusStore.SetStatus("已连接，正常监听");
             using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
             foreach (var item in doc.RootElement.GetProperty("calls").EnumerateArray())
             {
@@ -123,15 +128,20 @@ public class CallPoller
         catch
         {
             // 网络/平台暂时不可用，下轮重试
+            CallStatusStore.SetStatus("连接出错，将自动重试");
         }
     }
 
     /// <summary>
-    /// 显示呼叫并确认，防止重复拉取
+    /// 显示呼叫并确认，防止重复拉取。
+    /// 展示走 ClassIsland 标准提醒模式（提醒提供方 → 全屏遮罩 + 正文）。
     /// </summary>
     private async Task ShowAndAckAsync(CallMessage call, HttpClient http)
     {
-        CallWindow.Show(call);
+        // ClassIsland 标准提醒（遮罩 + 正文）
+        CallNotificationProvider.Show(call);
+        // 更新主界面组件展示的最近呼叫
+        CallStatusStore.SetLastCall(call);
         try
         {
             await http.PostAsJsonAsync("api/calls_ack", new
