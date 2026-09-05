@@ -40,21 +40,53 @@ public class CallPoller
         _timer?.Dispose();
         _timer = null;
 
-        if (string.IsNullOrEmpty(_settings.ServerUrl) || string.IsNullOrEmpty(_settings.Password) ||
-            string.IsNullOrEmpty(_settings.DeviceUuid))
+        if (string.IsNullOrEmpty(_settings.ServerUrl) || string.IsNullOrEmpty(_settings.Password))
         {
-            // 配置为空：尝试自动探测，仍为空则提示前往插件设置页配置
+            // 平台地址/密码为空：尝试自动探测，仍为空则提示前往插件设置页配置
             PluginSettings.TryAutoDetect(_settings);
             _settings.Save(_configFolder);
-            if (string.IsNullOrEmpty(_settings.ServerUrl) || string.IsNullOrEmpty(_settings.Password) ||
-                string.IsNullOrEmpty(_settings.DeviceUuid))
+            if (string.IsNullOrEmpty(_settings.ServerUrl) || string.IsNullOrEmpty(_settings.Password))
             {
                 return;
             }
         }
 
+        // 设备 UUID 为空：不再依赖本机 AgoraIn 客户端，自动向服务器登记为呼叫接收端
+        if (string.IsNullOrEmpty(_settings.DeviceUuid))
+        {
+            var uuid = RegisterSelf(); // 同步尝试（失败时留空，由轮询重试）
+            if (!string.IsNullOrEmpty(uuid))
+            {
+                _settings.DeviceUuid = uuid;
+                _settings.Save(_configFolder);
+            }
+        }
+
         var interval = TimeSpan.FromSeconds(Math.Max(5, _settings.PollIntervalSeconds));
         _timer = new Timer(async _ => await PollAsync(), null, TimeSpan.FromSeconds(3), interval);
+    }
+
+    /// <summary>
+    /// 呼叫接收端自登记：向服务器注册（无需 AgoraIn 客户端与 RSA 密钥），
+    /// 教师端设备列表会用登记的 UUID 作为发送目标。广播呼叫（*）也总会送达。
+    /// </summary>
+    private string RegisterSelf()
+    {
+        try
+        {
+            var name = "ClassIsland-" + (System.Net.Dns.GetHostName() ?? "设备");
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+            var req = new HttpRequestMessage(HttpMethod.Post,
+                new Uri((_settings.ServerUrl.EndsWith('/') ? _settings.ServerUrl : _settings.ServerUrl + "/") + "api/calls_register"))
+            {
+                Content = JsonContent.Create(new { name, password = _settings.Password, client_version = "ClassIslandPlugin-2.4.0" })
+            };
+            var res = http.Send(req);
+            if (!res.IsSuccessStatusCode) return "";
+            using var doc = System.Text.Json.JsonDocument.Parse(res.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+            return doc.RootElement.TryGetProperty("uuid", out var u) ? u.GetString() ?? "" : "";
+        }
+        catch { return ""; }
     }
 
     private async Task PollAsync()

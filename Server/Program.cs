@@ -107,8 +107,8 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
     .AllowAnyMethod().AllowAnyHeader().AllowCredentials()));
 
 // ---- 版本常量（供 /api/version、启动横幅与更新检查器使用） ----
-const string ServerVersion = "3.2.4";
-const string LatestClientVersion = "v3.2.4";
+const string ServerVersion = "3.2.5";
+const string LatestClientVersion = "v3.2.5";
 const string ClientDownloadUrl = "https://github.com/liuyuchen012/AgoraIn/releases";
 
 // ---- 注册集控平台版本更新检查器（后台定时检查 GitHub 最新发布） ----
@@ -3589,12 +3589,17 @@ app.MapPost("/api/mobile/calls", async (AppDbContext db, JsonElement body, HttpC
         return Results.Json(new { error = "权限不足" }, statusCode: 403);
 
     var machineUuid = body.GetProperty("machine_uuid").GetString() ?? "";
-    if (string.IsNullOrEmpty(machineUuid))
-        return Results.Json(new { error = "machine_uuid 不能为空" }, statusCode: 400);
-
-    var machine = await db.Machines.FindAsync(machineUuid);
-    if (machine == null)
-        return Results.Json(new { error = "设备不存在" }, statusCode: 404);
+    var isBroadcast = string.IsNullOrEmpty(machineUuid) || machineUuid == "all" || machineUuid == "*";
+    if (!isBroadcast)
+    {
+        var machine = await db.Machines.FindAsync(machineUuid);
+        if (machine == null)
+            return Results.Json(new { error = "设备不存在" }, statusCode: 404);
+    }
+    else
+    {
+        machineUuid = "*";
+    }
 
     var type = body.GetProperty("type").GetString() ?? "prenotice";
     if (type is not ("prenotice" or "emergency" or "summon"))
@@ -4109,6 +4114,42 @@ app.MapPost("/api/config_applied", async (AppDbContext db, JsonElement body, Htt
 });
 
 /// <summary>
+/// <summary>
+/// POST /api/calls_register - 呼叫接收端（ClassIsland 插件等）自动登记为设备（无需 AgoraIn 客户端）
+/// 幂等：同名称且无公钥的设备复用同一 UUID，教师端设备列表可直接看到并选择
+/// </summary>
+app.MapPost("/api/calls_register", async (AppDbContext db, JsonElement body) =>
+{
+    if (!CheckPwd(body, ServerRuntime.Password, null))
+        return Results.Json(new { error = "invalid password" }, statusCode: 403);
+
+    var name = body.TryGetProperty("name", out var nm) ? nm.GetString() ?? "" : "ClassIsland-设备";
+    var clientVersion = body.TryGetProperty("client_version", out var cv) ? cv.GetString() ?? "" : "ClassIslandPlugin";
+
+    var existing = await db.Machines
+        .FirstOrDefaultAsync(m => m.Name == name && string.IsNullOrEmpty(m.PublicKey));
+    if (existing != null)
+    {
+        existing.LastSeen = DateTime.Now.ToString("O");
+        existing.ClientVersion = string.IsNullOrEmpty(clientVersion) ? existing.ClientVersion : clientVersion;
+        await db.SaveChangesAsync();
+        return Results.Json(new { uuid = existing.Uuid, existing = true });
+    }
+
+    var m = new MachineEntity
+    {
+        Uuid = Guid.NewGuid().ToString(),
+        Name = name,
+        PublicKey = "",
+        LastSeen = DateTime.Now.ToString("O"),
+        ClientVersion = clientVersion
+    };
+    db.Machines.Add(m);
+    await db.SaveChangesAsync();
+    return Results.Json(new { uuid = m.Uuid, existing = false });
+});
+
+/// <summary>
 /// POST /api/calls_pull - 设备拉取自己的待处理呼叫（CheckPwd 鉴权）
 /// 返回该设备所有 pending 状态的呼叫，已过期的一并标记为 expired
 /// </summary>
@@ -4134,7 +4175,7 @@ app.MapPost("/api/calls_pull", async (AppDbContext db, JsonElement body, HttpCon
         await db.SaveChangesAsync();
 
     var calls = await db.Calls
-        .Where(c => c.MachineUuid == uuid && c.Status == "pending")
+        .Where(c => (c.MachineUuid == uuid || c.MachineUuid == "*") && c.Status == "pending")
         .OrderBy(c => c.Id)
         .ToListAsync();
 
