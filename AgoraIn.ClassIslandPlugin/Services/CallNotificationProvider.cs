@@ -31,11 +31,15 @@ public class CallNotificationProvider : NotificationProviderBase
     /// <summary>容器创建的唯一实例（托管服务单例），供轮询器调用</summary>
     public static CallNotificationProvider? Instance { get; private set; }
 
-    public CallNotificationProvider()
+    /// <summary>课程服务（DI 注入，用于判断上课/下课状态；未注入时为 null）</summary>
+    public static ClassIsland.Core.Abstractions.Services.ILessonsService? Lessons { get; private set; }
+
+    public CallNotificationProvider(ClassIsland.Core.Abstractions.Services.ILessonsService lessons)
     {
         // 基类构造已完成：注册表查询 Info、Name/ProviderGuid/IconElement 初始化、
         // RegisterNotificationProvider(this) 注册到提醒主机
         Instance = this;
+        Lessons = lessons;
     }
 
     /// <summary>
