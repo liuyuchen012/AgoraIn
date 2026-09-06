@@ -108,7 +108,8 @@ public class CallNotificationProvider : NotificationProviderBase
         };
         ShowNotification(req);
 
-        TtsSpeaker.Speak(BuildSpokenText(call, label));
+        // v2.5.0：朗读统一由 CallWindow.SpeakOnce 承担（三遍节奏，仅第一遍有声），
+        // 避免与标准提醒重复发声。
     }
 
     /// <summary>正文文本：标题 + 内容 + 传唤名单（仅 summon）+ 发送者</summary>

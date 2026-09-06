@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using AgoraIn.ClassIslandPlugin.Models;
 using AgoraIn.ClassIslandPlugin.Services.NotificationProviders;
+using AgoraIn.ClassIslandPlugin.Views;
 
 namespace AgoraIn.ClassIslandPlugin.Services;
 
@@ -79,7 +80,7 @@ public class CallPoller
             var req = new HttpRequestMessage(HttpMethod.Post,
                 new Uri((_settings.ServerUrl.EndsWith('/') ? _settings.ServerUrl : _settings.ServerUrl + "/") + "api/calls_register"))
             {
-                Content = JsonContent.Create(new { name, password = _settings.Password, client_version = "ClassIslandPlugin-2.4.0" })
+                Content = JsonContent.Create(new { name, password = _settings.Password, client_version = "ClassIslandPlugin-2.5.0" })
             };
             var res = http.Send(req);
             if (!res.IsSuccessStatusCode) return "";
@@ -123,9 +124,11 @@ public class CallPoller
                     Sender = item.TryGetProperty("sender", out var se) ? se.GetString() ?? "" : "",
                 };
 
-                if (call.Type == "prenotice" && _settings.PrenoticeEnabled)
+                if ((call.Type == "prenotice" && _settings.PrenoticeEnabled) || call.Type == "summon")
                 {
-                    // 待下课通知：等待"距下课 ≤ 提前分钟数"的窗口再显示
+                    // 待下课/下课传唤：按 ClassIsland 下课状态呼出——
+                    // 上课时段（有课时且距下课 > 提前分钟数）暂缓；下课段/无课时立即呼出。
+                    // 放假（无课表）时视为下课段立即呼出。
                     lock (_pendingPrenotice)
                         _pendingPrenotice.Add(call);
                 }
@@ -170,8 +173,9 @@ public class CallPoller
     /// </summary>
     private async Task ShowAndAckAsync(CallMessage call, HttpClient http)
     {
-        // ClassIsland 标准提醒（遮罩 + 正文）
-        CallNotificationProvider.Show(call);
+        // v2.5.0：仅顶部常驻提示栏 + 主界面脉冲动画 + 朗读一遍；
+        // 不再弹出大提示窗口与标准提醒遮罩（用户要求仅保留提示栏）。
+        CallWindow.Show(call);
         // 更新主界面组件展示的最近呼叫
         CallStatusStore.SetLastCall(call);
         try

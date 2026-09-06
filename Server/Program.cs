@@ -1829,9 +1829,13 @@ app.MapGet("/", async (AppDbContext db, HttpContext ctx) =>
         var badgeText = online ? "在线" : "离线";
         var lastSeenStr = last?.ToString("yyyy-MM-dd HH:mm:ss") ?? "从未连接";
 
-        // 文件夹样式显示
+        // 文件夹样式显示（无公钥设备 = 插件/呼叫输出端，附加标记）
+        var isOutput = string.IsNullOrEmpty(m.PublicKey);
+        var outputTag = isOutput
+            ? "<span class='badge' style='margin-left:8px;background:#ecfdf5;color:#047857;'>🔔 呼叫输出端</span>"
+            : "";
         rows.Append($@"<tr class=""machine-row"" onclick=""window.location.href='/machine/{m.Uuid}'"">
-<td><div class=""folder-icon""><span class=""icon"">📁</span><span class=""name"">{HttpUtility.HtmlEncode(m.Name)}</span></div></td>
+<td><div class=""folder-icon""><span class=""icon"">📁</span><span class=""name"">{HttpUtility.HtmlEncode(m.Name)}</span>{outputTag}</div></td>
 <td><span class=""badge {badgeCls}"">{badgeText}</span></td>
 <td>{taskCount} 个任务</td>
 <td>{lastSeenStr}</td>
@@ -1914,6 +1918,10 @@ app.MapGet("/machine/{uuid}", async (string uuid, AppDbContext db, HttpContext c
 
     var escapedConfig = HttpUtility.HtmlAttributeEncode(machine.Config);
     var clientVersion = HttpUtility.HtmlEncode(string.IsNullOrEmpty(machine.ClientVersion) ? "未知" : machine.ClientVersion);
+    var isCallOutput = string.IsNullOrEmpty(machine.PublicKey);
+    var callOutputTag = isCallOutput
+        ? "<span class='badge' style='background:#ecfdf5;color:#047857;'>🔔 呼叫输出端</span>"
+        : "";
     // 重命名设备脚本（普通字符串，避免插值模板转义问题）
     var renameJs = "<script>function renameMachine() { var nn = prompt('请输入新的设备名称', ''); if (nn == null || nn.trim() == '') return; fetch('/api/web_rename_machine', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ machine_uuid: '" + uuid + "', name: nn.trim() }) }).then(function (r) { return r.json(); }).then(function (j) { if (j.status == 'ok') location.reload(); else alert(j.error || '重命名失败'); }).catch(function (e) { alert('重命名失败: ' + e); }); }</script>";
 
@@ -1922,7 +1930,7 @@ app.MapGet("/machine/{uuid}", async (string uuid, AppDbContext db, HttpContext c
 <h2>{HttpUtility.HtmlEncode(machine.Name)}</h2>
 <div style=""display:flex;gap:8px;"">
 <span class=""badge {badgeCls}"">{badgeText}</span>
-<span class=""badge"" style=""background:#eef2ff;color:#4338ca;"">客户端 {clientVersion}</span>
+<span class=""badge"" style=""background:#eef2ff;color:#4338ca;"">客户端 {clientVersion}</span>{callOutputTag}
 <button class=""btn btn-sm"" onclick=""renameMachine()"">重命名</button>
 <button class=""btn btn-sm"" onclick=""openEditConfigModal('{uuid}','{escapedConfig}')"">编辑配置</button>
 <button class=""btn btn-sm btn-danger"" onclick=""openDeleteMachineModal('{uuid}','{HttpUtility.HtmlEncode(machine.Name)}')"">删除设备</button>
@@ -3569,6 +3577,7 @@ app.MapGet("/api/mobile/devices", async (AppDbContext db, HttpContext ctx) =>
             online = last != null && (now - last.Value).TotalSeconds < 300,
             last_seen = m.LastSeen,
             client_version = m.ClientVersion ?? "",
+            is_call_output = string.IsNullOrEmpty(m.PublicKey),
             public_key = string.IsNullOrEmpty(m.PublicKey) ? "N/A" : m.PublicKey[..Math.Min(m.PublicKey.Length, 30)] + "..."
         };
     }).ToList();
@@ -3645,6 +3654,7 @@ app.MapGet("/api/mobile/calls", async (AppDbContext db, HttpContext ctx) =>
         query = query.Where(c => c.Sender == username);
 
     var calls = await query.OrderByDescending(c => c.Id).Take(100).ToListAsync();
+
     return Results.Json(new
     {
         calls = calls.Select(c => new
@@ -4174,10 +4184,27 @@ app.MapPost("/api/calls_pull", async (AppDbContext db, JsonElement body, HttpCon
     if (expired.Any(e => e.Status == "expired"))
         await db.SaveChangesAsync();
 
+    // 心跳：更新呼叫接收端最后在线时间（插件类设备无 RSA 心跳，靠轮询保持在线）
+    var machine = await db.Machines.FindAsync(uuid);
+    if (machine != null)
+    {
+        machine.LastSeen = DateTime.Now.ToString("O");
+        if (body.TryGetProperty("client_version", out var cv) && cv.ValueKind == JsonValueKind.String)
+            machine.ClientVersion = cv.GetString() ?? machine.ClientVersion;
+        db.Machines.Update(machine);
+        await db.SaveChangesAsync();
+    }
+
     var calls = await db.Calls
         .Where(c => (c.MachineUuid == uuid || c.MachineUuid == "*") && c.Status == "pending")
         .OrderBy(c => c.Id)
         .ToListAsync();
+
+    if (machine != null)
+    {
+        db.Machines.Update(machine);
+        await db.SaveChangesAsync();
+    }
 
     return Results.Json(new
     {
