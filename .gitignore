@@ -25,3 +25,11 @@ client_key.pem
 client_uuid.txt
 CHANGELOG.md
 publish/
+
+## 商业版服务端（不开源，仅部署于公司服务器）
+Server/
+build-linux.sh
+server.md
+server_error.txt
+server_output.txt
+AgoraInPro/installer/AgoraIn-Server.iss
