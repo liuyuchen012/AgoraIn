@@ -26,7 +26,7 @@ public class AdminUsersViewModel : INotifyPropertyChanged
     private string _newDisplayName = "";
     public string NewDisplayName { get => _newDisplayName; set { _newDisplayName = value; OnPropertyChanged(); } }
 
-    private string _newRole = "viewer";
+    private string _newRole = "student";
     public string NewRole { get => _newRole; set { _newRole = value; OnPropertyChanged(); } }
 
     private string _message = "";
@@ -38,7 +38,7 @@ public class AdminUsersViewModel : INotifyPropertyChanged
     public bool HasMessage => !string.IsNullOrEmpty(Message);
 
     public ObservableCollection<UserItem> Users { get; } = new();
-    public List<string> RoleOptions { get; } = new() { "student", "parent", "teacher", "admin" };
+    public List<string> RoleOptions { get; } = new() { "student", "parent", "teacher", "owner", "admin" };
 
     public ICommand RefreshCommand { get; }
     public ICommand CreateUserCommand { get; }
@@ -178,14 +178,23 @@ public class AdminUsersViewModel : INotifyPropertyChanged
         IsLoading = true;
         try
         {
-            // 暂时不支持通过 toggle 关闭/启用（API 尚未扩展），使用编辑接口
-            await _api.PostAsync("/api/users/change-password", new
+            var result = await _api.PutAsync($"/api/users/{user.Id}", new
             {
-                user_id = user.Id,
-                new_password = "temp123" // 占位，不会实际修改密码
+                is_active = !user.IsActive
             });
+            var error = ApiService.GetError(result);
+            if (error != null)
+                ShowMessage(error, true);
+            else
+            {
+                ShowMessage(user.IsActive ? $"已禁用 {user.Username}" : $"已启用 {user.Username}", false);
+                await LoadUsersAsync();
+            }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            ShowMessage($"操作失败: {ex.Message}", true);
+        }
         finally
         {
             IsLoading = false;
@@ -209,7 +218,7 @@ public class UserItem
 {
     public int Id { get; set; }
     public string Username { get; set; } = "";
-    public string Role { get; set; } = "viewer";
+    public string Role { get; set; } = "student";
     public string DisplayName { get; set; } = "";
     public bool IsActive { get; set; } = true;
     public string CreatedAt { get; set; } = "";
@@ -217,8 +226,9 @@ public class UserItem
     public string RoleText => Role switch
     {
         "admin" => "管理员",
-        "teacher" => "普通教师",
-        "operator" => "普通教师",
+        "owner" => "区域主账号",
+        "teacher" => "教师",
+        "operator" => "教师",
         "student" => "学生",
         "viewer" => "学生",
         "parent" => "家长",
@@ -228,11 +238,12 @@ public class UserItem
     public Color RoleColor => Role switch
     {
         "admin" => Color.FromArgb("#ea4335"),
+        "owner" => Color.FromArgb("#e37400"),
         "teacher" => Color.FromArgb("#4285f4"),
         "operator" => Color.FromArgb("#4285f4"),
         "student" => Color.FromArgb("#34a853"),
         "viewer" => Color.FromArgb("#34a853"),
-        "parent" => Color.FromArgb("#e37400"),
+        "parent" => Color.FromArgb("#9333ea"),
         _ => Color.FromArgb("#888888")
     };
 

@@ -69,3 +69,63 @@ public class StringNotEmptyConverter : IValueConverter
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
         => throw new NotImplementedException();
 }
+
+/// <summary>
+/// 不排课日背景色：true -> 浅红，false -> 白色
+/// </summary>
+public class OffDayColorConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => value is bool isOff && isOff ? Color.FromArgb("#fef2f2") : Colors.White;
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotImplementedException();
+}
+
+/// <summary>
+/// 今日字体加粗：true -> Bold，false -> None
+/// </summary>
+public class BoldConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => value is bool isToday && isToday ? FontAttributes.Bold : FontAttributes.None;
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotImplementedException();
+}
+
+/// <summary>
+/// 今日文字颜色：true -> 主色蓝，false -> 深灰
+/// </summary>
+public class TodayColorConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => value is bool isToday && isToday ? Color.FromArgb("#4285f4") : Color.FromArgb("#333333");
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotImplementedException();
+}
+
+/// <summary>
+/// 不排课日文字：true -> "休"，false -> 空
+/// </summary>
+public class OffDayTextConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => value is bool isOff && isOff ? "休" : "";
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotImplementedException();
+}
+
+/// <summary>
+/// 排课人数显示：0 -> 空，>0 -> "N人"
+/// </summary>
+public class ScheduleCountConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => value is int count && count > 0 ? $"{count}人" : "";
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotImplementedException();
+}

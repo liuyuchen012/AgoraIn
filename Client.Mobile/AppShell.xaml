@@ -34,6 +34,10 @@
                       Icon="{OnPlatform Default='control.png'}"
                       ContentTemplate="{DataTemplate pages:ControlModePage}"
                       Route="control" />
+        <ShellContent Title="排课"
+                      Icon="{OnPlatform Default='calendar.png'}"
+                      ContentTemplate="{DataTemplate pages:SchedulePage}"
+                      Route="schedule" />
         <ShellContent Title="用户"
                       Icon="{OnPlatform Default='users.png'}"
                       ContentTemplate="{DataTemplate pages:AdminUsersPage}"

@@ -30,7 +30,7 @@ public class AuthService
     public bool IsStudent => NormalizedRole == "student";
     public bool IsParent => NormalizedRole == "parent";
     /// <summary>管理员或教师（有管理权限）</summary>
-    public bool IsAdminOrTeacher => NormalizedRole == "admin" || NormalizedRole == "teacher";
+    public bool IsAdminOrTeacher => NormalizedRole == "admin" || NormalizedRole == "owner" || NormalizedRole == "teacher";
 
     public AuthService(ApiService api)
     {

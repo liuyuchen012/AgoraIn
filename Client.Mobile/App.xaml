@@ -16,6 +16,11 @@
             <converters:RankColorConverter x:Key="RankColorConverter" />
             <converters:InverseBoolConverter x:Key="InverseBool" />
             <converters:StringNotEmptyConverter x:Key="StringNotEmpty" />
+            <converters:OffDayColorConverter x:Key="OffDayColorConverter" />
+            <converters:BoldConverter x:Key="BoldConverter" />
+            <converters:TodayColorConverter x:Key="TodayColorConverter" />
+            <converters:OffDayTextConverter x:Key="OffDayTextConverter" />
+            <converters:ScheduleCountConverter x:Key="ScheduleCountConverter" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

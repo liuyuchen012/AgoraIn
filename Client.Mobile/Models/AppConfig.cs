@@ -17,5 +17,5 @@ public class AppConfig
     public int ServerPort { get; set; } = 5250;
     public string ServerPassword { get; set; } = "";
     public string AdminPasswordHash { get; set; } = "";
-    public const string Version = "v2.7.1";
+    public const string Version = "v3.2.5";
 }

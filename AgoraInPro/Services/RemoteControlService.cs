@@ -212,4 +212,126 @@ public class RemoteControlService
             new { old_password = oldPassword, new_password = newPassword, user_id = userId });
         await SendAsync(req);
     }
+
+    // ============ 排课管理 ============
+
+    /// <summary>获取课时学生列表</summary>
+    public async Task<List<JsonElement>> GetClassHourStudentsAsync(string machineUuid)
+    {
+        using var req = MakeRequest(HttpMethod.Get, $"/api/mobile/classhour-students?machine_uuid={Uri.EscapeDataString(machineUuid)}");
+        var json = await SendAsync(req);
+        var students = new List<JsonElement>();
+        if (json?.TryGetProperty("students", out var arr) == true)
+            foreach (var s in arr.EnumerateArray()) students.Add(s);
+        return students;
+    }
+
+    /// <summary>添加课时学生</summary>
+    public async Task<int> AddClassHourStudentAsync(string machineUuid, string name, double totalHours)
+    {
+        using var req = MakeRequest(HttpMethod.Post, "/api/mobile/classhour-students",
+            new { machine_uuid = machineUuid, name, total_hours = totalHours });
+        var json = await SendAsync(req);
+        return json?.TryGetProperty("id", out var id) == true ? id.GetInt32() : 0;
+    }
+
+    /// <summary>删除课时学生</summary>
+    public async Task DeleteClassHourStudentAsync(int id)
+    {
+        using var req = MakeRequest(HttpMethod.Delete, $"/api/mobile/classhour-students/{id}");
+        await SendAsync(req);
+    }
+
+    /// <summary>调整课时（正数增加，负数扣减）</summary>
+    public async Task<double> AdjustClassHoursAsync(int studentId, double hours, string remark = "")
+    {
+        using var req = MakeRequest(HttpMethod.Post, $"/api/mobile/classhour-students/{studentId}/adjust",
+            new { hours, remark });
+        var json = await SendAsync(req);
+        return json?.TryGetProperty("remaining", out var r) == true ? r.GetDouble() : 0;
+    }
+
+    /// <summary>获取课时记录流水</summary>
+    public async Task<List<JsonElement>> GetClassHourRecordsAsync(string machineUuid, int? studentId = null)
+    {
+        var path = $"/api/mobile/classhour-records?machine_uuid={Uri.EscapeDataString(machineUuid)}";
+        if (studentId.HasValue) path += $"&student_id={studentId.Value}";
+        using var req = MakeRequest(HttpMethod.Get, path);
+        var json = await SendAsync(req);
+        var records = new List<JsonElement>();
+        if (json?.TryGetProperty("records", out var arr) == true)
+            foreach (var r in arr.EnumerateArray()) records.Add(r);
+        return records;
+    }
+
+    /// <summary>获取排课列表</summary>
+    public async Task<List<JsonElement>> GetSchedulesAsync(string machineUuid, string? date = null)
+    {
+        var path = $"/api/mobile/schedules?machine_uuid={Uri.EscapeDataString(machineUuid)}";
+        if (!string.IsNullOrEmpty(date)) path += $"&date={Uri.EscapeDataString(date)}";
+        using var req = MakeRequest(HttpMethod.Get, path);
+        var json = await SendAsync(req);
+        var schedules = new List<JsonElement>();
+        if (json?.TryGetProperty("schedules", out var arr) == true)
+            foreach (var s in arr.EnumerateArray()) schedules.Add(s);
+        return schedules;
+    }
+
+    /// <summary>创建排课</summary>
+    public async Task<int> CreateScheduleAsync(string machineUuid, string date, int studentId, string studentName, string startTime, string endTime)
+    {
+        using var req = MakeRequest(HttpMethod.Post, "/api/mobile/schedules",
+            new { machine_uuid = machineUuid, date, student_id = studentId, student_name = studentName, start_time = startTime, end_time = endTime });
+        var json = await SendAsync(req);
+        return json?.TryGetProperty("id", out var id) == true ? id.GetInt32() : 0;
+    }
+
+    /// <summary>删除排课</summary>
+    public async Task DeleteScheduleAsync(int id)
+    {
+        using var req = MakeRequest(HttpMethod.Delete, $"/api/mobile/schedules/{id}");
+        await SendAsync(req);
+    }
+
+    /// <summary>复制排课</summary>
+    public async Task<int> CopySchedulesAsync(string machineUuid, string fromDate, List<string> toDates, bool skipOffDays = true)
+    {
+        using var req = MakeRequest(HttpMethod.Post, "/api/mobile/schedules/copy",
+            new { machine_uuid = machineUuid, from_date = fromDate, to_dates = toDates, skip_off_days = skipOffDays });
+        var json = await SendAsync(req);
+        return json?.TryGetProperty("copied", out var c) == true ? c.GetInt32() : 0;
+    }
+
+    /// <summary>设置不排课日</summary>
+    public async Task SetOffDayAsync(string machineUuid, string date, bool isOffDay)
+    {
+        using var req = MakeRequest(HttpMethod.Post, "/api/mobile/schedules/off-day",
+            new { machine_uuid = machineUuid, date, is_off_day = isOffDay });
+        await SendAsync(req);
+    }
+
+    /// <summary>获取月历排课数据</summary>
+    public async Task<JsonElement?> GetScheduleCalendarAsync(string machineUuid, int year, int month)
+    {
+        using var req = MakeRequest(HttpMethod.Get, $"/api/mobile/schedules/calendar?machine_uuid={Uri.EscapeDataString(machineUuid)}&year={year}&month={month}");
+        return await SendAsync(req);
+    }
+
+    /// <summary>获取课时设置</summary>
+    public async Task<(double HoursPerHour, bool AutoDeduct)> GetClassHourSettingsAsync(string machineUuid)
+    {
+        using var req = MakeRequest(HttpMethod.Get, $"/api/mobile/classhour-settings?machine_uuid={Uri.EscapeDataString(machineUuid)}");
+        var json = await SendAsync(req);
+        var hph = json?.TryGetProperty("hours_per_hour", out var h) == true ? h.GetDouble() : 1.0;
+        var ad = json?.TryGetProperty("auto_deduct", out var a) == true && a.GetBoolean();
+        return (hph, ad);
+    }
+
+    /// <summary>更新课时设置</summary>
+    public async Task UpdateClassHourSettingsAsync(string machineUuid, double hoursPerHour, bool autoDeduct)
+    {
+        using var req = MakeRequest(HttpMethod.Post, "/api/mobile/classhour-settings",
+            new { machine_uuid = machineUuid, hours_per_hour = hoursPerHour, auto_deduct = autoDeduct });
+        await SendAsync(req);
+    }
 }

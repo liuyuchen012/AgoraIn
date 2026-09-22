@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:viewmodels="clr-namespace:CheckIn.Client.Mobile.ViewModels"
+             x:Class="CheckIn.Client.Mobile.Pages.SchedulePage"
+             Title="排课管理"
+             BackgroundColor="#f5f6fa">
+
+    <RefreshView IsRefreshing="{Binding IsLoading}" Command="{Binding RefreshCommand}">
+        <ScrollView>
+            <VerticalStackLayout Padding="16" Spacing="12">
+
+                <!-- 设备选择 -->
+                <Border BackgroundColor="White" StrokeShape="RoundRectangle 12"
+                        Padding="12" Stroke="#e8e8e8" StrokeThickness="1">
+                    <VerticalStackLayout Spacing="8">
+                        <Label Text="选择设备" FontSize="13" TextColor="#888888" />
+                        <Picker ItemsSource="{Binding Devices}"
+                                ItemDisplayBindingPath="Name"
+                                SelectedItem="{Binding SelectedDevice}"
+                                FontSize="14" />
+                    </VerticalStackLayout>
+                </Border>
+
+                <!-- 月历标题 -->
+                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12" Padding="4,0">
+                    <Button Grid.Column="0" Text="◀" Command="{Binding PrevMonthCommand}"
+                            BackgroundColor="Transparent" TextColor="#4285f4"
+                            FontSize="18" WidthRequest="40" HeightRequest="36" Padding="0" />
+                    <Label Grid.Column="1" Text="{Binding CalMonthText}"
+                           FontSize="16" FontAttributes="Bold" TextColor="#333333"
+                           HorizontalOptions="Center" VerticalOptions="Center" />
+                    <Button Grid.Column="2" Text="▶" Command="{Binding NextMonthCommand}"
+                            BackgroundColor="Transparent" TextColor="#4285f4"
+                            FontSize="18" WidthRequest="40" HeightRequest="36" Padding="0" />
+                </Grid>
+
+                <!-- 月历网格 -->
+                <Border BackgroundColor="White" StrokeShape="RoundRectangle 12"
+                        Padding="8" Stroke="#e8e8e8" StrokeThickness="1">
+                    <Grid ColumnDefinitions="*,*,*,*,*,*,*" RowSpacing="4" ColumnSpacing="2">
+                        <!-- 星期标题 -->
+                        <Label Grid.Row="0" Grid.Column="0" Text="日" FontSize="11" TextColor="#888888" HorizontalOptions="Center" />
+                        <Label Grid.Row="0" Grid.Column="1" Text="一" FontSize="11" TextColor="#888888" HorizontalOptions="Center" />
+                        <Label Grid.Row="0" Grid.Column="2" Text="二" FontSize="11" TextColor="#888888" HorizontalOptions="Center" />
+                        <Label Grid.Row="0" Grid.Column="3" Text="三" FontSize="11" TextColor="#888888" HorizontalOptions="Center" />
+                        <Label Grid.Row="0" Grid.Column="4" Text="四" FontSize="11" TextColor="#888888" HorizontalOptions="Center" />
+                        <Label Grid.Row="0" Grid.Column="5" Text="五" FontSize="11" TextColor="#888888" HorizontalOptions="Center" />
+                        <Label Grid.Row="0" Grid.Column="6" Text="六" FontSize="11" TextColor="#888888" HorizontalOptions="Center" />
+                    </Grid>
+                </Border>
+
+                <CollectionView ItemsSource="{Binding CalendarDays}" HeightRequest="220"
+                                SelectionMode="None">
+                    <CollectionView.ItemsLayout>
+                        <GridItemsLayout Orientation="Vertical" Span="7"
+                                        VerticalItemSpacing="4" HorizontalItemSpacing="2" />
+                    </CollectionView.ItemsLayout>
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate x:DataType="viewmodels:CalendarDayItem">
+                            <Border StrokeShape="RoundRectangle 8" Padding="4"
+                                    Stroke="#e8e8e8" StrokeThickness="1"
+                                    BackgroundColor="{Binding IsOffDay, Converter={StaticResource OffDayColorConverter}}">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer
+                                        Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}}, Path=BindingContext.PickDateCommand}"
+                                        CommandParameter="{Binding Date}" />
+                                </Border.GestureRecognizers>
+                                <VerticalStackLayout HorizontalOptions="Center" Spacing="1">
+                                    <Label Text="{Binding Day, StringFormat='{0}'}"
+                                           FontSize="14" HorizontalOptions="Center"
+                                           FontAttributes="{Binding IsToday, Converter={StaticResource BoldConverter}}"
+                                           TextColor="{Binding IsToday, Converter={StaticResource TodayColorConverter}}" />
+                                    <Label Text="{Binding IsOffDay, Converter={StaticResource OffDayTextConverter}}"
+                                           FontSize="9" HorizontalOptions="Center" TextColor="#ea4335" />
+                                    <Label Text="{Binding ScheduleCount, Converter={StaticResource ScheduleCountConverter}}"
+                                           FontSize="9" HorizontalOptions="Center" TextColor="#4285f4" />
+                                </VerticalStackLayout>
+                            </Border>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+
+                <!-- 当日排课 -->
+                <Label Text="{Binding SelectedDateText}" FontSize="16" FontAttributes="Bold"
+                       TextColor="#333333" Margin="0,8,0,0" />
+                <CollectionView ItemsSource="{Binding DaySchedules}" HeightRequest="160">
+                    <CollectionView.EmptyView>
+                        <Label Text="该日无排课" TextColor="#888888" HorizontalOptions="Center" Margin="0,16" />
+                    </CollectionView.EmptyView>
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate x:DataType="viewmodels:ScheduleItem">
+                            <SwipeView Margin="0,0,0,6">
+                                <SwipeView.RightItems>
+                                    <SwipeItems>
+                                        <SwipeItem Text="删除" BackgroundColor="#ea4335"
+                                                   Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}}, Path=BindingContext.DeleteScheduleCommand}"
+                                                   CommandParameter="{Binding Id}" />
+                                    </SwipeItems>
+                                </SwipeView.RightItems>
+                                <Border BackgroundColor="White" StrokeShape="RoundRectangle 10"
+                                        Padding="12" Stroke="#e8e8e8" StrokeThickness="1">
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <Label Grid.Column="0" Text="{Binding StudentName}"
+                                               FontSize="14" TextColor="#333333" />
+                                        <Label Grid.Column="1"
+                                               Text="{Binding StartTime, StringFormat='{0} - '}​{Binding EndTime}"
+                                               FontSize="13" TextColor="#4285f4" VerticalOptions="Center" />
+                                    </Grid>
+                                </Border>
+                            </SwipeView>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+
+                <!-- 课时学生 -->
+                <Label Text="课时学生" FontSize="16" FontAttributes="Bold" TextColor="#333333" />
+                <CollectionView ItemsSource="{Binding ClassHourStudents}" HeightRequest="180">
+                    <CollectionView.EmptyView>
+                        <Label Text="暂无课时学生" TextColor="#888888" HorizontalOptions="Center" Margin="0,16" />
+                    </CollectionView.EmptyView>
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate x:DataType="viewmodels:ClassHourStudentItem">
+                            <Border BackgroundColor="White" StrokeShape="RoundRectangle 10"
+                                    Padding="12" Stroke="#e8e8e8" StrokeThickness="1"
+                                    Margin="0,0,0,6">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <VerticalStackLayout Grid.Column="0" Spacing="2">
+                                        <Label Text="{Binding Name}" FontSize="14" FontAttributes="Bold" TextColor="#333333" />
+                                        <Label FontSize="12" TextColor="#888888">
+                                            <Label.Text>
+                                                <Binding StringFormat="总 {0:0.#} · 已用 {1:0.#}">
+                                                    <Binding.Path>TotalHours</Binding.Path>
+                                                </Binding>
+                                            </Label.Text>
+                                        </Label>
+                                    </VerticalStackLayout>
+                                    <Label Grid.Column="1" Text="{Binding RemainingHours, StringFormat='{0:0.#}'}"
+                                           FontSize="20" FontAttributes="Bold" TextColor="#4285f4"
+                                           VerticalOptions="Center" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+
+                <!-- 消息 -->
+                <Label Text="{Binding Message}" IsVisible="{Binding HasMessage}"
+                       TextColor="#ea4335" FontSize="13" Margin="0,4" />
+
+            </VerticalStackLayout>
+        </ScrollView>
+    </RefreshView>
+
+</ContentPage>
