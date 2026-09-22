@@ -284,7 +284,13 @@ dotnet run --project Server\CheckIn.Server.csproj
 
 1. 将 `Server` 发布产物复制到目标机器，编辑 `config.json` 设置 `Port`、`ServerName`、`ServerPassword`
 2. 运行服务器程序，首次启动自动创建 SQLite 数据库与表结构
-3. 局域网内客户端「远程 → 远程服务器设置」填入 IP、端口与密码即可连接
+3. **首次部署**时访问 `http://<服务器IP>:5250/setup`，按向导完成初始化：
+   - 第 1 步：创建管理员账户（admin 超级管理员）
+   - 第 2 步：配置平台名称、设备协议密码、端口
+   - 第 3 步：可选配置 SMTP 邮件服务
+4. 初始化完成后自动跳转登录页，使用刚创建的管理员账号登录
+5. 局域网内客户端「远程 → 远程服务器设置」填入 IP、端口与密码即可连接
+6. 区域主账号首次登录时，首页自动显示使用向导（配置设备密码 → 部署客户端 → 添加子账户 → 开始打卡）
 
 ---
 
@@ -315,6 +321,7 @@ dotnet run --project Server\CheckIn.Server.csproj
 | 用户 | `POST /api/users/change-password` | 修改密码 |
 | 认证 | `POST /api/auth/login` | 管理员登录（JWT） |
 | 认证 | `POST /api/auth/verify` | 验证令牌 |
+| 认证 | `POST /api/setup` | 系统初始化（首次部署，创建管理员+系统配置） |
 | 二维码 | `POST /api/qrcode/generate` | 生成签到二维码 |
 | 二维码 | `POST /api/qrcode/checkin` | 扫码签到 |
 | 移动端 | `GET /api/mobile/dashboard` | 管理员仪表盘 |
@@ -325,6 +332,19 @@ dotnet run --project Server\CheckIn.Server.csproj
 | 移动端 | `GET /api/mobile/students/history` | 学生打卡历史 |
 | 移动端 | `GET/POST /api/mobile/assignments` | 排课（设备分配）管理 |
 | 移动端 | `GET /api/mobile/teachers` | 教师列表 |
+| 排课 | `GET /api/mobile/classhour-students` | 课时学生列表 |
+| 排课 | `POST /api/mobile/classhour-students` | 添加课时学生 |
+| 排课 | `DELETE /api/mobile/classhour-students/{id}` | 删除课时学生 |
+| 排课 | `POST /api/mobile/classhour-students/{id}/adjust` | 调整课时（划消/增加） |
+| 排课 | `GET /api/mobile/classhour-records` | 课时记录流水 |
+| 排课 | `GET /api/mobile/schedules` | 排课列表 |
+| 排课 | `POST /api/mobile/schedules` | 创建排课 |
+| 排课 | `DELETE /api/mobile/schedules/{id}` | 删除排课 |
+| 排课 | `POST /api/mobile/schedules/copy` | 复制排课到多日 |
+| 排课 | `POST /api/mobile/schedules/off-day` | 设置/取消不排课日 |
+| 排课 | `GET /api/mobile/schedules/calendar` | 月历排课视图 |
+| 排课 | `GET /api/mobile/classhour-settings` | 课时设置 |
+| 排课 | `POST /api/mobile/classhour-settings` | 更新课时设置 |
 | 调试 | `GET /api/debug/status`、`/api/debug/token`、`POST /api/debug/login` | 调试模式（`DebugMode: true` 时生效） |
 
 ---
@@ -399,6 +419,9 @@ A：确认排课的起止时间均有效，且课程已到下课时间；系统�
 
 **Q：客户端连不上服务器？**
 A：检查服务器端口（默认 5250）是否开放、IP 是否正确，服务器 `config.json` 中的 `ServerPassword` 是否与客户端一致。
+
+**Q：首次部署后访问服务器显示什么？**
+A：首次部署（无管理员账户）会自动跳转到 `/setup` 初始化向导，按提示创建管理员并配置系统即可。已有管理员账户的服务器不受影响。
 
 ---
 
