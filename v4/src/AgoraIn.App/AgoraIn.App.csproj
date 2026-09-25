@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Avalonia 桌面端（net10.0，Windows 优先交付，保持跨平台可编译）。
+       依赖许可证：Avalonia* = MIT，CommunityToolkit.Mvvm = MIT -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>AgoraIn</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\app-icon.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Diagnostics" Version="11.3.22" Condition="'$(Configuration)' == 'Debug'" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AgoraIn.Core\AgoraIn.Core.csproj" />
+    <ProjectReference Include="..\AgoraIn.Data\AgoraIn.Data.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 应用图标沿用 v3.2 多尺寸 ICO（avares 资源，窗口 Icon 引用） -->
+    <AvaloniaResource Include="Assets\app-icon.ico" />
+  </ItemGroup>
+
+</Project>

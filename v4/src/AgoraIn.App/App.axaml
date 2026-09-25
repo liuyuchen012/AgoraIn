@@ -1,0 +1,33 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="AgoraIn.App.App"
+             RequestedThemeVariant="Light">
+
+  <Application.Styles>
+    <FluentTheme />
+  </Application.Styles>
+
+  <!-- 集中式主题资源（UI 规范：主蓝 #4285f4 系、绿/红在线灯、金/银/铜排名高亮，禁止散落魔法颜色） -->
+  <Application.Resources>
+    <ResourceDictionary>
+      <!-- 品牌色 -->
+      <SolidColorBrush x:Key="Brand.Primary" Color="#4285F4" />
+      <SolidColorBrush x:Key="Brand.PrimaryDark" Color="#3367D6" />
+      <SolidColorBrush x:Key="Brand.PrimaryLight" Color="#E8F0FE" />
+      <SolidColorBrush x:Key="Brand.Green" Color="#34A853" />
+      <SolidColorBrush x:Key="Brand.Red" Color="#EA4335" />
+      <!-- 排名色沿用 v3 RankColorConverter 精确值 -->
+      <SolidColorBrush x:Key="Rank.Gold" Color="#FFD700" />
+      <SolidColorBrush x:Key="Rank.Silver" Color="#C0C0C0" />
+      <SolidColorBrush x:Key="Rank.Bronze" Color="#CD7F32" />
+
+      <!-- 中性色 -->
+      <SolidColorBrush x:Key="App.Background" Color="#F8F9FA" />
+      <SolidColorBrush x:Key="App.Card" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="App.Border" Color="#E0E3E7" />
+      <SolidColorBrush x:Key="App.TextPrimary" Color="#202124" />
+      <SolidColorBrush x:Key="App.TextSecondary" Color="#5F6368" />
+    </ResourceDictionary>
+  </Application.Resources>
+
+</Application>

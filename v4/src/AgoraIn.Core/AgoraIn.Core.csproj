@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 领域层：禁止引用任何 UI / EF / 平台库，保证可单测（架构规则见重构提示词第 4 章） -->
+
+</Project>

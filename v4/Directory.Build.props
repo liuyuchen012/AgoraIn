@@ -1,0 +1,19 @@
+<Project>
+
+  <!-- AgoraIn v4 公共构建属性：v4/ 下所有项目继承 -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <Version>4.0.0</Version>
+    <Product>AgoraIn</Product>
+    <Company>AgoraIn</Company>
+    <!-- Windows 10（ntdll < 19041.5007）不支持完整 CET，.NET 10 默认检查会致命报错。
+         沿用 v3.2 方案（commit 32509aa）：全部禁用 CET 兼容检查。 -->
+    <CETCompat>false</CETCompat>
+  </PropertyGroup>
+
+</Project>
