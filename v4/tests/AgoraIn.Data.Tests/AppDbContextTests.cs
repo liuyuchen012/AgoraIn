@@ -54,9 +54,7 @@ public class AppDbContextTests : IDisposable
             Assert.True(db.Database.EnsureCreated());
         }
 
-        using (var db2 = CreateContext())
-        {
-            Assert.True(db2.Database.EnsureCreated());
-        }
+        using var db2 = CreateContext();
+        Assert.True(db2.Database.CanConnect());
     }
 }

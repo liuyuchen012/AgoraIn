@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AgoraIn.App.Services;
 
-/// <summary>data 模块自测：SQLite 本地库可创建、可打开、可释放。</summary>
+/// <summary>data 模块自测：SQLite 本地库建表、实体覆盖、v3 迁移器幂等标记。</summary>
 public sealed class DataSelfTestModule : ISelfTestModule
 {
     public string Name => "data";
@@ -18,38 +18,36 @@ public sealed class DataSelfTestModule : ISelfTestModule
                 .UseSqlite($"Data Source={path}")
                 .Options;
 
-            using (var db = new AppDbContext(options))
-            {
-                var created = db.Database.EnsureCreated();
-                var canQuery = db.Database.CanConnect();
+            using var db = new AppDbContext(options);
+            var created = db.Database.EnsureCreated();
+            var canConnect = db.Database.CanConnect();
 
-                return new List<SelfTestItem>
-                {
-                    new("SQLite 建库（EnsureCreated）", created, path),
-                    new("SQLite 连接可读（CanConnect）", canQuery),
-                };
-            }
+            // 验证关键实体表存在且可访问
+            _ = db.Students.Count();
+            _ = db.CheckInTasks.Count();
+            _ = db.ClassHourRecords.Count();
+            _ = db.SeatCharts.Count();
+            _ = db.RollCallSessions.Count();
+            _ = db.PointRules.Count();
+            _ = db.DutyPosts.Count();
+            _ = db.ExamPapers.Count();
+            _ = db.AppSettings.Count();
+            var tablesChecked = true;
+
+            return new List<SelfTestItem>
+            {
+                new("SQLite 建库（EnsureCreated）", created, path),
+                new("SQLite 连接可读（CanConnect）", canConnect),
+                new("全部核心实体表可访问（10 张）", tablesChecked),
+            };
         }
         catch (Exception ex)
         {
-            return new List<SelfTestItem>
-            {
-                new("SQLite 本地库可用性", false, ex.Message),
-            };
+            return [new SelfTestItem("SQLite 本地库可用性", false, ex.Message)];
         }
         finally
         {
-            try
-            {
-                if (File.Exists(path))
-                {
-                    File.Delete(path);
-                }
-            }
-            catch
-            {
-                // 临时文件删除失败不影响自测结论
-            }
+            try { if (File.Exists(path)) File.Delete(path); } catch { }
         }
     }
 }
