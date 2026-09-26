@@ -20,18 +20,32 @@ public partial class MainWindow : Window
         _vm.RequestShowStudentList += OnShowStudentList;
     }
 
-    private void OnModeClick(object? sender, PointerPressedEventArgs e)
-    {
-        if (DataContext is MainWindowViewModel vm) vm.CycleMode();
-    }
+    // ═══ 标签栏 ═══
 
-    private void OnTabPointerPressed(object? sender, PointerPressedEventArgs e)
+    private void OnTabTapped(object? sender, TappedEventArgs e)
     {
         if (sender is Border border && border.Tag is TabInfo tab && DataContext is MainWindowViewModel vm)
         {
             vm.ActiveTab = vm.Tabs.FirstOrDefault(t => t.Id == tab.Id);
         }
     }
+
+    private void OnAddTabTapped(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+        {
+            vm.AddTabCommand.Execute(null);
+        }
+    }
+
+    // ═══ 模式切换 ═══
+
+    private void OnModeClick(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm) vm.CycleMode();
+    }
+
+    // ═══ 日历 ═══
 
     private void OnCalendarDayClick(object? sender, PointerPressedEventArgs e)
     {
@@ -41,13 +55,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnAddTabClick(object? sender, PointerPressedEventArgs e)
-    {
-        if (DataContext is MainWindowViewModel vm)
-        {
-            vm.AddTabCommand.Execute(null);
-        }
-    }
+    // ═══ 学生管理 ═══
 
     private async void OnShowStudentList(object? sender, EventArgs e)
     {
@@ -71,6 +79,8 @@ public partial class MainWindow : Window
         vm.RequestClose += (_, _) => dialog.Close();
         dialog.ShowDialog(this);
     }
+
+    // ═══ 窗口控制 ═══
 
     private void OnMinimizeClick(object? sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
 

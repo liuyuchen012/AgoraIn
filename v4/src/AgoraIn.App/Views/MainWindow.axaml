@@ -19,6 +19,7 @@
         FontFamily="Microsoft YaHei UI, Microsoft YaHei">
 
   <Window.Styles>
+    <!-- ═══ 标题栏扁平按钮（菜单用，保留默认模板以支持 Flyout） ═══ -->
     <Style Selector="Button.flat">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
@@ -32,15 +33,18 @@
       <Setter Property="Background" Value="#20FFFFFF" />
     </Style>
 
+    <!-- ═══ 窗口控制按钮 ═══ -->
     <Style Selector="Button.titlebar">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="Width" Value="46" />
-      <Setter Property="Height" Value="30" />
+      <Setter Property="Height" Value="32" />
       <Setter Property="Padding" Value="0" />
-      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Foreground" Value="White" />
     </Style>
     <Style Selector="Button.titlebar:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="#20FFFFFF" />
+      <Setter Property="Background" Value="#33FFFFFF" />
     </Style>
     <Style Selector="Button.titlebar-close:pointerover /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource Brand.Red}" />
@@ -142,20 +146,52 @@
               <TextBlock Text="{Binding SelectedMode.DisplayName}" FontSize="13" Foreground="White"
                          VerticalAlignment="Center" Margin="12,0,10,0" Cursor="Hand"
                          PointerPressed="OnModeClick" />
-              <Button Content="文件" Classes="flat" />
-              <Button Content="远程" Classes="flat" />
+              <Button Content="文件" Classes="flat">
+                <Button.Flyout>
+                  <Flyout Placement="BottomEdgeAlignedLeft">
+                    <StackPanel>
+                      <MenuItem Header="导出打卡数据" Command="{Binding ExportCommand}" />
+                      <MenuItem Header="导入打卡数据" Command="{Binding ImportCommand}" />
+                      <Separator />
+                      <MenuItem Header="清空打卡记录" Command="{Binding ClearAllCommand}" />
+                      <Separator />
+                      <MenuItem Header="新建任务" Command="{Binding NewTaskCommand}" />
+                    </StackPanel>
+                  </Flyout>
+                </Button.Flyout>
+              </Button>
+              <Button Content="远程" Classes="flat">
+                <Button.Flyout>
+                  <Flyout Placement="BottomEdgeAlignedLeft">
+                    <StackPanel>
+                      <MenuItem Header="远程服务器设置（P5）" IsEnabled="False" />
+                      <MenuItem Header="创建签到（P5）" IsEnabled="False" />
+                      <MenuItem Header="检查服务器状态" IsEnabled="False" />
+                    </StackPanel>
+                  </Flyout>
+                </Button.Flyout>
+              </Button>
               <Button Content="设置" Classes="flat" Command="{Binding ShowStudentListCommand}" />
-              <Button Content="帮助" Classes="flat" />
+              <Button Content="帮助" Classes="flat">
+                <Button.Flyout>
+                  <Flyout Placement="BottomEdgeAlignedLeft">
+                    <StackPanel>
+                      <MenuItem Header="在线文档" IsEnabled="False" />
+                      <MenuItem Header="关于 AgoraIn v4.0" />
+                    </StackPanel>
+                  </Flyout>
+                </Button.Flyout>
+              </Button>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal">
               <Button Classes="titlebar" Click="OnMinimizeClick">
-                <Path Data="M0,0 H10" Stroke="White" StrokeThickness="1" />
+                <Path Data="M0,6 H12" Stroke="White" StrokeThickness="1.5" />
               </Button>
               <Button Classes="titlebar" Click="OnMaximizeClick">
-                <Path Data="M0.5,0.5 H9.5 V9.5 H0.5 Z" Stroke="White" StrokeThickness="1" Fill="Transparent" />
+                <Path Data="M1,1 H11 V11 H1 Z" Stroke="White" StrokeThickness="1.5" Fill="Transparent" />
               </Button>
               <Button Classes="titlebar titlebar-close" Click="OnCloseClick">
-                <Path Data="M0,0 L10,10 M10,0 L0,10" Stroke="White" StrokeThickness="1" />
+                <Path Data="M1,1 L11,11 M11,1 L1,11" Stroke="White" StrokeThickness="1.5" />
               </Button>
             </StackPanel>
           </Grid>
@@ -173,7 +209,7 @@
                   <DataTemplate x:CompileBindings="False">
                     <Border Padding="12,0" Height="36" MinWidth="100" Cursor="Hand"
                             Background="Transparent" Tag="{Binding}"
-                            PointerPressed="OnTabPointerPressed">
+                            Tapped="OnTabTapped">
                       <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                         <TextBlock Text="{Binding Name}" FontSize="12" Foreground="#555555"
                                    MaxWidth="120" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
@@ -186,7 +222,7 @@
               </ItemsControl>
               <TextBlock Text="+" FontSize="18" FontWeight="Light" Foreground="#666666"
                          HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,14,0"
-                         Cursor="Hand" PointerPressed="OnAddTabClick" />
+                         Cursor="Hand" Tapped="OnAddTabTapped" />
             </Grid>
           </Border>
 
