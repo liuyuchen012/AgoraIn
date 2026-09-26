@@ -29,14 +29,12 @@ public partial class TeacherViewModel : ObservableObject
     public ObservableCollection<PointRuleEntry> PointRules { get; } = new();
     public ObservableCollection<PointRecordEntry> PointRecords { get; } = new();
     [ObservableProperty] private string _pointStatus = "选择学生和规则进行加减分";
-    private int _pointSeq = 1;
 
     // ═══ 值日 ═══
     public ObservableCollection<DutyPostEntry> DutyPosts { get; } = new();
     public ObservableCollection<DutyTodayEntry> DutyToday { get; } = new();
     [ObservableProperty] private string _dutyStatus = "今日值日安排";
     [ObservableProperty] private int _dutyCycleIndex; // 0=按周 1=按日
-    private int _dutyWeekOffset;
 
     public ICommand GenerateDutyCommand { get; }
 

@@ -114,7 +114,7 @@ public partial class MainWindow : Window
 
     // ═══ 学生管理 ═══
 
-    private async void OnShowStudentList(object? sender, EventArgs e)
+    private void OnShowStudentList(object? sender, EventArgs e)
     {
         if (_vm?.ActiveTab == null) return;
 
