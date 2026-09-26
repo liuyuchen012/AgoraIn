@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- ASP.NET Core 服务端（闭源，见第 11 章）。
+       依赖许可证：ASP.NET Core = MIT，EF Core Sqlite = MIT，JwtBearer = MIT，
+       SignalR = MIT，Swashbuckle = MIT（MIT/Apache 宽松许可，闭源合规） -->
+
+  <PropertyGroup>
+    <CETCompat>false</CETCompat>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.*" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="7.*" />
+    <PackageReference Include="BCrypt.Net-Next" Version="4.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AgoraIn.Core\AgoraIn.Core.csproj" />
+  </ItemGroup>
+
+</Project>
