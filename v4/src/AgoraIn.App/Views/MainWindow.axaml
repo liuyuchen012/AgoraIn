@@ -3,6 +3,7 @@
         xmlns:vm="using:AgoraIn.App.ViewModels"
         xmlns:models="using:AgoraIn.App.Models"
         x:Class="AgoraIn.App.Views.MainWindow"
+        x:Name="Root"
         x:DataType="vm:MainWindowViewModel"
         x:CompileBindings="True"
         Title="AgoraIn v4"
@@ -141,7 +142,7 @@
                          VerticalAlignment="Center" Margin="12,0,10,0" />
               <Button Content="文件" Classes="flat" />
               <Button Content="远程" Classes="flat" />
-              <Button Content="设置" Classes="flat" />
+              <Button Content="设置" Classes="flat" Command="{Binding ShowStudentListCommand}" />
               <Button Content="帮助" Classes="flat" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal">
@@ -167,9 +168,10 @@
                   </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="vm:TabInfo">
+                  <DataTemplate x:CompileBindings="False">
                     <Border Padding="12,0" Height="36" MinWidth="100" Cursor="Hand"
-                            Background="Transparent" Tag="{Binding}">
+                            Background="Transparent" Tag="{Binding}"
+                            PointerPressed="OnTabPointerPressed">
                       <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                         <TextBlock Text="{Binding Name}" FontSize="12" Foreground="#555555"
                                    MaxWidth="120" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
@@ -181,7 +183,8 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
               <TextBlock Text="+" FontSize="18" FontWeight="Light" Foreground="#666666"
-                         HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,14,0" />
+                         HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,14,0"
+                         Cursor="Hand" PointerPressed="OnAddTabClick" />
             </Grid>
           </Border>
 
@@ -239,12 +242,12 @@
                       <DataTemplate>
                         <Button Classes="student" Content="{Binding Name}"
                                 Classes.checked="{Binding IsCheckedIn}"
-                                Command="{Binding DataContext.CheckInCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                Command="{Binding #Root.DataContext.CheckInCommand}"
                                 CommandParameter="{Binding}">
                           <Button.ContextMenu>
                             <ContextMenu>
                               <MenuItem Header="取消打卡"
-                                        Command="{Binding DataContext.CancelCheckInCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        Command="{Binding #Root.DataContext.CancelCheckInCommand}"
                                         CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                             </ContextMenu>
                           </Button.ContextMenu>

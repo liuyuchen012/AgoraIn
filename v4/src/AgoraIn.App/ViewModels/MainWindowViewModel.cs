@@ -97,6 +97,7 @@ public partial class MainWindowViewModel : ObservableObject
     public ICommand ImportCommand { get; }
     public ICommand NewTaskCommand { get; }
     public ICommand DeleteTaskCommand { get; }
+    public ICommand ShowStudentListCommand { get; }
 
     public MainWindowViewModel() : this(AppDomain.CurrentDomain.BaseDirectory) { }
 
@@ -115,8 +116,18 @@ public partial class MainWindowViewModel : ObservableObject
         ImportCommand = new RelayCommand(DoImport);
         NewTaskCommand = new RelayCommand(DoNewTask);
         DeleteTaskCommand = new RelayCommand<string?>(DoDeleteTask);
+        ShowStudentListCommand = new RelayCommand(DoShowStudentList);
 
         LoadWorkspace();
+    }
+
+    /// <summary>外部调用：重新加载当前活动标签页数据（学生列表修改后刷新面板）。</summary>
+    public void ReloadActiveTab()
+    {
+        if (_activeTabId.Length > 0)
+        {
+            LoadTabData(_activeTabId);
+        }
     }
 
     // ═══ 工作区加载 ═══
@@ -348,6 +359,14 @@ public partial class MainWindowViewModel : ObservableObject
         RefreshTaskTree();
         StatusMessage = "已删除任务";
     }
+
+    private void DoShowStudentList()
+    {
+        RequestShowStudentList?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>外部（MainWindow）订阅此事件以打开学生管理对话框。</summary>
+    public event EventHandler? RequestShowStudentList;
 }
 
 /// <summary>标签页引用（workspace.json 持久化）。</summary>
