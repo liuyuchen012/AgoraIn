@@ -1,0 +1,38 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AgoraIn.App.Views.ServerWebPanel"
+        Title="集控平台"
+        Width="1024" Height="700"
+        WindowStartupLocation="CenterOwner"
+        Background="#F8F9FA">
+
+  <Grid RowDefinitions="Auto,*,Auto">
+    <!-- 顶部工具栏 -->
+    <Border Grid.Row="0" Background="White" Padding="12,8" BorderBrush="#E0E4E8" BorderThickness="0,0,0,1">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <TextBlock Grid.Column="0" Text="集控平台" FontSize="15" FontWeight="SemiBold"
+                   VerticalAlignment="Center" Margin="0,0,12,0" />
+        <TextBox Grid.Column="1" x:Name="UrlBox" Text="http://localhost:5250"
+                 Watermark="服务器地址" VerticalAlignment="Center" />
+        <Button Grid.Column="2" Content="刷新" Padding="12,4" Margin="8,0,0,0" CornerRadius="6"
+                Background="#4285f4" Foreground="White" Click="OnRefreshClick" />
+      </Grid>
+    </Border>
+
+    <!-- WebView 占位 -->
+    <Border Grid.Row="1" Background="White">
+      <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
+        <TextBlock Text="🌐" FontSize="48" HorizontalAlignment="Center" />
+        <TextBlock Text="服务端 Web 管理面板" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center" />
+        <TextBlock Text="配置服务器地址后，点击「加载」打开集控平台" FontSize="12" Foreground="#888"
+                   HorizontalAlignment="Center" />
+        <Button Content="加载网页" Padding="16,8" CornerRadius="8" Background="#4285f4" Foreground="White"
+                Click="OnLoadClick" />
+      </StackPanel>
+    </Border>
+
+    <!-- 底部状态栏 -->
+    <TextBlock Grid.Row="2" Text="输入服务器地址（如 http://192.168.1.100:5250）后点击加载"
+               FontSize="11" Foreground="#888" Padding="12,6" />
+  </Grid>
+</Window>

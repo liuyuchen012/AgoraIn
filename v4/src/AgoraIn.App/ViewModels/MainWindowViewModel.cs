@@ -22,6 +22,7 @@ public sealed record ModeOption(AppMode Mode, string DisplayName)
 public partial class MainWindowViewModel : ObservableObject
 {
     private readonly Services.TaskService _taskService;
+    private readonly Services.AppConfig _appConfig;
     private readonly string _baseDir;
     private readonly Dictionary<string, StudentModel> _students = new(StringComparer.Ordinal);
     private string _activeTabId = "";
@@ -123,7 +124,8 @@ public partial class MainWindowViewModel : ObservableObject
     {
         _baseDir = baseDir;
         _taskService = new Services.TaskService(baseDir);
-        _selectedMode = ModeOptions[0];
+        _appConfig = Services.AppConfig.Load(baseDir);
+        _selectedMode = ModeOptions[Math.Clamp(_appConfig.StartupMode, 0, 2)];
         ClassHours = new ClassHoursViewModel(baseDir);
         Teacher = new TeacherViewModel(baseDir);
 

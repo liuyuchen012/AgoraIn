@@ -140,7 +140,8 @@
                          Cursor="Hand" Tag="划课" />
               <TextBlock Text="设备列表" FontSize="13" Padding="22,10" Foreground="#888888" Cursor="Hand" />
               <TextBlock Text="任务中心" FontSize="13" Padding="22,10" Foreground="#888888" Cursor="Hand" />
-              <TextBlock Text="集控平台列表" FontSize="13" Padding="22,10" Foreground="#888888" Cursor="Hand" />
+              <TextBlock Text="集控平台" FontSize="13" Padding="22,10" Foreground="#888888"
+                         Cursor="Hand" Tapped="OnServerPanelClick" />
             </StackPanel>
 
             <!-- 教师模式：导航 -->

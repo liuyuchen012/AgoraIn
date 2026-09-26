@@ -67,19 +67,37 @@ public partial class MainWindow : Window
         }
     }
 
+    // ═══ 集控平台 ═══
+
+    private void OnServerPanelClick(object? sender, RoutedEventArgs e)
+    {
+        var panel = new ServerWebPanel();
+        panel.ShowDialog(this);
+    }
+
     // ═══ 设置 ═══
 
     private void OnSettingsClick(object? sender, RoutedEventArgs e)
     {
         if (_vm == null) return;
-        var dialog = new SettingsDialog();
+        var config = new Services.AppConfig(AppDomain.CurrentDomain.BaseDirectory);
         var vm = new SettingsDialogViewModel
         {
             ButtonRows = _vm.ButtonRows,
             ButtonCols = _vm.ButtonCols,
             HoursPerHour = _vm.ClassHours.HoursPerHour,
             AutoDeduct = _vm.ClassHours.AutoDeduct,
+            StartupModeIndex = _vm.CurrentMode switch
+            {
+                Core.AppMode.Control => 1,
+                Core.AppMode.Teacher => 2,
+                _ => 0,
+            },
+            ServerIp = config.ServerIp,
+            ServerPort = config.ServerPort,
+            OnlineMode = config.OnlineMode,
         };
+        var dialog = new SettingsDialog();
         dialog.DataContext = vm;
         dialog.ShowDialog(this);
     }

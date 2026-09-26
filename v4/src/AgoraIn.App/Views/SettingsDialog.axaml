@@ -31,6 +31,14 @@
           <TextBlock Text="基本设置" FontSize="18" FontWeight="SemiBold" />
           <Border CornerRadius="8" BorderBrush="#E0E4E8" BorderThickness="1" Padding="16">
             <StackPanel Spacing="12">
+              <TextBlock Text="启动场景" FontSize="13" FontWeight="SemiBold" />
+              <ComboBox ItemsSource="{Binding StartupModes}" SelectedIndex="{Binding StartupModeIndex}"
+                        Width="200" HorizontalAlignment="Left" />
+              <TextBlock Text="应用启动时默认进入的模式" FontSize="11" Foreground="#888" />
+            </StackPanel>
+          </Border>
+          <Border CornerRadius="8" BorderBrush="#E0E4E8" BorderThickness="1" Padding="16">
+            <StackPanel Spacing="12">
               <TextBlock Text="管理员密码" FontSize="13" FontWeight="SemiBold" />
               <TextBox Watermark="输入新密码" Width="280" HorizontalAlignment="Left" PasswordChar="●" />
               <TextBlock Text="密码用于远程设置和管理员操作的验证" FontSize="11" Foreground="#888" />

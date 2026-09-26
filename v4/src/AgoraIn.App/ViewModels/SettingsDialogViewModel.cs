@@ -18,6 +18,8 @@ public partial class SettingsDialogViewModel : ObservableObject
     [ObservableProperty] private int _buttonCols = 6;
     [ObservableProperty] private double _hoursPerHour = 1;
     [ObservableProperty] private bool _autoDeduct;
+    [ObservableProperty] private int _startupModeIndex; // 0=大屏 1=控制 2=教师
+    public IReadOnlyList<string> StartupModes { get; } = ["大屏模式", "控制模式", "教师模式"];
 
     // 远程连接
     [ObservableProperty] private string _serverIp = "";
