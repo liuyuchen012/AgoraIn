@@ -1,6 +1,7 @@
 using System.Text;
 using AgoraIn.Server;
 using AgoraIn.Server.Controllers;
+using AgoraIn.Server.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -30,6 +31,9 @@ builder.Services.AddAuthorization();
 
 // ── SignalR ──
 builder.Services.AddSignalR();
+
+// ── DeepSeek AI ──
+builder.Services.AddHttpClient<DeepSeekGradingService>();
 
 // ── Controllers + Swagger ──
 builder.Services.AddControllers();

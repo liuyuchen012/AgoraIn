@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using AgoraIn.Server.Models;
 
 namespace AgoraIn.Server;
 
@@ -14,7 +15,11 @@ public sealed class ServerDbContext : DbContext
     public DbSet<User> Users => Set<User>();
     public DbSet<Device> Devices => Set<Device>();
 
-    // ── 共享 Core 实体（复用 AgoraIn.Core.Entities） ──
+    // ── 答题卡与 AI 阅卷 ──
+    public DbSet<ExamPaper> ExamPapers => Set<ExamPaper>();
+    public DbSet<Question> Questions => Set<Question>();
+    public DbSet<AnswerSheetSubmission> AnswerSheetSubmissions => Set<AnswerSheetSubmission>();
+    public DbSet<QuestionResult> QuestionResults => Set<QuestionResult>();
     public DbSet<AgoraIn.Core.Entities.ClassInfo> Classes => Set<AgoraIn.Core.Entities.ClassInfo>();
     public DbSet<AgoraIn.Core.Entities.Student> Students => Set<AgoraIn.Core.Entities.Student>();
     public DbSet<AgoraIn.Core.Entities.CheckInTask> CheckInTasks => Set<AgoraIn.Core.Entities.CheckInTask>();
