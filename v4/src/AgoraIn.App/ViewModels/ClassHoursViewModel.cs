@@ -88,6 +88,68 @@ public partial class ClassHoursViewModel : ObservableObject
 
         Load();
         BuildCalendar();
+        StartAutoDeductTimer();
+    }
+
+    private Timer? _autoDeductTimer;
+
+    private void StartAutoDeductTimer()
+    {
+        _autoDeductTimer = new Timer(_ => AutoDeductCheck(), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+    }
+
+    /// <summary>自动扣减课时：每 30 秒检查已完成的排课，按 SlotKey 幂等去重。</summary>
+    private void AutoDeductCheck()
+    {
+        if (!_data.AutoDeduct || _data.HoursPerHour <= 0) return;
+
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var now = DateTime.Now;
+        var changed = false;
+
+        // 遍历今天的排课
+        var todayKey = today.ToString("yyyy-MM-dd");
+        if (!_data.Schedule.TryGetValue(todayKey, out var entries)) return;
+
+        foreach (var entry in entries)
+        {
+            if (!TimeOnly.TryParse(entry.StartTime, out var start) || !TimeOnly.TryParse(entry.EndTime, out var end))
+                continue;
+
+            var startDt = today.ToDateTime(start);
+            var endDt = end <= start ? today.AddDays(1).ToDateTime(end) : today.ToDateTime(end);
+
+            // 课程已结束
+            if (now < endDt) continue;
+
+            var durationHours = (endDt - startDt).TotalHours;
+            var deduct = -(durationHours * _data.HoursPerHour);
+
+            // SlotKey 幂等
+            var slotKey = $"{todayKey}|{entry.StudentId}|{entry.StartTime}";
+            if (_data.Records.Any(r => r.SlotKey == slotKey)) continue;
+
+            var student = _data.Students.FirstOrDefault(s => s.Id == entry.StudentId);
+            if (student == null) continue;
+
+            var actualDeduct = Math.Min(-deduct, student.TotalHours - student.UsedHours);
+            if (actualDeduct <= 0) continue;
+
+            student.UsedHours += actualDeduct;
+            _data.Records.Add(new ChRecordV3
+            {
+                Id = Guid.NewGuid().ToString("N")[..8],
+                StudentId = entry.StudentId,
+                Date = todayKey,
+                Hours = -actualDeduct,
+                Note = "自动扣减",
+                SlotKey = slotKey,
+                CreatedAt = now.ToString("yyyy-MM-dd HH:mm:ss"),
+            });
+            changed = true;
+        }
+
+        if (changed) Save();
     }
 
     // ═══ 数据加载/保存 ═══

@@ -45,6 +45,28 @@ public partial class MainWindow : Window
         if (DataContext is MainWindowViewModel vm) vm.CycleMode();
     }
 
+    // ═══ 教师模式导航 ═══
+
+    private void OnTeacherNavClick(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is TextBlock tb && tb.Tag is string nav && DataContext is MainWindowViewModel vm)
+        {
+            vm.Teacher.SelectedNav = nav;
+            // 更新导航高亮
+            if (tb.Parent is StackPanel sp)
+            {
+                foreach (var child in sp.Children.OfType<TextBlock>())
+                {
+                    child.Foreground = child.Tag?.ToString() == nav
+                        ? new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#4285f4"))
+                        : new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#888888"));
+                    child.FontWeight = child.Tag?.ToString() == nav
+                        ? Avalonia.Media.FontWeight.SemiBold : Avalonia.Media.FontWeight.Normal;
+                }
+            }
+        }
+    }
+
     // ═══ 设置 ═══
 
     private void OnSettingsClick(object? sender, RoutedEventArgs e)

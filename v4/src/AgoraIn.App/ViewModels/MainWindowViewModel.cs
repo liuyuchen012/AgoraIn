@@ -102,6 +102,9 @@ public partial class MainWindowViewModel : ObservableObject
     // ═══ 课时划消面板 ═══
     public ClassHoursViewModel ClassHours { get; }
 
+    // ═══ 教师模式面板 ═══
+    public TeacherViewModel Teacher { get; }
+
     // ═══ 命令 ═══
     public ICommand AddTabCommand { get; }
     public ICommand CloseTabCommand { get; }
@@ -122,6 +125,7 @@ public partial class MainWindowViewModel : ObservableObject
         _taskService = new Services.TaskService(baseDir);
         _selectedMode = ModeOptions[0];
         ClassHours = new ClassHoursViewModel(baseDir);
+        Teacher = new TeacherViewModel(baseDir);
 
         AddTabCommand = new RelayCommand(AddTab);
         CloseTabCommand = new RelayCommand<string?>(CloseTab);
