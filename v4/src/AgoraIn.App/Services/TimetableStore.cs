@@ -1,5 +1,7 @@
 using System.Text.Json;
 using AgoraIn.Core.Entities;
+using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
 
 namespace AgoraIn.App.Services;
 
@@ -89,7 +91,92 @@ public static class ClassIslandCompat
         AllowTrailingCommas = true,
     };
 
-    /// <summary>从 ClassIsland 档案 JSON 导入课表。</summary>
+    /// <summary>从 ClassIsland 档案导入课表（自动识别 JSON 或 YAML 格式）。</summary>
+    public static TimetableData ImportFromText(string text)
+    {
+        text = text.TrimStart();
+        if (text.StartsWith("{") || text.StartsWith("["))
+            return ImportFromJson(text);
+        return ImportFromYaml(text);
+    }
+
+    /// <summary>从 ClassIsland YAML 导入课表。</summary>
+    public static TimetableData ImportFromYaml(string yaml)
+    {
+        var deserializer = new DeserializerBuilder()
+            .WithNamingConvention(NullNamingConvention.Instance)
+            .Build();
+        var data = deserializer.Deserialize<ClassIslandYamlArchive>(yaml);
+        if (data == null) return new TimetableData();
+
+        var result = new TimetableData();
+
+        // 科目
+        foreach (var s in data.Subjects ?? [])
+        {
+            if (string.IsNullOrEmpty(s.Name)) continue;
+            result.Subjects.Add(new TtSubject
+            {
+                Id = Guid.NewGuid().ToString("N")[..8],
+                Name = s.Name,
+                TeacherName = s.Teacher,
+            });
+        }
+
+        // 时间布局 + 课表
+        // YAML 格式：schedules 按天分组，每段有 enable_day (1=周一..7=周日) 和 classes 列表
+        // 同一 enable_day 可能出现多次（不同 weeks），合并去重
+        var layout = new TtTimeLayout { Name = "ClassIsland 导入" };
+        var plan = new TtClassPlan { Name = "ClassIsland 课表", IsActive = true };
+        var slotIndex = 0;
+        var processedSlots = new HashSet<int>();
+
+        // 按 enable_day 分组
+        var byDay = (data.Schedules ?? [])
+            .Where(s => s.EnableDay.HasValue)
+            .GroupBy(s => s.EnableDay!.Value);
+
+        foreach (var dayGroup in byDay)
+        {
+            var weekDay = dayGroup.Key - 1; // enable_day 1=周一 → index 0
+            if (weekDay < 0 || weekDay > 6) continue;
+
+            foreach (var sched in dayGroup)
+            {
+                foreach (var cls in sched.Classes ?? [])
+                {
+                    if (string.IsNullOrEmpty(cls.Subject) && string.IsNullOrEmpty(cls.StartTime)) continue;
+
+                    var sl = slotIndex++;
+                    // 时间布局只取第一天的节次
+                    if (!processedSlots.Contains(sl))
+                    {
+                        processedSlots.Add(sl);
+                        layout.Entries.Add(new TtTimeEntry
+                        {
+                            Index = sl,
+                            StartTime = cls.StartTime?[..5] ?? "08:00",
+                            EndTime = cls.EndTime?[..5] ?? "08:45",
+                            Name = $"第{sl + 1}节",
+                        });
+                    }
+
+                    if (!string.IsNullOrEmpty(cls.Subject))
+                    {
+                        var sub = result.Subjects.FirstOrDefault(s => s.Name == cls.Subject);
+                        if (sub != null)
+                            plan.Entries[weekDay * 100 + sl] = sub.Id;
+                    }
+                }
+            }
+        }
+
+        result.TimeLayouts.Add(layout);
+        result.ClassPlans.Add(plan);
+        return result;
+    }
+
+    /// <summary>从 ClassIsland JSON 导入课表。</summary>
     public static TimetableData ImportFromJson(string json)
     {
         var data = JsonSerializer.Deserialize<ClassIslandArchive>(json, JsonOpts);
@@ -213,3 +300,34 @@ internal sealed class CiSubject { public string? Id { get; set; } public string?
 internal sealed class CiTimeLayout { public string? Id { get; set; } public string? Name { get; set; } public List<CiTimeEntry>? Entries { get; set; } }
 internal sealed class CiTimeEntry { public int Index { get; set; } public string? StartTime { get; set; } public string? EndTime { get; set; } public bool IsBreak { get; set; } public string? Name { get; set; } }
 internal sealed class CiClassPlan { public string? Id { get; set; } public string? Name { get; set; } public string? TimeLayoutId { get; set; } public string[][]? Table { get; set; } }
+
+// ClassIsland YAML 反序列化模型（YamlDotNet 使用）
+internal sealed class ClassIslandYamlArchive
+{
+    public int Version { get; set; } = 1;
+    public List<CiYamlSubject>? Subjects { get; set; }
+    public List<CiYamlSchedule>? Schedules { get; set; }
+}
+
+internal sealed class CiYamlSubject
+{
+    public string? Name { get; set; }
+    public string? SimplifiedName { get; set; }
+    public string? Teacher { get; set; }
+    public string? Room { get; set; }
+}
+
+internal sealed class CiYamlSchedule
+{
+    public string? Name { get; set; }
+    public List<CiYamlClass>? Classes { get; set; }
+    public int? EnableDay { get; set; }
+    public string? Weeks { get; set; }
+}
+
+internal sealed class CiYamlClass
+{
+    public string? Subject { get; set; }
+    public string? StartTime { get; set; }
+    public string? EndTime { get; set; }
+}
