@@ -40,6 +40,18 @@ public partial class MainWindowViewModel : ObservableObject
     public bool IsControlMode => CurrentMode == AppMode.Control;
     public bool IsTeacherMode => CurrentMode == AppMode.Teacher;
 
+    /// <summary>循环切换模式：大屏→控制→教师→大屏。</summary>
+    public void CycleMode()
+    {
+        var next = CurrentMode switch
+        {
+            AppMode.LargeScreen => AppMode.Control,
+            AppMode.Control => AppMode.Teacher,
+            _ => AppMode.LargeScreen,
+        };
+        SelectedMode = ModeOptions.First(o => o.Mode == next);
+    }
+
     // ═══ 在线状态 ═══
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(OnlineText))]
     private bool _isOnline;
@@ -87,6 +99,9 @@ public partial class MainWindowViewModel : ObservableObject
     private string _controlNavSelected = "划课";
     public string ControlNavSelected { get => _controlNavSelected; set => SetProperty(ref _controlNavSelected, value); }
 
+    // ═══ 课时划消面板 ═══
+    public ClassHoursViewModel ClassHours { get; }
+
     // ═══ 命令 ═══
     public ICommand AddTabCommand { get; }
     public ICommand CloseTabCommand { get; }
@@ -106,6 +121,7 @@ public partial class MainWindowViewModel : ObservableObject
         _baseDir = baseDir;
         _taskService = new Services.TaskService(baseDir);
         _selectedMode = ModeOptions[0];
+        ClassHours = new ClassHoursViewModel(baseDir);
 
         AddTabCommand = new RelayCommand(AddTab);
         CloseTabCommand = new RelayCommand<string?>(CloseTab);

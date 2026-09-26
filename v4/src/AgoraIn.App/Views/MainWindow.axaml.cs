@@ -20,11 +20,24 @@ public partial class MainWindow : Window
         _vm.RequestShowStudentList += OnShowStudentList;
     }
 
+    private void OnModeClick(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm) vm.CycleMode();
+    }
+
     private void OnTabPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (sender is Border border && border.Tag is TabInfo tab && DataContext is MainWindowViewModel vm)
         {
             vm.ActiveTab = vm.Tabs.FirstOrDefault(t => t.Id == tab.Id);
+        }
+    }
+
+    private void OnCalendarDayClick(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is Border border && border.Tag is CalendarDayItem day && DataContext is MainWindowViewModel vm)
+        {
+            vm.ClassHours.SelectCalendarDay(day);
         }
     }
 
