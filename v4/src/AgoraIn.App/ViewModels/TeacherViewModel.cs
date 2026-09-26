@@ -22,19 +22,26 @@ public partial class TeacherViewModel : ObservableObject
     // ═══ 点名 ═══
     public ObservableCollection<RollCallStudent> RollCallStudents { get; } = new();
     [ObservableProperty] private string _rollCallStatus = "点击「开始点名」随机抽取学生";
+    [ObservableProperty] private int _rollCallModeIndex; // 0=随机 1=顺序 2=指定
+    private int _sequentialIndex;
 
     // ═══ 积分 ═══
     public ObservableCollection<PointRuleEntry> PointRules { get; } = new();
     public ObservableCollection<PointRecordEntry> PointRecords { get; } = new();
     [ObservableProperty] private string _pointStatus = "选择学生和规则进行加减分";
+    private int _pointSeq = 1;
 
     // ═══ 值日 ═══
     public ObservableCollection<DutyPostEntry> DutyPosts { get; } = new();
     public ObservableCollection<DutyTodayEntry> DutyToday { get; } = new();
     [ObservableProperty] private string _dutyStatus = "今日值日安排";
+    [ObservableProperty] private int _dutyCycleIndex; // 0=按周 1=按日
+    private int _dutyWeekOffset;
+
+    public ICommand GenerateDutyCommand { get; }
 
     // ═══ 座位 ═══
-    public ObservableCollection<string> SeatStudents { get; } = new();
+    public SeatChartViewModel SeatChart { get; }
 
     public ICommand StartRollCallCommand { get; }
     public ICommand AddPointRuleCommand { get; }
@@ -54,6 +61,8 @@ public partial class TeacherViewModel : ObservableObject
         StartRollCallCommand = new RelayCommand(DoStartRollCall);
         AddPointRuleCommand = new RelayCommand(DoAddPointRule);
         AddDutyPostCommand = new RelayCommand(DoAddDutyPost);
+        GenerateDutyCommand = new RelayCommand(DoGenerateDuty);
+        SeatChart = new SeatChartViewModel(baseDir);
         Load();
     }
 
@@ -88,9 +97,27 @@ public partial class TeacherViewModel : ObservableObject
     {
         if (RollCallStudents.Count == 0) { RollCallStatus = "无学生数据"; return; }
         var rng = new Random();
-        var picked = RollCallStudents[rng.Next(RollCallStudents.Count)];
+
+        RollCallStudent picked;
+        if (RollCallModeIndex == 1) // 顺序
+        {
+            picked = RollCallStudents[_sequentialIndex % RollCallStudents.Count];
+            _sequentialIndex++;
+        }
+        else if (RollCallModeIndex == 2 && SelectedRollCallStudent != null) // 指定
+        {
+            picked = SelectedRollCallStudent;
+        }
+        else // 随机
+        {
+            picked = RollCallStudents[rng.Next(RollCallStudents.Count)];
+        }
+
+        picked.Result = "答到";
         RollCallStatus = $"🎲 点到：{picked.Name}";
     }
+
+    [ObservableProperty] private RollCallStudent? _selectedRollCallStudent;
 
     // ═══ 积分 ═══
 
@@ -121,6 +148,38 @@ public partial class TeacherViewModel : ObservableObject
     private void DoAddDutyPost()
     {
         DutyPosts.Add(new DutyPostEntry { Name = "新岗位", Capacity = 1 });
+    }
+
+    private void DoGenerateDuty()
+    {
+        if (RollCallStudents.Count == 0 || DutyPosts.Count == 0) { DutyStatus = "无学生或岗位数据"; return; }
+
+        DutyToday.Clear();
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var students = RollCallStudents.Select(s => s.Name).ToList();
+        var rng = new Random();
+
+        // 按今日日期计算轮换偏移
+        int offset;
+        if (DutyCycleIndex == 0) // 按周
+            offset = (today.DayNumber - DateOnly.MinValue.DayNumber) / 7;
+        else // 按日
+            offset = today.DayNumber - DateOnly.MinValue.DayNumber;
+
+        foreach (var post in DutyPosts)
+        {
+            for (var slot = 0; slot < post.Capacity; slot++)
+            {
+                var idx = (offset * DutyPosts.Count * 2 + DutyPosts.IndexOf(post) * 2 + slot) % students.Count;
+                DutyToday.Add(new DutyTodayEntry
+                {
+                    Student = students[idx],
+                    Post = $"{post.Icon} {post.Name}",
+                });
+            }
+        }
+
+        DutyStatus = $"已生成 {today:MM-dd} 值日安排（{(DutyCycleIndex == 0 ? "按周" : "按日")}轮换）";
     }
 }
 

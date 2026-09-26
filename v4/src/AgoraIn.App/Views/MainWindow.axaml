@@ -404,17 +404,23 @@
             <Grid IsVisible="{Binding IsTeacherMode}" ColumnDefinitions="*">
               <!-- 点名面板 -->
               <Panel IsVisible="{Binding Teacher.IsRollCall}">
-                <Grid RowDefinitions="Auto,*,Auto" Margin="24,20,24,16">
-                  <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12" Margin="0,0,0,16">
+                <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="24,20,24,16">
+                  <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12" Margin="0,0,0,12">
                     <TextBlock Classes="page-title" Text="点名" FontSize="18" VerticalAlignment="Center" />
+                    <ComboBox SelectedIndex="{Binding Teacher.RollCallModeIndex}" Width="120" VerticalAlignment="Center">
+                      <ComboBoxItem Content="随机点名" />
+                      <ComboBoxItem Content="顺序点名" />
+                      <ComboBoxItem Content="指定点名" />
+                    </ComboBox>
                     <Button Content="🎲 开始点名" Padding="16,8" CornerRadius="8"
                             Background="#4285f4" Foreground="White" FontWeight="SemiBold"
                             Command="{Binding Teacher.StartRollCallCommand}" />
                     <TextBlock Text="{Binding Teacher.RollCallStatus}" FontSize="14" FontWeight="SemiBold"
                                Foreground="#4285f4" VerticalAlignment="Center" />
                   </StackPanel>
-                  <ListBox Grid.Row="1" ItemsSource="{Binding Teacher.RollCallStudents}" Background="White"
-                           BorderBrush="#E0E4E8" BorderThickness="1" CornerRadius="8">
+                  <ListBox Grid.Row="2" ItemsSource="{Binding Teacher.RollCallStudents}" Background="White"
+                           BorderBrush="#E0E4E8" BorderThickness="1" CornerRadius="8"
+                           SelectedItem="{Binding Teacher.SelectedRollCallStudent}">
                     <ListBox.ItemTemplate>
                       <DataTemplate x:CompileBindings="False">
                         <Border Padding="12,8" Margin="2,1" CornerRadius="6">
@@ -459,15 +465,22 @@
 
               <!-- 值日面板 -->
               <Panel IsVisible="{Binding Teacher.IsDuty}">
-                <Grid RowDefinitions="Auto,Auto,*" Margin="24,20,24,16">
-                  <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12" Margin="0,0,0,16">
-                    <TextBlock Classes="page-title" Text="值日岗位" FontSize="18" VerticalAlignment="Center" />
+                <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="24,20,24,16">
+                  <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12" Margin="0,0,0,12">
+                    <TextBlock Classes="page-title" Text="值日管理" FontSize="18" VerticalAlignment="Center" />
+                    <ComboBox SelectedIndex="{Binding Teacher.DutyCycleIndex}" Width="100" VerticalAlignment="Center">
+                      <ComboBoxItem Content="按周轮换" />
+                      <ComboBoxItem Content="按日轮换" />
+                    </ComboBox>
+                    <Button Content="生成今日值日" Padding="12,6" CornerRadius="6"
+                            Background="#4285f4" Foreground="White"
+                            Command="{Binding Teacher.GenerateDutyCommand}" />
                     <Button Content="+ 添加岗位" Padding="12,6" CornerRadius="6"
                             Background="#34a853" Foreground="White"
                             Command="{Binding Teacher.AddDutyPostCommand}" />
                   </StackPanel>
-                  <ListBox Grid.Row="1" ItemsSource="{Binding Teacher.DutyPosts}" Background="White"
-                           BorderBrush="#E0E4E8" BorderThickness="1" CornerRadius="8" Height="200">
+                  <ListBox Grid.Row="2" ItemsSource="{Binding Teacher.DutyPosts}" Background="White"
+                           BorderBrush="#E0E4E8" BorderThickness="1" CornerRadius="8" Height="160">
                     <ListBox.ItemTemplate>
                       <DataTemplate x:CompileBindings="False">
                         <Border Padding="12,8" Margin="2,1" CornerRadius="6">
@@ -486,17 +499,59 @@
                       </DataTemplate>
                     </ListBox.ItemTemplate>
                   </ListBox>
-                  <TextBlock Grid.Row="2" Text="{Binding Teacher.DutyStatus}" Classes="hint" Margin="0,8,0,0" />
+                  <TextBlock Grid.Row="3" Text="{Binding Teacher.DutyStatus}" Classes="hint" Margin="0,8,0,0" />
+                  <!-- 今日值日安排 -->
+                  <ListBox Grid.Row="4" ItemsSource="{Binding Teacher.DutyToday}" Background="White"
+                           BorderBrush="#E0E4E8" BorderThickness="1" CornerRadius="8" MaxHeight="200">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:CompileBindings="False">
+                        <Border Padding="12,6" Margin="2,1" CornerRadius="6">
+                          <Grid ColumnDefinitions="*,*">
+                            <TextBlock Text="{Binding Student}" FontSize="13" VerticalAlignment="Center" FontWeight="SemiBold" />
+                            <TextBlock Grid.Column="1" Text="{Binding Post}" FontSize="12" Foreground="#666" VerticalAlignment="Center" />
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
                 </Grid>
               </Panel>
 
               <!-- 座位面板 -->
               <Panel IsVisible="{Binding Teacher.IsSeats}">
-                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
-                  <TextBlock Text="座位编排" FontSize="16" Foreground="#bbbbbb" HorizontalAlignment="Center" />
-                  <TextBlock Text="教室布局编辑器、拖拽调座、打印导出（P3 后续实现）" FontSize="12"
-                             Foreground="#cccccc" HorizontalAlignment="Center" />
-                </StackPanel>
+                <Grid RowDefinitions="Auto,Auto,1*" Margin="24,20,24,16">
+                  <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12" Margin="0,0,0,12">
+                    <TextBlock Classes="page-title" Text="座位编排" FontSize="18" VerticalAlignment="Center" />
+                    <Button Content="随机排座" Padding="12,6" CornerRadius="6"
+                            Background="#4285f4" Foreground="White"
+                            Command="{Binding Teacher.SeatChart.RandomAssignCommand}" />
+                    <Button Content="清空" Padding="12,6" CornerRadius="6"
+                            Background="#ea4335" Foreground="White"
+                            Command="{Binding Teacher.SeatChart.ClearAllCommand}" />
+                    <Button Content="保存" Padding="12,6" CornerRadius="6"
+                            Background="#34a853" Foreground="White"
+                            Command="{Binding Teacher.SeatChart.SaveCommand}" />
+                    <TextBlock Text="{Binding Teacher.SeatChart.Status}" Classes="hint" VerticalAlignment="Center" />
+                  </StackPanel>
+                  <TextBlock Grid.Row="1" Text="点击空位分配下一个学生，点击已占用座位移除" Classes="hint" Margin="0,0,0,8" />
+                  <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Teacher.SeatChart.Seats}">
+                      <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                          <UniformGrid Columns="{Binding #Root.DataContext.Teacher.SeatChart.Cols}" />
+                        </ItemsPanelTemplate>
+                      </ItemsControl.ItemsPanel>
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:CompileBindings="False">
+                          <Button Classes="student" Content="{Binding DisplayText}"
+                                  Width="100" Height="52" Margin="3"
+                                  Command="{Binding TapCommand}" CommandParameter="{Binding}"
+                                  Background="{Binding IsEmpty, Converter={x:Static conv:SeatBgConverter.Instance}}" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+                </Grid>
               </Panel>
             </Grid>
           </Panel>
