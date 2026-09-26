@@ -45,6 +45,23 @@ public partial class MainWindow : Window
         if (DataContext is MainWindowViewModel vm) vm.CycleMode();
     }
 
+    // ═══ 设置 ═══
+
+    private void OnSettingsClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm == null) return;
+        var dialog = new SettingsDialog();
+        var vm = new SettingsDialogViewModel
+        {
+            ButtonRows = _vm.ButtonRows,
+            ButtonCols = _vm.ButtonCols,
+            HoursPerHour = _vm.ClassHours.HoursPerHour,
+            AutoDeduct = _vm.ClassHours.AutoDeduct,
+        };
+        dialog.DataContext = vm;
+        dialog.ShowDialog(this);
+    }
+
     // ═══ 日历 ═══
 
     private void OnCalendarDayClick(object? sender, PointerPressedEventArgs e)

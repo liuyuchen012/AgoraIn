@@ -1,0 +1,106 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:AgoraIn.App.ViewModels"
+        x:Class="AgoraIn.App.Views.SettingsDialog"
+        x:DataType="vm:SettingsDialogViewModel"
+        x:CompileBindings="True"
+        Title="设置"
+        Width="680" Height="520"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False"
+        Background="#F8F9FA">
+
+  <Grid ColumnDefinitions="160,*">
+    <!-- 左侧选项卡 -->
+    <Border Grid.Column="0" Background="#f5f5f5" CornerRadius="8,0,0,8">
+      <ListBox ItemsSource="{Binding Tabs}" SelectedItem="{Binding SelectedTab}"
+               Background="Transparent" BorderThickness="0" Padding="8,12">
+        <ListBox.ItemTemplate>
+          <DataTemplate x:CompileBindings="False">
+            <TextBlock Text="{Binding}" FontSize="14" Padding="12,8" />
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+    </Border>
+
+    <!-- 右侧内容 -->
+    <Border Grid.Column="1" Background="White" Padding="24">
+      <Panel>
+        <!-- 基本设置 -->
+        <StackPanel IsVisible="{Binding IsBasic}" Spacing="16">
+          <TextBlock Text="基本设置" FontSize="18" FontWeight="SemiBold" />
+          <Border CornerRadius="8" BorderBrush="#E0E4E8" BorderThickness="1" Padding="16">
+            <StackPanel Spacing="12">
+              <TextBlock Text="管理员密码" FontSize="13" FontWeight="SemiBold" />
+              <TextBox Watermark="输入新密码" Width="280" HorizontalAlignment="Left" PasswordChar="●" />
+              <TextBlock Text="密码用于远程设置和管理员操作的验证" FontSize="11" Foreground="#888" />
+            </StackPanel>
+          </Border>
+          <Border CornerRadius="8" BorderBrush="#E0E4E8" BorderThickness="1" Padding="16">
+            <StackPanel Spacing="12">
+              <TextBlock Text="按钮网格" FontSize="13" FontWeight="SemiBold" />
+              <Grid ColumnDefinitions="Auto,60,Auto,60">
+                <TextBlock Grid.Column="0" Text="行数" VerticalAlignment="Center" />
+                <NumericUpDown Grid.Column="1" Value="{Binding ButtonRows}" Minimum="1" Maximum="20" />
+                <TextBlock Grid.Column="2" Text="列数" VerticalAlignment="Center" Margin="16,0,0,0" />
+                <NumericUpDown Grid.Column="3" Value="{Binding ButtonCols}" Minimum="1" Maximum="20" />
+              </Grid>
+            </StackPanel>
+          </Border>
+          <Border CornerRadius="8" BorderBrush="#E0E4E8" BorderThickness="1" Padding="16">
+            <StackPanel Spacing="12">
+              <TextBlock Text="课时设置" FontSize="13" FontWeight="SemiBold" />
+              <Grid ColumnDefinitions="Auto,120,Auto">
+                <TextBlock Grid.Column="0" Text="每小时消耗" VerticalAlignment="Center" />
+                <NumericUpDown Grid.Column="1" Value="{Binding HoursPerHour}" Minimum="0.5" Maximum="24"
+                               Increment="0.5" FormatString="0.#" />
+                <TextBlock Grid.Column="2" Text="课时" VerticalAlignment="Center" Margin="8,0,0,0" />
+              </Grid>
+              <CheckBox Content="自动划消课时（课程结束自动扣减）" IsChecked="{Binding AutoDeduct}" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <!-- 远程连接 -->
+        <StackPanel IsVisible="{Binding IsRemote}" Spacing="16">
+          <TextBlock Text="远程连接" FontSize="18" FontWeight="SemiBold" />
+          <Border CornerRadius="8" BorderBrush="#E0E4E8" BorderThickness="1" Padding="16">
+            <StackPanel Spacing="12">
+              <TextBlock Text="集控服务器" FontSize="13" FontWeight="SemiBold" />
+              <Grid ColumnDefinitions="Auto,200,Auto,80">
+                <TextBlock Grid.Column="0" Text="IP 地址" VerticalAlignment="Center" />
+                <TextBox Grid.Column="1" Text="{Binding ServerIp}" Watermark="192.168.1.100" />
+                <TextBlock Grid.Column="2" Text="端口" VerticalAlignment="Center" Margin="12,0,0,0" />
+                <NumericUpDown Grid.Column="3" Value="{Binding ServerPort}" Minimum="1" Maximum="65535" />
+              </Grid>
+              <Grid ColumnDefinitions="Auto,200">
+                <TextBlock Grid.Column="0" Text="连接密码" VerticalAlignment="Center" />
+                <TextBox Grid.Column="1" Watermark="服务器密码" PasswordChar="●" />
+              </Grid>
+              <CheckBox Content="启用在线模式（连接服务器同步打卡数据）" IsChecked="{Binding OnlineMode}" />
+              <Button Content="测试连接" Padding="16,6" CornerRadius="6"
+                      Background="#4285f4" Foreground="White" HorizontalAlignment="Left" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <!-- 关于 -->
+        <StackPanel IsVisible="{Binding IsAbout}" Spacing="16">
+          <TextBlock Text="关于 AgoraIn" FontSize="18" FontWeight="SemiBold" />
+          <Border CornerRadius="8" BorderBrush="#E0E4E8" BorderThickness="1" Padding="20">
+            <StackPanel Spacing="12" HorizontalAlignment="Center">
+              <TextBlock Text="AgoraIn v4.0" FontSize="22" FontWeight="Bold" HorizontalAlignment="Center" />
+              <TextBlock Text="课堂签到打卡与班级教学管理一体机平台" FontSize="13" Foreground="#666"
+                         HorizontalAlignment="Center" />
+              <Separator />
+              <TextBlock Text="在线文档：https://doc.615mc.cn" FontSize="12" Foreground="#4285f4"
+                         HorizontalAlignment="Center" />
+              <TextBlock Text="基于 .NET 10 + Avalonia UI 11 构建" FontSize="11" Foreground="#888"
+                         HorizontalAlignment="Center" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </Panel>
+    </Border>
+  </Grid>
+</Window>
