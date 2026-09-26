@@ -1,14 +1,13 @@
 using System;
 using System.Runtime.InteropServices;
+using AgoraIn.App.ViewModels;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
-using AgoraIn.App.ViewModels;
 
 namespace AgoraIn.App.Views;
 
 /// <summary>
-/// 主窗口：无边框圆角（DWM 圆角偏好，Win10 不支持时静默回退方角），
-/// 顶部蓝栏 + 三模式下拉框，沿用 v3 视觉语言。
+/// 主窗口：无边框圆角（Win10/11 通用），数据驱动。
 /// </summary>
 public partial class MainWindow : Window
 {
@@ -18,12 +17,6 @@ public partial class MainWindow : Window
         DataContext = new MainWindowViewModel();
     }
 
-    protected override void OnOpened(EventArgs e)
-    {
-        base.OnOpened(e);
-        ApplyRoundedCornerPreference();
-    }
-
     private void OnMinimizeClick(object? sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
 
     private void OnMaximizeClick(object? sender, RoutedEventArgs e)
@@ -31,58 +24,25 @@ public partial class MainWindow : Window
 
     private void OnCloseClick(object? sender, RoutedEventArgs e) => Close();
 
-    private void OnModeButtonClick(object? sender, RoutedEventArgs e)
+    protected override void OnOpened(EventArgs e)
     {
-        ModePopup.IsOpen = !ModePopup.IsOpen;
-        ModeButton.Classes.Set("open", ModePopup.IsOpen);
-    }
-
-    private void OnModeListSelectionChanged(object? sender, SelectionChangedEventArgs e)
-    {
-        if (ModePopup.IsOpen)
-        {
-            ModePopup.IsOpen = false;
-            ModeButton.Classes.Set("open", false);
-        }
+        base.OnOpened(e);
+        ApplyRoundedCornerPreference();
     }
 
     private void ApplyRoundedCornerPreference()
     {
-        if (!OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
+        if (!OperatingSystem.IsWindows()) return;
         try
         {
             var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
-            if (handle == IntPtr.Zero)
-            {
-                return;
-            }
-
-            var preference = DwmWindowCornerPreference.Round;
-            _ = DwmSetWindowAttribute(handle, DwmWindowAttribute.CornerPreference, ref preference, sizeof(int));
+            if (handle == IntPtr.Zero) return;
+            var preference = 2; // DwmWindowCornerPreference.Round
+            DwmSetWindowAttribute(handle, 33, ref preference, sizeof(int));
         }
-        catch
-        {
-            // Windows 10 无 DWMWA_WINDOW_CORNER_PREFERENCE（Win11 起才有），回退方角即可
-        }
-    }
-
-    private enum DwmWindowAttribute
-    {
-        CornerPreference = 33,
-    }
-
-    private enum DwmWindowCornerPreference
-    {
-        Default = 0,
-        DoNotRound = 1,
-        Round = 2,
-        RoundSmall = 3,
+        catch { }
     }
 
     [DllImport("dwmapi.dll")]
-    private static extern int DwmSetWindowAttribute(IntPtr hwnd, DwmWindowAttribute attribute, ref DwmWindowCornerPreference value, int size);
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 }
