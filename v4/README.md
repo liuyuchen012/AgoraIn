@@ -44,7 +44,7 @@ src/AgoraIn.App/bin/Debug/net10.0/AgoraIn.exe --selftest --out out/selftest-repo
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
 | P0 脚手架 | ✅ 完成 | 解决方案骨架、Avalonia 主窗口（v3.2 同款视觉 + 三模式框架）、`--selftest` 门禁、CET 兼容 |
-| P1 领域与数据 | ⬜ | Core 全部实体、EF Core 建模、v3 JSON 数据迁移器 |
+| P1 领域与数据 | ✅ 完成 | Core 11 组实体、3 个领域服务（课时幂等/积分上限/值日轮换）、EF Core 建模、v3 迁移器（38 测试全绿） |
 | P2 桌面端 parity | ⬜ | 大屏/控制模式功能自 v3.2 等价迁移（P0 已复刻外壳视觉） |
 | P3~P9 | ⬜ | 班级中心 / 课表 / 服务端 / Web / 答题卡 / 家长端 / 发布 |
 

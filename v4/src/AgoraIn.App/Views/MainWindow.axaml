@@ -108,8 +108,9 @@
       <Setter Property="Background" Value="#e8f0fe" />
     </Style>
 
-    <!-- ═══ 学生打卡按钮（沿用 v3：高 52、圆角 8、灰底描边、打卡变蓝、悬停 0.85） ═══ -->
+    <!-- ═══ 学生打卡按钮（沿用 v3：高 52、宽 120、圆角 8、灰底描边、打卡变蓝、悬停 0.85） ═══ -->
     <Style Selector="Button.student">
+      <Setter Property="Width" Value="120" />
       <Setter Property="Height" Value="52" />
       <Setter Property="FontSize" Value="15" />
       <Setter Property="FontWeight" Value="Medium" />
@@ -120,6 +121,7 @@
       <Setter Property="BorderBrush" Value="#d0d0d0" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
     </Style>
     <Style Selector="Button.student:pointerover /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Opacity" Value="0.85" />
