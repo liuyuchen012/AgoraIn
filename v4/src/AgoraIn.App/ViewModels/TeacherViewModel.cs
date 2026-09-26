@@ -51,7 +51,10 @@ public partial class TeacherViewModel : ObservableObject
         OnPropertyChanged(nameof(IsPoints));
         OnPropertyChanged(nameof(IsDuty));
         OnPropertyChanged(nameof(IsSeats));
+        OnPropertyChanged(nameof(IsTimetable));
     }
+
+    public bool IsTimetable => SelectedNav == "课表";
 
     public TeacherViewModel(string baseDir)
     {

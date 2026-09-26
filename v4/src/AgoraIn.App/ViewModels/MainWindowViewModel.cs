@@ -40,6 +40,7 @@ public partial class MainWindowViewModel : ObservableObject
     public bool IsLargeScreen => CurrentMode == AppMode.LargeScreen;
     public bool IsControlMode => CurrentMode == AppMode.Control;
     public bool IsTeacherMode => CurrentMode == AppMode.Teacher;
+    public bool IsTimetable => Teacher.SelectedNav == "课表";
 
     /// <summary>循环切换模式：大屏→控制→教师→大屏。</summary>
     public void CycleMode()
@@ -106,6 +107,9 @@ public partial class MainWindowViewModel : ObservableObject
     // ═══ 教师模式面板 ═══
     public TeacherViewModel Teacher { get; }
 
+    // ═══ 课表编辑器 ═══
+    public TimetableViewModel Timetable { get; }
+
     // ═══ 命令 ═══
     public ICommand AddTabCommand { get; }
     public ICommand CloseTabCommand { get; }
@@ -128,6 +132,7 @@ public partial class MainWindowViewModel : ObservableObject
         _selectedMode = ModeOptions[Math.Clamp(_appConfig.StartupMode, 0, 2)];
         ClassHours = new ClassHoursViewModel(baseDir);
         Teacher = new TeacherViewModel(baseDir);
+        Timetable = new TimetableViewModel(baseDir);
 
         AddTabCommand = new RelayCommand(AddTab);
         CloseTabCommand = new RelayCommand<string?>(CloseTab);

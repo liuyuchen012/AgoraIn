@@ -154,6 +154,8 @@
                          Cursor="Hand" PointerPressed="OnTeacherNavClick" Tag="值日" />
               <TextBlock Text="座位" FontSize="13" Padding="22,10" Foreground="#888888"
                          Cursor="Hand" PointerPressed="OnTeacherNavClick" Tag="座位" />
+              <TextBlock Text="课表" FontSize="13" Padding="22,10" Foreground="#888888"
+                         Cursor="Hand" PointerPressed="OnTeacherNavClick" Tag="课表" />
             </StackPanel>
           </Grid>
         </Border>
@@ -552,6 +554,46 @@
                       </ItemsControl.ItemTemplate>
                     </ItemsControl>
                   </ScrollViewer>
+                </Grid>
+              </Panel>
+
+              <!-- 课表编辑器面板 -->
+              <Panel IsVisible="{Binding Teacher.IsTimetable}">
+                <Grid RowDefinitions="Auto,Auto,1*" Margin="24,20,24,16">
+                  <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12" Margin="0,0,0,12">
+                    <TextBlock Classes="page-title" Text="课表编辑器" FontSize="18" VerticalAlignment="Center" />
+                    <Button Content="+ 添加科目" Padding="12,6" CornerRadius="6"
+                            Background="#34a853" Foreground="White"
+                            Command="{Binding Timetable.AddSubjectCommand}" />
+                    <Button Content="💾 保存" Padding="12,6" CornerRadius="6"
+                            Background="#4285f4" Foreground="White"
+                            Command="{Binding Timetable.SaveCommand}" />
+                    <TextBlock Text="{Binding Timetable.Status}" Classes="hint" VerticalAlignment="Center" />
+                  </StackPanel>
+                  <Grid Grid.Row="1" ColumnDefinitions="Auto,*" Margin="0,0,0,12">
+                    <TextBlock Grid.Column="0" Text="选择周几：" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <ComboBox Grid.Column="1" ItemsSource="{Binding Timetable.WeekDays}"
+                              SelectedItem="{Binding Timetable.SelectedDay}" Width="120" HorizontalAlignment="Left" />
+                  </Grid>
+                  <!-- 科目列表 -->
+                  <Border Grid.Row="2" Background="White" CornerRadius="8" BorderBrush="#E0E4E8" BorderThickness="1" Padding="12">
+                    <DockPanel>
+                      <TextBlock DockPanel.Dock="Top" Classes="page-title" Text="科目列表" Margin="0,0,0,8" />
+                      <ItemsControl ItemsSource="{Binding Timetable.Subjects}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:CompileBindings="False">
+                            <Border Padding="10,6" Margin="0,2" CornerRadius="6" Background="#f8f9fa">
+                              <Grid ColumnDefinitions="Auto,*,Auto">
+                                <Border Grid.Column="0" Width="14" Height="14" CornerRadius="3"
+                                        Background="{Binding Color}" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13" VerticalAlignment="Center" />
+                              </Grid>
+                            </Border>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </DockPanel>
+                  </Border>
                 </Grid>
               </Panel>
             </Grid>
