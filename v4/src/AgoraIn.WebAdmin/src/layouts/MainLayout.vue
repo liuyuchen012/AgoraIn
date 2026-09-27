@@ -40,6 +40,10 @@
           <el-icon><Document /></el-icon>
           <span>试卷管理</span>
         </el-menu-item>
+        <el-menu-item index="/answer-sheet">
+          <el-icon><EditPen /></el-icon>
+          <span>答题卡制作</span>
+        </el-menu-item>
         <el-menu-item index="/users">
           <el-icon><UserFilled /></el-icon>
           <span>用户管理</span>
@@ -78,7 +82,7 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import { DataLine, School, User, Monitor, Clock, Setting, UserFilled, Key, Bell, FolderOpened, Document } from '@element-plus/icons-vue'
+import { DataLine, School, User, Monitor, Clock, Setting, UserFilled, Key, Bell, FolderOpened, Document, EditPen } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()

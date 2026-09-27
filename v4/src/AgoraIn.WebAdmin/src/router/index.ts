@@ -64,6 +64,12 @@ const router = createRouter({
           meta: { title: '试卷管理' },
         },
         {
+          path: 'answer-sheet',
+          name: 'answer-sheet',
+          component: () => import('@/views/AnswerSheetEditor.vue'),
+          meta: { title: '答题卡制作' },
+        },
+        {
           path: 'users',
           name: 'users',
           component: () => import('@/views/UsersView.vue'),
