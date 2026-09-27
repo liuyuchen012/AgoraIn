@@ -100,7 +100,8 @@
               <template v-if="q.type<=1">
                 <div v-for="(opt,oi) in getOpts(q)" :key="oi" style="display:flex;align-items:center;gap:4px;margin:2px 0">
                   <span style="font-weight:600;font-size:12px;min-width:16px">{{String.fromCharCode(65+oi)}}</span>
-                  <el-input v-model="opt.text" size="small" placeholder="选项" style="flex:1" />
+                  <el-input :model-value="opt.text" size="small" placeholder="选项" style="flex:1"
+                            @input="(v:string) => syncOpt(q, oi, v)" />
                 </div>
                 <el-button size="small" text @click="addOpt(q)">+ 选项</el-button>
               </template>
@@ -263,6 +264,9 @@ function addQ(type: number) {
 
 function getOpts(q: any): {key:string;text:string}[] {
   try { const a=JSON.parse(q.optionsJson||'[]'); return Array.isArray(a)?a:[] } catch {} return [{key:'A',text:''},{key:'B',text:''}]
+}
+function syncOpt(q: any, idx: number, val: string) {
+  const o=getOpts(q); if(o[idx]) o[idx].text=val; q.optionsJson=JSON.stringify(o)
 }
 function addOpt(q: any) {
   const o=getOpts(q); o.push({key:String.fromCharCode(65+o.length),text:''}); q.optionsJson=JSON.stringify(o)
