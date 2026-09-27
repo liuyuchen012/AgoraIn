@@ -4,11 +4,12 @@ name: v4 build
 # AgoraIn v4.0 自动构建
 #
 # 触发策略（仓库已公开 → Actions 分钟与产物存储免费）：
-#   · push / PR      → 门禁 + Web 面板 + 桌面端 ×5 + 服务端 ×3（可下载产物）
-#   · tag / 手动触发 → 追加移动端（Android / iOS，最慢）
-#   · 打 tag         → 全部产物额外附到 GitHub Release（长期分发渠道）
-# 说明：自包含包体积较大（桌面端约 112MB 解压 / 约 50MB zip），产物保留 7 天，
-#       过期清理见 .github/workflows/cleanup-artifacts.yml。
+#   · push / PR → 门禁 + Web 面板 + 桌面端 ×5 + 服务端 ×3 + 移动端 ×2（全平台）
+#   · 构建成功后自动发布版本：
+#       - push 到分支 → 打 tag `v4.0.0-build.{运行号}`，发布**预发布版本**
+#       - 手动打 tag  → 使用该 tag 发布**正式版本**
+#   · 产物保留 7 天，过期清理见 .github/workflows/cleanup-artifacts.yml
+# 说明：自包含包体积较大（桌面端约 112MB 解压 / 约 50MB zip）。
 #
 # 产物（tag / 手动触发）：
 #   · 桌面端  AgoraIn-{win-x64,linux-x64,linux-arm64,osx-x64,osx-arm64}.zip
@@ -179,13 +180,6 @@ jobs:
           path: publish/AgoraIn-${{ matrix.name }}.zip
           retention-days: 7
 
-      # 打 tag 时直接附到 Release（Release 资源不计入 Actions 产物配额）
-      - name: 附到 Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: publish/AgoraIn-${{ matrix.name }}.zip
-          fail_on_unmatched_files: true
 
   # ══════════════════════════════════════════════════════════════════
   # 4. 服务端（ASP.NET Core，内置 Web 管理面板）—— 仅 tag / 手动触发
@@ -245,12 +239,6 @@ jobs:
           path: publish/AgoraIn-Server-${{ matrix.name }}.zip
           retention-days: 7
 
-      - name: 附到 Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: publish/AgoraIn-Server-${{ matrix.name }}.zip
-          fail_on_unmatched_files: true
 
   # ══════════════════════════════════════════════════════════════════
   # 5. 移动端 Android（MAUI）—— 仅 tag / 手动触发
@@ -258,7 +246,6 @@ jobs:
   android:
     name: 移动端 Android
     needs: test
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -299,12 +286,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - name: 附到 Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: publish/artifacts/AgoraIn-Android.*
-          fail_on_unmatched_files: false
 
   # ══════════════════════════════════════════════════════════════════
   # 6. 移动端 iOS（MAUI，模拟器构建免签名）—— 仅 tag / 手动触发
@@ -312,7 +293,6 @@ jobs:
   ios:
     name: 移动端 iOS（模拟器）
     needs: test
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -353,9 +333,76 @@ jobs:
           path: publish/artifacts/*
           retention-days: 7
 
-      - name: 附到 Release
-        if: startsWith(github.ref, 'refs/tags/')
+  # ══════════════════════════════════════════════════════════════════
+  # 7. 自动发布版本（全部平台构建成功后）
+  #    · push 构建 → 自动打 tag `v4.0.0-build.{运行号}` 并发布（预发布）
+  #    · 手动打 tag → 发布正式版（非预发布），使用该 tag
+  # ══════════════════════════════════════════════════════════════════
+  release:
+    name: 发布版本
+    needs: [desktop, server, android, ios]
+    # 仅 push 事件（含 tag）；桌面端与服务端必须成功，移动端失败不阻塞发布。
+    # 守卫：排除自动生成的构建 tag，防止「发布 → 建 tag → 再触发构建 → 再发布」循环。
+    # （默认 GITHUB_TOKEN 创建的事件本就不会触发新运行；此守卫是为将来换 PAT 时仍安全。）
+    if: >-
+      github.event_name == 'push' && !cancelled()
+      && !startsWith(github.ref_name, 'v4.0.0-build.')
+      && needs.desktop.result == 'success'
+      && needs.server.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 下载全部构建产物
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+          pattern: AgoraIn-*
+
+      - name: 过滤出发布文件（zip / apk / aab）
+        run: |
+          find assets -type f ! \( -name "*.zip" -o -name "*.apk" -o -name "*.aab" \) -delete
+          echo "=== 待发布文件 ==="
+          ls -lh assets/
+
+      - name: 计算版本号
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "发布正式版：${TAG}"
+          else
+            TAG="v4.0.0-build.${GITHUB_RUN_NUMBER}"
+            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "发布预发布版本：${TAG}"
+          fi
+
+      - name: 创建 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: publish/artifacts/AgoraIn-iOS-simulator.zip
-          fail_on_unmatched_files: false
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
+          prerelease: ${{ steps.ver.outputs.prerelease }}
+          files: assets/**
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            AgoraIn v4.0 自动构建（提交 ${{ github.sha }}）
+
+            | 平台 | 文件 |
+            | --- | --- |
+            | Windows 桌面端 | `AgoraIn-win-x64.zip`（解压后运行 AgoraIn.exe） |
+            | Linux 桌面端 | `AgoraIn-linux-x64.zip` / `AgoraIn-linux-arm64.zip` |
+            | macOS 桌面端 | `AgoraIn-osx-x64.zip` / `AgoraIn-osx-arm64.zip` |
+            | Windows 服务端 | `AgoraIn-Server-win-x64.zip`（内置 Web 管理面板） |
+            | Linux 服务端 | `AgoraIn-Server-linux-x64.zip` |
+            | macOS 服务端 | `AgoraIn-Server-osx-arm64.zip` |
+            | Android | `AgoraIn-Android.apk`（未签名，需自行签名后安装） |
+            | iOS | `AgoraIn-iOS-simulator.zip`（仅模拟器，真机需签名） |
+
+            > 客户端统一连接 `https://agorain.615mc.cn`（服务器地址已锁定，不可配置）。

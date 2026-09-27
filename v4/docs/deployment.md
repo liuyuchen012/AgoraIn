@@ -217,29 +217,26 @@ powershell -ExecutionPolicy Bypass -File v4/scripts/gate.ps1
 | 移动端 Android | ubuntu | `AgoraIn-Android.apk` / `.aab` |
 | 移动端 iOS | macos | `AgoraIn-iOS-simulator.zip`（模拟器构建，免签名） |
 
-### 触发策略与产物配额
+### 触发策略与产物发布
 
-私有仓库的 **Actions 产物存储有配额（Free 计划 500MB）**，而自包含发布包体积很大
-（桌面端约 60MB/平台）。因此按「不浪费配额」原则设计：
-
-| 触发 | 执行内容 | 产物 |
+| 触发 | 执行内容 | 发布 |
 | --- | --- | --- |
-| `push` / PR（改动 `v4/**`） | 门禁（构建 + 测试）+ Web 面板构建校验 | **不产生产物**（零配额占用） |
-| 打 tag（`v4*`） | 门禁 + Web + 桌面端 ×5 + 服务端 ×3 + Android + iOS | 产物保留 **3 天** + 自动附到 **GitHub Release** |
-| 手动 `workflow_dispatch` | 同 tag（但不建 Release） | 产物保留 3 天 |
+| `push` / PR（改动 `v4/**`） | 门禁 + Web 面板 + 桌面端 ×5 + 服务端 ×3 + 移动端 ×2（全平台） | push 到分支时**自动发布预发布版本** |
+| 手动打 tag（如 `v4.0.1`） | 同上，使用该 tag | **正式版本**（非预发布） |
+| 手动 `workflow_dispatch` | 同上 | 打 tag 逻辑同上（分支触发则预发布） |
 
-> **正式分发请用 GitHub Release 附件**：Release 资源不计入 Actions 产物配额。
-> 产物上传时关闭了调试符号（`DebugType=none`）以显著减小体积。
+**自动发布规则**（`release` 作业，需桌面端与服务端构建成功；移动端失败不阻塞）：
 
-### 配额被打满时怎么办
+- 分支 push → 自动打 tag `v4.0.0-build.{运行号}`，发布为**预发布**（prerelease）
+- 手动打 tag → 用该 tag 发布**正式版本**
+- Release 说明自动生成变更日志 + 平台文件对照表；附件包含全部 zip / apk / aab
 
-报错形如 `Artifact storage quota has been hit` 时，运行 **清理 Actions 产物** 工作流
-（`cleanup-artifacts.yml`，Actions → 该工作流 → Run workflow）：
+> 自动生成的 `v4.0.0-build.*` tag 仍在 `tags: ['v4*']` 触发范围内，但
+> **用默认 `GITHUB_TOKEN` 创建 tag 不会触发新的工作流运行**，因此不会形成循环；
+> 工作流另加了 `!startsWith(github.ref_name, 'v4.0.0-build.')` 守卫，换成 PAT 时同样安全。
 
-- `delete_all: true` → **立即清空全部产物**（救急，推荐）
-- 或填 `keep_days: N` → 只删除 N 天前的产物
-
-该工作流也会每周日 03:00（UTC）自动清理 3 天前的产物。
+产物保留 7 天（Actions 产物），过期清理见 `cleanup-artifacts.yml`；
+**Release 附件长期保存**，是推荐的分发渠道。
 
 ### 产物签名
 
