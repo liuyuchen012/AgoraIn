@@ -74,20 +74,28 @@
           <TextBlock Text="远程连接" FontSize="18" FontWeight="SemiBold" />
           <Border CornerRadius="8" BorderBrush="#E0E4E8" BorderThickness="1" Padding="16">
             <StackPanel Spacing="12">
-              <TextBlock Text="集控服务器" FontSize="13" FontWeight="SemiBold" />
-              <Grid ColumnDefinitions="Auto,200,Auto,80">
-                <TextBlock Grid.Column="0" Text="IP 地址" VerticalAlignment="Center" />
-                <TextBox Grid.Column="1" Text="{Binding ServerIp}" Watermark="192.168.1.100" />
-                <TextBlock Grid.Column="2" Text="端口" VerticalAlignment="Center" Margin="12,0,0,0" />
-                <NumericUpDown Grid.Column="3" Value="{Binding ServerPort}" Minimum="1" Maximum="65535" />
+              <TextBlock Text="官方服务器（固定，不可修改）" FontSize="13" FontWeight="SemiBold" />
+              <Grid ColumnDefinitions="Auto,*">
+                <TextBlock Grid.Column="0" Text="服务器地址" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{Binding ServerAddress}" Margin="12,0,0,0"
+                           FontSize="14" FontWeight="SemiBold" Foreground="#4285f4"
+                           VerticalAlignment="Center" TextWrapping="Wrap" />
               </Grid>
-              <Grid ColumnDefinitions="Auto,200">
-                <TextBlock Grid.Column="0" Text="连接密码" VerticalAlignment="Center" />
-                <TextBox Grid.Column="1" Watermark="服务器密码" PasswordChar="●" />
+              <TextBlock Text="为保证数据一致与服务稳定，客户端统一连接官方服务器，不支持自定义服务器地址。"
+                         FontSize="11" Foreground="#888888" TextWrapping="Wrap" />
+              <CheckBox Content="启用在线模式（连接服务器同步数据）" IsChecked="{Binding OnlineMode}" />
+            </StackPanel>
+          </Border>
+          <Border CornerRadius="8" BorderBrush="#E0E4E8" BorderThickness="1" Padding="16">
+            <StackPanel Spacing="12">
+              <TextBlock Text="课表驱动行为" FontSize="13" FontWeight="SemiBold" />
+              <CheckBox Content="按课表自动切换模式（上课→大屏，下课→控制）" IsChecked="{Binding TimetableDriven}" />
+              <Grid ColumnDefinitions="Auto,100,Auto">
+                <TextBlock Grid.Column="0" Text="上课前提醒" VerticalAlignment="Center" />
+                <NumericUpDown Grid.Column="1" Value="{Binding RemindMinutesBefore}" Minimum="0" Maximum="15"
+                               Increment="1" FormatString="0" />
+                <TextBlock Grid.Column="2" Text="分钟（0 = 不提醒）" VerticalAlignment="Center" Margin="8,0,0,0" />
               </Grid>
-              <CheckBox Content="启用在线模式（连接服务器同步打卡数据）" IsChecked="{Binding OnlineMode}" />
-              <Button Content="测试连接" Padding="16,6" CornerRadius="6"
-                      Background="#4285f4" Foreground="White" HorizontalAlignment="Left" />
             </StackPanel>
           </Border>
         </StackPanel>

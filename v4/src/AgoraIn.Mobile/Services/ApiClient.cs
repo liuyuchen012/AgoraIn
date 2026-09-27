@@ -4,22 +4,22 @@ using System.Text.Json;
 namespace AgoraIn.Mobile.Services;
 
 /// <summary>
-/// AgoraIn v4 服务端 API 客户端（JWT 鉴权 + 本地持久化服务器地址与令牌）。
+/// AgoraIn v4 服务端 API 客户端（JWT 鉴权）。
+/// 服务器地址**已锁定**为官方域名（<see cref="ServerBaseUrl"/>），不允许连接第三方服务器。
 /// </summary>
 public sealed class ApiClient
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
-    private const string BaseUrlKey = "agorain_base_url";
+    /// <summary>官方服务端基地址（唯一允许的服务器）。</summary>
+    public const string ServerBaseUrl = "https://agorain.615mc.cn";
+
     private const string TokenKey = "agorain_token";
     private const string UserKey = "agorain_user";
 
-    public string BaseUrl
-    {
-        get => Preferences.Default.Get(BaseUrlKey, "");
-        set => Preferences.Default.Set(BaseUrlKey, (value ?? "").TrimEnd('/'));
-    }
+    /// <summary>服务端基地址（只读，恒为官方域名）。</summary>
+    public string BaseUrl => ServerBaseUrl;
 
     public string Token
     {
@@ -41,9 +41,8 @@ public sealed class ApiClient
 
     // ── 认证 ──
 
-    public async Task<UserInfo> LoginAsync(string baseUrl, string username, string password)
+    public async Task<UserInfo> LoginAsync(string username, string password)
     {
-        BaseUrl = baseUrl;
         var res = await PostAsync<LoginResponse>("/api/v4/auth/login", new { username, password });
         if (res == null || string.IsNullOrEmpty(res.Token))
             throw new InvalidOperationException("服务器未返回令牌");

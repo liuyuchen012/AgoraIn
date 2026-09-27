@@ -23,6 +23,9 @@ bash v4/deploy-server.sh <host> <user> <password>
 
 各端完整构建命令、部署步骤与常见问题见 **[v4/docs/deployment.md](v4/docs/deployment.md)**。
 
+> ⚠️ **服务器地址已锁定为 `https://agorain.615mc.cn`**：桌面端、小程序、移动端均为硬编码，
+> 客户端不提供服务器地址配置入口，不允许连接第三方服务器。
+
 ## 组成
 
 | 模块 | 技术栈 | 说明 |

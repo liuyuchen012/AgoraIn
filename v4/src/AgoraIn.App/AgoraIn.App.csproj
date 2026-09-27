@@ -8,6 +8,12 @@
     <AssemblyName>AgoraIn</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\app-icon.ico</ApplicationIcon>
+
+    <!-- Microsoft.Web.WebView2 同时附带 WPF/WinForms 包装器程序集，它们引用 WPF 的
+         WindowsBase 5.0.0.0，与 .NET 10 自带的 WindowsBase 4.0.0.0 产生版本冲突（MSB3277）。
+         本项目只使用纯 Core API（Microsoft.Web.WebView2.Core），不引用任何 WPF/WinForms 类型，
+         冲突不可达，故抑制该警告（共 22 条）。 -->
+    <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,6 +23,7 @@
     <PackageReference Include="Avalonia.Diagnostics" Version="11.3.22" Condition="'$(Configuration)' == 'Debug'" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="YamlDotNet" Version="16.*" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
   </ItemGroup>
 
   <ItemGroup>

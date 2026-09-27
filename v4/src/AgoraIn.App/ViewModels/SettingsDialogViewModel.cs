@@ -21,10 +21,16 @@ public partial class SettingsDialogViewModel : ObservableObject
     [ObservableProperty] private int _startupModeIndex; // 0=大屏 1=控制 2=教师
     public IReadOnlyList<string> StartupModes { get; } = ["大屏模式", "控制模式", "教师模式"];
 
-    // 远程连接
-    [ObservableProperty] private string _serverIp = "";
-    [ObservableProperty] private int _serverPort = 5250;
-    [ObservableProperty] private bool _onlineMode;
+    // 远程连接（服务器地址已锁定为官方域名，不可编辑）
+    /// <summary>固定服务端地址（只读展示）。</summary>
+    public string ServerAddress => Core.AppConstants.ServerBaseUrl;
+
+    /// <summary>服务端主机名（只读展示）。</summary>
+    public string ServerHostName => Core.AppConstants.ServerHost;
+
+    [ObservableProperty] private bool _onlineMode = true;
+    [ObservableProperty] private int _remindMinutesBefore = 2;
+    [ObservableProperty] private bool _timetableDriven;
 
     partial void OnSelectedTabChanged(string value)
     {

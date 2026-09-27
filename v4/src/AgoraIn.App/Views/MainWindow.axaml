@@ -3,6 +3,7 @@
         xmlns:vm="using:AgoraIn.App.ViewModels"
         xmlns:models="using:AgoraIn.App.Models"
         xmlns:conv="using:AgoraIn.App.Converters"
+        xmlns:controls="using:AgoraIn.App.Controls"
         x:Class="AgoraIn.App.Views.MainWindow"
         x:Name="Root"
         x:DataType="vm:MainWindowViewModel"
@@ -107,7 +108,7 @@
       <Grid ColumnDefinitions="200,*">
 
         <!-- ═══ 左侧栏（200px，三种模式共用，内容按模式切换） ═══ -->
-        <Border Grid.Column="0" Background="#f5f5f5">
+        <Border Grid.Column="0" Background="#f5f5f5" IsVisible="{Binding IsLargeScreen}">
           <Grid RowDefinitions="48,*">
             <!-- 顶部品牌栏 -->
             <Border Grid.Row="0" Background="#4285f4">
@@ -118,7 +119,7 @@
             </Border>
 
             <!-- 大屏模式：任务树 -->
-            <ScrollViewer Grid.Row="1" Padding="8,8,8,0" IsVisible="{Binding IsLargeScreen}">
+            <ScrollViewer Grid.Row="1" Padding="8,8,8,0">
               <ItemsControl ItemsSource="{Binding TaskTree}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="models:TaskTreeNode">
@@ -134,29 +135,7 @@
               </ItemsControl>
             </ScrollViewer>
 
-            <!-- 控制模式：导航 -->
-            <StackPanel Grid.Row="1" IsVisible="{Binding IsControlMode}" Margin="0,4,0,0">
-              <TextBlock Text="划课" FontSize="13" Padding="22,10" Foreground="#4285f4" FontWeight="SemiBold"
-                         Cursor="Hand" Tag="划课" />
-              <TextBlock Text="设备列表" FontSize="13" Padding="22,10" Foreground="#888888" Cursor="Hand" />
-              <TextBlock Text="任务中心" FontSize="13" Padding="22,10" Foreground="#888888" Cursor="Hand" />
-              <TextBlock Text="集控平台" FontSize="13" Padding="22,10" Foreground="#888888"
-                         Cursor="Hand" Tapped="OnServerPanelClick" />
-            </StackPanel>
 
-            <!-- 教师模式：导航 -->
-            <StackPanel Grid.Row="1" IsVisible="{Binding IsTeacherMode}" Margin="0,4,0,0">
-              <TextBlock Text="点名" FontSize="13" Padding="22,10" Foreground="#4285f4" FontWeight="SemiBold"
-                         Cursor="Hand" PointerPressed="OnTeacherNavClick" Tag="点名" />
-              <TextBlock Text="积分" FontSize="13" Padding="22,10" Foreground="#888888"
-                         Cursor="Hand" PointerPressed="OnTeacherNavClick" Tag="积分" />
-              <TextBlock Text="值日" FontSize="13" Padding="22,10" Foreground="#888888"
-                         Cursor="Hand" PointerPressed="OnTeacherNavClick" Tag="值日" />
-              <TextBlock Text="座位" FontSize="13" Padding="22,10" Foreground="#888888"
-                         Cursor="Hand" PointerPressed="OnTeacherNavClick" Tag="座位" />
-              <TextBlock Text="课表" FontSize="13" Padding="22,10" Foreground="#888888"
-                         Cursor="Hand" PointerPressed="OnTeacherNavClick" Tag="课表" />
-            </StackPanel>
           </Grid>
         </Border>
 
@@ -290,313 +269,25 @@
               </ScrollViewer>
             </Grid>
 
-            <!-- 控制模式 -->
-            <Grid IsVisible="{Binding IsControlMode}" ColumnDefinitions="*">
-              <Grid RowDefinitions="Auto,*" Background="#fafafa" Margin="24,20,24,16">
-                <!-- 课时划消面板 -->
-                <Grid Grid.Row="0" ColumnDefinitions="360,1*" Margin="0,0,0,16">
-                  <!-- 左：学生列表 + 操作 -->
-                  <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                    <TextBlock Classes="page-title" Text="课时管理" FontSize="18" Margin="0,0,0,12" />
-                    <ListBox ItemsSource="{Binding ClassHours.Students}" Height="240" Background="White"
-                             BorderBrush="#E0E4E8" BorderThickness="1" CornerRadius="8"
-                             SelectedItem="{Binding ClassHours.SelectedStudent}">
-                      <ListBox.ItemTemplate>
-                        <DataTemplate x:CompileBindings="False">
-                          <Grid ColumnDefinitions="*,Auto" Margin="4,2">
-                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center" FontSize="13" />
-                            <Border Grid.Column="1" Background="#4285f4" CornerRadius="10" Padding="8,2">
-                              <TextBlock FontSize="11" Foreground="White" VerticalAlignment="Center">
-                                <TextBlock.Text>
-                                  <MultiBinding StringFormat="剩余 {0:0.#}">
-                                    <Binding Path="RemainingHours" />
-                                  </MultiBinding>
-                                </TextBlock.Text>
-                              </TextBlock>
-                            </Border>
-                          </Grid>
-                        </DataTemplate>
-                      </ListBox.ItemTemplate>
-                    </ListBox>
-                    <StackPanel Margin="0,8,0,0">
-                      <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,8">
-                        <NumericUpDown Grid.Column="0" Value="{Binding ClassHours.OperateHours}" Minimum="0.5" Maximum="100"
-                                       Increment="0.5" FormatString="0.#" Width="140" />
-                        <Button Grid.Column="1" Content="划消" Margin="8,0,4,0" Padding="12,6"
-                                Background="#ea4335" Foreground="White" CornerRadius="6"
-                                Command="{Binding ClassHours.DeductCommand}" />
-                        <Button Grid.Column="2" Content="赠送" Padding="12,6"
-                                Background="#34a853" Foreground="White" CornerRadius="6"
-                                Command="{Binding ClassHours.GiftCommand}" />
-                      </Grid>
-                      <TextBox Text="{Binding ClassHours.OperateNote}" Watermark="备注（可选）" Margin="0,0,0,8" />
-                    </StackPanel>
-                  </StackPanel>
-                  <!-- 右：月历 -->
-                  <Grid Grid.Column="1">
-                    <Grid RowDefinitions="Auto,Auto,*">
-                      <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,8">
-                        <Button Content="◀" Padding="8,4" Command="{Binding ClassHours.PrevMonthCommand}"
-                                Background="Transparent" BorderThickness="0" FontSize="14" />
-                        <TextBlock Grid.Column="1" HorizontalAlignment="Center" FontSize="15" FontWeight="SemiBold"
-                                   Text="{Binding ClassHours.CurrentMonth, StringFormat={}{0:yyyy 年 M 月}}" />
-                        <Button Grid.Column="2" Content="▶" Padding="8,4" Command="{Binding ClassHours.NextMonthCommand}"
-                                Background="Transparent" BorderThickness="0" FontSize="14" />
-                      </Grid>
-                      <Grid Grid.Row="1" Margin="0,0,0,4">
-                        <Grid.ColumnDefinitions>
-                          <ColumnDefinition /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition />
-                          <ColumnDefinition /><ColumnDefinition /><ColumnDefinition />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="一" HorizontalAlignment="Center" FontSize="12" Foreground="#888" />
-                        <TextBlock Grid.Column="1" Text="二" HorizontalAlignment="Center" FontSize="12" Foreground="#888" />
-                        <TextBlock Grid.Column="2" Text="三" HorizontalAlignment="Center" FontSize="12" Foreground="#888" />
-                        <TextBlock Grid.Column="3" Text="四" HorizontalAlignment="Center" FontSize="12" Foreground="#888" />
-                        <TextBlock Grid.Column="4" Text="五" HorizontalAlignment="Center" FontSize="12" Foreground="#888" />
-                        <TextBlock Grid.Column="5" Text="六" HorizontalAlignment="Center" FontSize="12" Foreground="#888" />
-                        <TextBlock Grid.Column="6" Text="日" HorizontalAlignment="Center" FontSize="12" Foreground="#888" />
-                      </Grid>
-                      <UniformGrid Grid.Row="2" Columns="7" x:CompileBindings="False">
-                        <ItemsControl ItemsSource="{Binding ClassHours.CalendarDays}">
-                          <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                              <Border Background="Transparent" CornerRadius="6" Margin="2"
-                                      Cursor="Hand" Tag="{Binding}"
-                                      PointerPressed="OnCalendarDayClick">
-                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="2">
-                                  <TextBlock HorizontalAlignment="Center" FontSize="12"
-                                             Foreground="{Binding IsCurrentMonth, Converter={x:Static conv:BoolToForegroundConverter.Instance}}"
-                                             Text="{Binding DisplayText}" />
-                                  <Border Width="4" Height="4" CornerRadius="2" HorizontalAlignment="Center"
-                                          Background="#4285f4" IsVisible="{Binding IsToday}" />
-                                </StackPanel>
-                              </Border>
-                            </DataTemplate>
-                          </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                      </UniformGrid>
-                    </Grid>
-                  </Grid>
-                </Grid>
-                <!-- 课时记录流水 -->
-                <Border Grid.Row="1" Background="White" CornerRadius="8" BorderBrush="#E0E4E8" BorderThickness="1" Padding="12">
-                  <DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Classes="page-title" Text="课时记录" Margin="0,0,0,8" />
-                    <TextBlock DockPanel.Dock="Top" Text="{Binding ClassHours.SelectedDetail}" Classes="hint" Margin="0,0,0,8" />
-                    <ItemsControl ItemsSource="{Binding ClassHours.Records}">
-                      <ItemsControl.ItemTemplate>
-                        <DataTemplate x:CompileBindings="False">
-                          <Border Padding="8,5" Margin="0,1" CornerRadius="4">
-                            <Grid ColumnDefinitions="80,60,*,100">
-                              <TextBlock Text="{Binding Date}" FontSize="12" Foreground="#888" VerticalAlignment="Center" />
-                              <TextBlock Grid.Column="1" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"
-                                         Text="{Binding HoursText}"
-                                         Foreground="{Binding IsDeduct, Converter={x:Static conv:HoursToColorConverter.Instance}}" />
-                              <TextBlock Grid.Column="2" Text="{Binding Note}" FontSize="12" Foreground="#555" VerticalAlignment="Center" />
-                            </Grid>
-                          </Border>
-                        </DataTemplate>
-                      </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                  </DockPanel>
-                </Border>
-              </Grid>
-            </Grid>
+            <!-- 控制 / 教师模式：内嵌服务端 Web 管理面板 -->
+            <Panel IsVisible="{Binding IsWebPanelMode}">
+              <!-- 降级提示：非 Windows 或 WebView2 初始化失败 -->
+              <Border IsVisible="{Binding !WebPanelReady}" Background="#fafafa">
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="10">
+                  <TextBlock Text="&#x1F310;" FontSize="48" HorizontalAlignment="Center" />
+                  <TextBlock Text="内嵌浏览器不可用" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                  <TextBlock Text="{Binding WebPanelHint}" FontSize="12" Foreground="#888888"
+                             HorizontalAlignment="Center" TextWrapping="Wrap" MaxWidth="440" TextAlignment="Center" />
+                  <TextBlock Text="{Binding WebPanelUrl}" FontSize="13" Foreground="#4285f4" HorizontalAlignment="Center" />
+                  <Button Content="用系统浏览器打开" Padding="16,8" CornerRadius="8"
+                          Background="#4285f4" Foreground="White" Click="OnOpenWebPanelInBrowser" />
+                </StackPanel>
+              </Border>
 
-            <!-- 教师模式 -->
-            <Grid IsVisible="{Binding IsTeacherMode}" ColumnDefinitions="*">
-              <!-- 点名面板 -->
-              <Panel IsVisible="{Binding Teacher.IsRollCall}">
-                <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="24,20,24,16">
-                  <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12" Margin="0,0,0,12">
-                    <TextBlock Classes="page-title" Text="点名" FontSize="18" VerticalAlignment="Center" />
-                    <ComboBox SelectedIndex="{Binding Teacher.RollCallModeIndex}" Width="120" VerticalAlignment="Center">
-                      <ComboBoxItem Content="随机点名" />
-                      <ComboBoxItem Content="顺序点名" />
-                      <ComboBoxItem Content="指定点名" />
-                    </ComboBox>
-                    <Button Content="🎲 开始点名" Padding="16,8" CornerRadius="8"
-                            Background="#4285f4" Foreground="White" FontWeight="SemiBold"
-                            Command="{Binding Teacher.StartRollCallCommand}" />
-                    <TextBlock Text="{Binding Teacher.RollCallStatus}" FontSize="14" FontWeight="SemiBold"
-                               Foreground="#4285f4" VerticalAlignment="Center" />
-                  </StackPanel>
-                  <ListBox Grid.Row="2" ItemsSource="{Binding Teacher.RollCallStudents}" Background="White"
-                           BorderBrush="#E0E4E8" BorderThickness="1" CornerRadius="8"
-                           SelectedItem="{Binding Teacher.SelectedRollCallStudent}">
-                    <ListBox.ItemTemplate>
-                      <DataTemplate x:CompileBindings="False">
-                        <Border Padding="12,8" Margin="2,1" CornerRadius="6">
-                          <Grid ColumnDefinitions="*,Auto">
-                            <TextBlock Text="{Binding Name}" FontSize="14" VerticalAlignment="Center" />
-                            <TextBlock Grid.Column="1" Text="{Binding Result}" FontSize="13"
-                                       Foreground="#4285f4" FontWeight="SemiBold" VerticalAlignment="Center" />
-                          </Grid>
-                        </Border>
-                      </DataTemplate>
-                    </ListBox.ItemTemplate>
-                  </ListBox>
-                </Grid>
-              </Panel>
-
-              <!-- 积分面板 -->
-              <Panel IsVisible="{Binding Teacher.IsPoints}">
-                <Grid RowDefinitions="Auto,*,Auto" Margin="24,20,24,16">
-                  <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12" Margin="0,0,0,16">
-                    <TextBlock Classes="page-title" Text="积分规则" FontSize="18" VerticalAlignment="Center" />
-                    <Button Content="+ 添加规则" Padding="12,6" CornerRadius="6"
-                            Background="#34a853" Foreground="White"
-                            Command="{Binding Teacher.AddPointRuleCommand}" />
-                  </StackPanel>
-                  <ListBox Grid.Row="1" ItemsSource="{Binding Teacher.PointRules}" Background="White"
-                           BorderBrush="#E0E4E8" BorderThickness="1" CornerRadius="8">
-                    <ListBox.ItemTemplate>
-                      <DataTemplate x:CompileBindings="False">
-                        <Border Padding="12,8" Margin="2,1" CornerRadius="6">
-                          <Grid ColumnDefinitions="*,Auto">
-                            <TextBlock Text="{Binding Name}" FontSize="14" VerticalAlignment="Center" />
-                            <TextBlock Grid.Column="1" FontSize="14" FontWeight="Bold" VerticalAlignment="Center"
-                                       Text="{Binding Delta, StringFormat='+{0}'}" />
-                          </Grid>
-                        </Border>
-                      </DataTemplate>
-                    </ListBox.ItemTemplate>
-                  </ListBox>
-                  <TextBlock Grid.Row="2" Text="{Binding Teacher.PointStatus}" Classes="hint" Margin="0,8,0,0" />
-                </Grid>
-              </Panel>
-
-              <!-- 值日面板 -->
-              <Panel IsVisible="{Binding Teacher.IsDuty}">
-                <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="24,20,24,16">
-                  <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12" Margin="0,0,0,12">
-                    <TextBlock Classes="page-title" Text="值日管理" FontSize="18" VerticalAlignment="Center" />
-                    <ComboBox SelectedIndex="{Binding Teacher.DutyCycleIndex}" Width="100" VerticalAlignment="Center">
-                      <ComboBoxItem Content="按周轮换" />
-                      <ComboBoxItem Content="按日轮换" />
-                    </ComboBox>
-                    <Button Content="生成今日值日" Padding="12,6" CornerRadius="6"
-                            Background="#4285f4" Foreground="White"
-                            Command="{Binding Teacher.GenerateDutyCommand}" />
-                    <Button Content="+ 添加岗位" Padding="12,6" CornerRadius="6"
-                            Background="#34a853" Foreground="White"
-                            Command="{Binding Teacher.AddDutyPostCommand}" />
-                  </StackPanel>
-                  <ListBox Grid.Row="2" ItemsSource="{Binding Teacher.DutyPosts}" Background="White"
-                           BorderBrush="#E0E4E8" BorderThickness="1" CornerRadius="8" Height="160">
-                    <ListBox.ItemTemplate>
-                      <DataTemplate x:CompileBindings="False">
-                        <Border Padding="12,8" Margin="2,1" CornerRadius="6">
-                          <Grid ColumnDefinitions="Auto,*,Auto">
-                            <TextBlock Text="{Binding Icon}" FontSize="18" VerticalAlignment="Center" Margin="0,0,12,0" />
-                            <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="14" VerticalAlignment="Center" />
-                            <TextBlock Grid.Column="2" FontSize="12" Foreground="#888" VerticalAlignment="Center">
-                              <TextBlock.Text>
-                                <MultiBinding StringFormat="需要 {0} 人">
-                                  <Binding Path="Capacity" />
-                                </MultiBinding>
-                              </TextBlock.Text>
-                            </TextBlock>
-                          </Grid>
-                        </Border>
-                      </DataTemplate>
-                    </ListBox.ItemTemplate>
-                  </ListBox>
-                  <TextBlock Grid.Row="3" Text="{Binding Teacher.DutyStatus}" Classes="hint" Margin="0,8,0,0" />
-                  <!-- 今日值日安排 -->
-                  <ListBox Grid.Row="4" ItemsSource="{Binding Teacher.DutyToday}" Background="White"
-                           BorderBrush="#E0E4E8" BorderThickness="1" CornerRadius="8" MaxHeight="200">
-                    <ListBox.ItemTemplate>
-                      <DataTemplate x:CompileBindings="False">
-                        <Border Padding="12,6" Margin="2,1" CornerRadius="6">
-                          <Grid ColumnDefinitions="*,*">
-                            <TextBlock Text="{Binding Student}" FontSize="13" VerticalAlignment="Center" FontWeight="SemiBold" />
-                            <TextBlock Grid.Column="1" Text="{Binding Post}" FontSize="12" Foreground="#666" VerticalAlignment="Center" />
-                          </Grid>
-                        </Border>
-                      </DataTemplate>
-                    </ListBox.ItemTemplate>
-                  </ListBox>
-                </Grid>
-              </Panel>
-
-              <!-- 座位面板 -->
-              <Panel IsVisible="{Binding Teacher.IsSeats}">
-                <Grid RowDefinitions="Auto,Auto,1*" Margin="24,20,24,16">
-                  <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12" Margin="0,0,0,12">
-                    <TextBlock Classes="page-title" Text="座位编排" FontSize="18" VerticalAlignment="Center" />
-                    <Button Content="随机排座" Padding="12,6" CornerRadius="6"
-                            Background="#4285f4" Foreground="White"
-                            Command="{Binding Teacher.SeatChart.RandomAssignCommand}" />
-                    <Button Content="清空" Padding="12,6" CornerRadius="6"
-                            Background="#ea4335" Foreground="White"
-                            Command="{Binding Teacher.SeatChart.ClearAllCommand}" />
-                    <Button Content="保存" Padding="12,6" CornerRadius="6"
-                            Background="#34a853" Foreground="White"
-                            Command="{Binding Teacher.SeatChart.SaveCommand}" />
-                    <TextBlock Text="{Binding Teacher.SeatChart.Status}" Classes="hint" VerticalAlignment="Center" />
-                  </StackPanel>
-                  <TextBlock Grid.Row="1" Text="点击空位分配下一个学生，点击已占用座位移除" Classes="hint" Margin="0,0,0,8" />
-                  <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                    <ItemsControl ItemsSource="{Binding Teacher.SeatChart.Seats}">
-                      <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                          <UniformGrid Columns="{Binding #Root.DataContext.Teacher.SeatChart.Cols}" />
-                        </ItemsPanelTemplate>
-                      </ItemsControl.ItemsPanel>
-                      <ItemsControl.ItemTemplate>
-                        <DataTemplate x:CompileBindings="False">
-                          <Button Classes="student" Content="{Binding DisplayText}"
-                                  Width="100" Height="52" Margin="3"
-                                  Command="{Binding TapCommand}" CommandParameter="{Binding}"
-                                  Background="{Binding IsEmpty, Converter={x:Static conv:SeatBgConverter.Instance}}" />
-                        </DataTemplate>
-                      </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                  </ScrollViewer>
-                </Grid>
-              </Panel>
-
-              <!-- 课表编辑器面板 -->
-              <Panel IsVisible="{Binding Teacher.IsTimetable}">
-                <Grid RowDefinitions="Auto,Auto,1*" Margin="24,20,24,16">
-                  <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12" Margin="0,0,0,12">
-                    <TextBlock Classes="page-title" Text="课表编辑器" FontSize="18" VerticalAlignment="Center" />
-                    <Button Content="+ 添加科目" Padding="12,6" CornerRadius="6"
-                            Background="#34a853" Foreground="White"
-                            Command="{Binding Timetable.AddSubjectCommand}" />
-                    <Button Content="💾 保存" Padding="12,6" CornerRadius="6"
-                            Background="#4285f4" Foreground="White"
-                            Command="{Binding Timetable.SaveCommand}" />
-                    <TextBlock Text="{Binding Timetable.Status}" Classes="hint" VerticalAlignment="Center" />
-                  </StackPanel>
-                  <Grid Grid.Row="1" ColumnDefinitions="Auto,*" Margin="0,0,0,12">
-                    <TextBlock Grid.Column="0" Text="选择周几：" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0" />
-                    <ComboBox Grid.Column="1" ItemsSource="{Binding Timetable.WeekDays}"
-                              SelectedItem="{Binding Timetable.SelectedDay}" Width="120" HorizontalAlignment="Left" />
-                  </Grid>
-                  <!-- 科目列表 -->
-                  <Border Grid.Row="2" Background="White" CornerRadius="8" BorderBrush="#E0E4E8" BorderThickness="1" Padding="12">
-                    <DockPanel>
-                      <TextBlock DockPanel.Dock="Top" Classes="page-title" Text="科目列表" Margin="0,0,0,8" />
-                      <ItemsControl ItemsSource="{Binding Timetable.Subjects}">
-                        <ItemsControl.ItemTemplate>
-                          <DataTemplate x:CompileBindings="False">
-                            <Border Padding="10,6" Margin="0,2" CornerRadius="6" Background="#f8f9fa">
-                              <Grid ColumnDefinitions="Auto,*,Auto">
-                                <Border Grid.Column="0" Width="14" Height="14" CornerRadius="3"
-                                        Background="{Binding Color}" Margin="0,0,8,0" VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13" VerticalAlignment="Center" />
-                              </Grid>
-                            </Border>
-                          </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                      </ItemsControl>
-                    </DockPanel>
-                  </Border>
-                </Grid>
-              </Panel>
-            </Grid>
+              <!-- 内嵌网页（Windows + WebView2） -->
+              <controls:WebViewHost x:Name="WebHost" Source="{Binding WebPanelUrl}"
+                                    IsVisible="{Binding WebPanelReady}" />
+            </Panel>
           </Panel>
 
           <!-- 底部状态栏 -->

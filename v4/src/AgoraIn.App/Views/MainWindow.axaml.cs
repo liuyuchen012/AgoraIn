@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using AgoraIn.App.Models;
 using AgoraIn.App.ViewModels;
@@ -18,6 +19,41 @@ public partial class MainWindow : Window
         _vm = new MainWindowViewModel();
         DataContext = _vm;
         _vm.RequestShowStudentList += OnShowStudentList;
+
+        // 内嵌网页面板：初始化失败时降级为「用浏览器打开」
+        WebHost.LoadFailed += OnWebHostLoadFailed;
+    }
+
+    // ═══ 内嵌服务端网页（控制 / 教师模式）═══
+
+    private void OnWebHostLoadFailed(object? sender, string message)
+    {
+        if (_vm == null) return;
+        _vm.WebPanelReady = false;
+        _vm.WebPanelHint = message;
+    }
+
+    private void OnOpenWebPanelInBrowser(object? sender, RoutedEventArgs e)
+    {
+        var url = _vm?.WebPanelUrl ?? Core.AppConstants.WebAdminUrl;
+        OpenInBrowser(url);
+    }
+
+    private static void OpenInBrowser(string url)
+    {
+        try
+        {
+            if (OperatingSystem.IsWindows())
+                Process.Start(new ProcessStartInfo("cmd", $"/c start {url}") { CreateNoWindow = true });
+            else if (OperatingSystem.IsMacOS())
+                Process.Start("open", url);
+            else
+                Process.Start("xdg-open", url);
+        }
+        catch
+        {
+            // 无可用浏览器时静默失败（地址已在界面上展示）
+        }
     }
 
     // ═══ 标签栏 ═══
@@ -45,42 +81,11 @@ public partial class MainWindow : Window
         if (DataContext is MainWindowViewModel vm) vm.CycleMode();
     }
 
-    // ═══ 教师模式导航 ═══
-
-    private void OnTeacherNavClick(object? sender, PointerPressedEventArgs e)
-    {
-        if (sender is TextBlock tb && tb.Tag is string nav && DataContext is MainWindowViewModel vm)
-        {
-            vm.Teacher.SelectedNav = nav;
-            // 更新导航高亮
-            if (tb.Parent is StackPanel sp)
-            {
-                foreach (var child in sp.Children.OfType<TextBlock>())
-                {
-                    child.Foreground = child.Tag?.ToString() == nav
-                        ? new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#4285f4"))
-                        : new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#888888"));
-                    child.FontWeight = child.Tag?.ToString() == nav
-                        ? Avalonia.Media.FontWeight.SemiBold : Avalonia.Media.FontWeight.Normal;
-                }
-            }
-        }
-    }
-
-    // ═══ 集控平台 ═══
-
-    private void OnServerPanelClick(object? sender, RoutedEventArgs e)
-    {
-        var panel = new ServerWebPanel();
-        panel.ShowDialog(this);
-    }
-
     // ═══ 设置 ═══
 
     private void OnSettingsClick(object? sender, RoutedEventArgs e)
     {
         if (_vm == null) return;
-        var config = new Services.AppConfig(AppDomain.CurrentDomain.BaseDirectory);
         var vm = new SettingsDialogViewModel
         {
             ButtonRows = _vm.ButtonRows,
@@ -93,23 +98,18 @@ public partial class MainWindow : Window
                 Core.AppMode.Teacher => 2,
                 _ => 0,
             },
-            ServerIp = config.ServerIp,
-            ServerPort = config.ServerPort,
-            OnlineMode = config.OnlineMode,
+            TimetableDriven = _vm.TimetableDriver.Enabled,
+            RemindMinutesBefore = _vm.TimetableDriver.RemindMinutesBefore,
         };
+
         var dialog = new SettingsDialog();
         dialog.DataContext = vm;
-        dialog.ShowDialog(this);
-    }
-
-    // ═══ 日历 ═══
-
-    private void OnCalendarDayClick(object? sender, PointerPressedEventArgs e)
-    {
-        if (sender is Border border && border.Tag is CalendarDayItem day && DataContext is MainWindowViewModel vm)
+        var closed = dialog.ShowDialog(this);
+        _ = closed.ContinueWith(_ =>
         {
-            vm.ClassHours.SelectCalendarDay(day);
-        }
+            // 保存设置（对话框关闭后统一落盘）
+            _vm.ApplySettings(vm);
+        }, TaskScheduler.FromCurrentSynchronizationContext());
     }
 
     // ═══ 学生管理 ═══

@@ -14,7 +14,7 @@ public partial class ProfilePage : ContentPage
         UsernameLabel.Text = user?.Username ?? "未登录";
         RoleLabel.Text = user == null ? "" : $"角色：{RoleText(user.Role)}";
         ServerEntry.Text = App.Api.BaseUrl;
-        ServerLabel.Text = string.IsNullOrEmpty(App.Api.BaseUrl) ? "" : $"服务器：{App.Api.BaseUrl}";
+        ServerLabel.Text = $"服务器：{App.Api.BaseUrl}";
         LoginButton.IsVisible = !App.Api.IsLoggedIn;
         LogoutButton.IsVisible = App.Api.IsLoggedIn;
     }
@@ -27,21 +27,6 @@ public partial class ProfilePage : ContentPage
         "student" => "学生",
         _ => role,
     };
-
-    private async void OnSaveServerClicked(object? sender, EventArgs e)
-    {
-        var url = ServerEntry.Text?.Trim() ?? "";
-        if (string.IsNullOrEmpty(url))
-        {
-            await DisplayAlertAsync("提示", "请输入服务器地址", "知道了");
-            return;
-        }
-        if (!url.StartsWith("http://") && !url.StartsWith("https://"))
-            url = "http://" + url;
-
-        App.Api.BaseUrl = url;
-        await DisplayAlertAsync("已保存", $"服务器地址已更新：{url}", "好的");
-    }
 
     private async void OnLoginClicked(object? sender, EventArgs e)
         => await Shell.Current.GoToAsync("//login");

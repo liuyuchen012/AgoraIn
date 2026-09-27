@@ -9,6 +9,12 @@
 | Node.js | ≥ 20（仅构建 Web 管理面板） |
 | 数据库 | SQLite（默认，零配置）/ 可选 PostgreSQL |
 | 端口 | 服务端默认 **5250**；Web 开发服务器 5173 |
+| 域名 | **`agorain.615mc.cn`**（客户端硬编码，必须部署在此域名下） |
+| WebView2 | 桌面端控制/教师模式内嵌网页依赖；Win10/11 通常已随 Edge 预装（缺失时自动降级为浏览器打开） |
+
+> ⚠️ **服务器地址已锁定**：桌面端、小程序、移动端全部硬编码连接 `https://agorain.615mc.cn`，
+> 客户端不提供服务器地址配置入口。服务端必须部署在该域名（HTTPS）下，否则客户端无法使用。
+> 本地联调时在 hosts 中把该域名指向内网服务器即可，无需改动客户端。
 
 ## 2. 服务端部署
 
@@ -83,6 +89,48 @@ sudo systemctl daemon-reload && sudo systemctl enable --now agorain
 
 > **安全提示**：`Jwt:Key` 与 `DeepSeek:ApiKey` 属敏感信息，生产环境建议用环境变量覆盖
 > （`Jwt__Key`、`DeepSeek__ApiKey`），不要提交到仓库。
+
+### 2.5 域名与 HTTPS 反向代理
+
+客户端硬编码访问 `https://agorain.615mc.cn`，因此需在该域名上配置反向代理到本机 5250：
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name agorain.615mc.cn;
+
+    ssl_certificate     /etc/letsencrypt/live/agorain.615mc.cn/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/agorain.615mc.cn/privkey.pem;
+
+    # Web 管理面板 + REST API
+    location / {
+        proxy_pass http://127.0.0.1:5250;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # SignalR 实时推送（必须开启 WebSocket 升级）
+    location /hub/ {
+        proxy_pass http://127.0.0.1:5250;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host       $host;
+        proxy_read_timeout 3600s;
+    }
+
+    # 答题卡照片/资源上传体积上限
+    client_max_body_size 200m;
+}
+```
+
+> 若用 Caddy，等价配置为 `agorain.615mc.cn { reverse_proxy 127.0.0.1:5250 }`（WebSocket 自动处理）。
+
+**验证**：`curl -I https://agorain.615mc.cn/api/v4/setup/status` 应返回 200。
+
+**本地联调**：不改客户端，在 hosts 中加入 `192.168.31.3 agorain.615mc.cn` 即可让客户端连到内网服务器。
 
 ## 3. Web 管理面板部署
 

@@ -34,6 +34,7 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(CurrentMode))]
     [NotifyPropertyChangedFor(nameof(IsLargeScreen))] [NotifyPropertyChangedFor(nameof(IsControlMode))]
     [NotifyPropertyChangedFor(nameof(IsTeacherMode))]
+    [NotifyPropertyChangedFor(nameof(IsWebPanelMode))] [NotifyPropertyChangedFor(nameof(WebPanelUrl))]
     private ModeOption _selectedMode;
 
     public AppMode CurrentMode => SelectedMode.Mode;
@@ -41,6 +42,25 @@ public partial class MainWindowViewModel : ObservableObject
     public bool IsControlMode => CurrentMode == AppMode.Control;
     public bool IsTeacherMode => CurrentMode == AppMode.Teacher;
     public bool IsTimetable => Teacher.SelectedNav == "课表";
+
+    // ═══ 内嵌服务端 Web 面板（控制 / 教师模式）═══
+
+    /// <summary>控制/教师模式均使用内嵌网页（大屏模式保留原生打卡界面）。</summary>
+    public bool IsWebPanelMode => CurrentMode is AppMode.Control or AppMode.Teacher;
+
+    /// <summary>当前模式对应的服务端页面地址（服务器地址已锁定为官方域名）。</summary>
+    public string WebPanelUrl => Core.AppConstants.ServerBaseUrl + (CurrentMode switch
+    {
+        AppMode.Teacher => Core.AppConstants.WebAdminTeacherPath,
+        _ => Core.AppConstants.WebAdminControlPath,
+    });
+
+    private bool _webPanelReady = Controls.WebViewHost.IsSupported;
+    /// <summary>内嵌网页是否可用（非 Windows 或 WebView2 缺失时为 false，显示降级提示）。</summary>
+    public bool WebPanelReady { get => _webPanelReady; set => SetProperty(ref _webPanelReady, value); }
+
+    private string _webPanelHint = "当前系统不支持内嵌浏览器（仅 Windows + WebView2 支持）。可在浏览器中打开下方地址使用完整管理功能。";
+    public string WebPanelHint { get => _webPanelHint; set => SetProperty(ref _webPanelHint, value); }
 
     /// <summary>循环切换模式：大屏→控制→教师→大屏。</summary>
     public void CycleMode()
@@ -52,6 +72,30 @@ public partial class MainWindowViewModel : ObservableObject
             _ => AppMode.LargeScreen,
         };
         SelectedMode = ModeOptions.First(o => o.Mode == next);
+    }
+
+    /// <summary>应用设置对话框的修改（对话框关闭后调用）并落盘。</summary>
+    public void ApplySettings(SettingsDialogViewModel vm)
+    {
+        ButtonRows = vm.ButtonRows;
+        ButtonCols = vm.ButtonCols;
+        ClassHours.HoursPerHour = vm.HoursPerHour;
+        ClassHours.AutoDeduct = vm.AutoDeduct;
+
+        TimetableDriver.Enabled = vm.TimetableDriven;
+        TimetableDriver.RemindMinutesBefore = vm.RemindMinutesBefore;
+
+        _appConfig.ButtonRows = vm.ButtonRows;
+        _appConfig.ButtonCols = vm.ButtonCols;
+        _appConfig.HoursPerHour = vm.HoursPerHour;
+        _appConfig.AutoDeduct = vm.AutoDeduct;
+        _appConfig.TimetableDriven = vm.TimetableDriven;
+        _appConfig.RemindMinutesBefore = vm.RemindMinutesBefore;
+        _appConfig.StartupMode = vm.StartupModeIndex;
+        _appConfig.OnlineMode = vm.OnlineMode;
+        _appConfig.Save();
+
+        StatusMessage = "设置已保存";
     }
 
     // ═══ 在线状态 ═══

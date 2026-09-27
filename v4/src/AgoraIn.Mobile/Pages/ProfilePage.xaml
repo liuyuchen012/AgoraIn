@@ -18,13 +18,15 @@
                 </VerticalStackLayout>
             </Border>
 
+            <!-- 服务器地址固定为官方域名，不可修改 -->
             <Border BackgroundColor="White" StrokeThickness="0"
                     StrokeShape="RoundRectangle 14" Padding="20">
-                <VerticalStackLayout Spacing="12">
+                <VerticalStackLayout Spacing="8">
                     <Label Text="服务器" FontSize="16" FontAttributes="Bold" />
-                    <Entry x:Name="ServerEntry" Placeholder="http://192.168.1.100:5250" Keyboard="Url" />
-                    <Button Text="保存并重连" BackgroundColor="#e8f0fe" TextColor="#4285f4"
-                            CornerRadius="8" HeightRequest="42" Clicked="OnSaveServerClicked" />
+                    <Label x:Name="ServerEntry" Text="https://agorain.615mc.cn"
+                           FontSize="14" TextColor="#4285f4" />
+                    <Label Text="本应用统一连接官方服务器，不支持自定义服务器地址"
+                           FontSize="12" TextColor="#999999" />
                 </VerticalStackLayout>
             </Border>
 

@@ -4,6 +4,9 @@ namespace AgoraIn.App.Services;
 
 /// <summary>
 /// 应用全局配置持久化（data/app-config.json）。
+///
+/// 注意：**服务端地址不再可配置**——所有客户端强制连接官方服务器
+/// <see cref="Core.AppConstants.ServerHost"/>（产品决策，禁止使用第三方服务器）。
 /// </summary>
 public sealed class AppConfig
 {
@@ -15,15 +18,18 @@ public sealed class AppConfig
     public int ButtonCols { get; set; } = 6;
     public double HoursPerHour { get; set; } = 1;
     public bool AutoDeduct { get; set; }
-    public string ServerIp { get; set; } = "";
-    public int ServerPort { get; set; } = 5250;
-    public string ServerPassword { get; set; } = "";
-    public bool OnlineMode { get; set; }
+    public bool OnlineMode { get; set; } = true;
     public string AdminPasswordHash { get; set; } = "";
 
     // 课表驱动行为（上下课自动切换模式 / 上课前点名提醒）
     public bool TimetableDriven { get; set; }
     public int RemindMinutesBefore { get; set; } = 2;
+
+    /// <summary>服务端基地址（只读，恒为官方域名）。</summary>
+    public static string ServerBaseUrl => Core.AppConstants.ServerBaseUrl;
+
+    /// <summary>服务端主机名（只读）。</summary>
+    public static string ServerHost => Core.AppConstants.ServerHost;
 
     public AppConfig(string basePath)
     {
