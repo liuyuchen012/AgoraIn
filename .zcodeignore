@@ -1,0 +1,108 @@
+# ═══════════════════════════════════════════════════════════
+# AgoraIn v4.0 分支（闭源商业版）
+#
+# 本分支只包含 v4/ 目录下的新代码。历史版本（v3.2 及以前，GPLv3）的
+# 目录与文件在本分支**不跟踪**，仍以只读形式保留在本地工作区供参考。
+#
+# 注意：下列历史版本条目均以 `/` 开头限定在**仓库根目录**，
+#       避免误伤 v4/ 下的同名子目录（如 v4/docs、v4/src/AgoraIn.Server）。
+# ═══════════════════════════════════════════════════════════
+
+## .NET 构建产物（任意层级）
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.log
+*.db
+
+## IDE
+.vs/
+.vscode/
+.idea/
+.codebuddy/
+.mimocode/
+
+## OS
+Thumbs.db
+.DS_Store
+
+## 本地数据与产物
+release/
+publish/
+out/
+*.dat
+name.txt
+config.json
+client_key.pem
+client_uuid.txt
+CHANGELOG.md
+
+## ═══ 历史版本目录（v3.2 及以前，仅根目录，本分支不跟踪） ═══
+/AgoraInPro/
+/Server/
+/Client.Mobile/
+/Shared/
+/ClassCall/
+/Tools/
+/AgoraIn.ClassIslandPlugin/
+/docs/
+/screenshots/
+/photo/
+/.playwright-cli/
+/.video_agent/
+
+## ═══ 历史版本文件（v3.2 及以前，仅根目录，本分支不跟踪） ═══
+/CheckIn.slnx
+/RELEASE-v2.8.34.md
+/LICENSE
+/大屏模式主窗口.svg
+/控制模式主窗口.svg
+/测试表格.md
+/测试表格.pdf
+/结果.md
+/结果2.md
+/_check_cipx.ps1
+/_pack_cipx.ps1
+/_template.csproj
+/$null
+
+## 历史 CI 与开源期配置（v4 使用 .github/workflows/v4-build.yml）
+/.github/workflows/build.yml
+/.github/FUNDING.yml
+
+## 本地备份（v3 README 存档，不入库）
+/README.v3.md.bak
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+node_modules/
+bower_components/
+jspm_packages/
+__pycache__/
+site-packages/
+venv/
+coverage/
+htmlcov/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.egg-info/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）

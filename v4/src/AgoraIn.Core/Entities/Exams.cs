@@ -91,6 +91,9 @@ public sealed class Question
     /// <summary>题型。</summary>
     public QuestionType Type { get; set; } = QuestionType.SingleChoice;
 
+    /// <summary>题目内容/题干。</summary>
+    public string? Content { get; set; }
+
     /// <summary>分值。</summary>
     public double Score { get; set; } = 1;
 

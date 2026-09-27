@@ -27,6 +27,21 @@ public class ExamsController : ControllerBase
         _ai = ai;
     }
 
+    /// <summary>试卷列表。</summary>
+    [HttpGet("papers")]
+    public async Task<IActionResult> ListPapers(CancellationToken ct)
+    {
+        var papers = await _db.ExamPapers
+            .OrderByDescending(p => p.CreatedAt)
+            .Select(p => new
+            {
+                p.Id, p.Title, p.Subject, p.ClassId, p.TotalScore, p.CreatedBy, p.CreatedAt,
+                questionCount = _db.Questions.Count(q => q.PaperId == p.Id),
+            })
+            .ToListAsync(ct);
+        return Ok(papers);
+    }
+
     /// <summary>创建试卷。</summary>
     [HttpPost("papers")]
     public async Task<IActionResult> CreatePaper([FromBody] ExamPaper paper)
@@ -35,6 +50,81 @@ public class ExamsController : ControllerBase
         await _db.SaveChangesAsync();
         return Created("", paper);
     }
+
+    /// <summary>更新试卷。</summary>
+    [HttpPut("papers/{paperId}")]
+    public async Task<IActionResult> UpdatePaper(string paperId, [FromBody] ExamPaper update)
+    {
+        var paper = await _db.ExamPapers.FindAsync(paperId);
+        if (paper == null) return NotFound();
+        paper.Title = update.Title ?? paper.Title;
+        paper.Subject = update.Subject ?? paper.Subject;
+        paper.ClassId = update.ClassId;
+        await _db.SaveChangesAsync();
+        return Ok(paper);
+    }
+
+    /// <summary>删除试卷（级联删除题目）。</summary>
+    [HttpDelete("papers/{paperId}")]
+    public async Task<IActionResult> DeletePaper(string paperId)
+    {
+        var paper = await _db.ExamPapers.FindAsync(paperId);
+        if (paper == null) return NotFound();
+        var questions = await _db.Questions.Where(q => q.PaperId == paperId).ToListAsync();
+        _db.Questions.RemoveRange(questions);
+        _db.ExamPapers.Remove(paper);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    /// <summary>试卷下的题目列表。</summary>
+    [HttpGet("papers/{paperId}/questions")]
+    public async Task<IActionResult> ListQuestions(string paperId)
+    {
+        var questions = await _db.Questions
+            .Where(q => q.PaperId == paperId)
+            .OrderBy(q => q.Index)
+            .ToListAsync();
+        return Ok(questions);
+    }
+
+    /// <summary>添加题目。</summary>
+    [HttpPost("papers/{paperId}/questions")]
+    public async Task<IActionResult> CreateQuestion(string paperId, [FromBody] Question question)
+    {
+        question.PaperId = paperId;
+        _db.Questions.Add(question);
+        await _db.SaveChangesAsync();
+        // 更新试卷总分
+        var total = await _db.Questions.Where(q => q.PaperId == paperId).SumAsync(q => q.Score);
+        var paper = await _db.ExamPapers.FindAsync(paperId);
+        if (paper != null) { paper.TotalScore = total; await _db.SaveChangesAsync(); }
+        return Created("", question);
+    }
+
+    /// <summary>更新题目。</summary>
+    [HttpPut("papers/{paperId}/questions/{questionId}")]
+    public async Task<IActionResult> UpdateQuestion(string paperId, string questionId, [FromBody] Question update)
+    {
+        var q = await _db.Questions.FindAsync(questionId);
+        if (q == null || q.PaperId != paperId) return NotFound();
+        q.Index = update.Index;
+        q.Type = update.Type;
+        q.Score = update.Score;
+        q.Content = update.Content;
+        q.StandardAnswer = update.StandardAnswer;
+        q.OptionsJson = update.OptionsJson;
+        q.Rubric = update.Rubric;
+        q.AiGradingEnabled = update.AiGradingEnabled;
+        await _db.SaveChangesAsync();
+        // 更新试卷总分
+        var total = await _db.Questions.Where(qq => qq.PaperId == paperId).SumAsync(qq => qq.Score);
+        var paper = await _db.ExamPapers.FindAsync(paperId);
+        if (paper != null) { paper.TotalScore = total; await _db.SaveChangesAsync(); }
+        return Ok(q);
+    }
+
+    /// <summary>提交答题卡图片并触发识别（考号涂卡 + 客观题 OMR）。</summary>
 
     /// <summary>上传答题卡图片并触发识别（考号涂卡 + 客观题 OMR）。</summary>
     [HttpPost("submissions")]
