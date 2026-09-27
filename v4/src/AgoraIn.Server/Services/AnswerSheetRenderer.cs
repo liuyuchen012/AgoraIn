@@ -1,5 +1,6 @@
 using System.Text;
 using AgoraIn.Core.Entities;
+using QRCoder;
 
 namespace AgoraIn.Server.Services;
 
@@ -132,7 +133,7 @@ public static class AnswerSheetRenderer
       <span style="font-size:7pt">请用 2B 铅笔填涂，保持卡面整洁</span>
     </div>
     {{(string.IsNullOrEmpty(studentNo) ? "" : $"<div class=\"barcode\">{Escape(studentNo)}</div>")}}
-    <div class="qr">二维码<br>{{Escape(paper.Id)}}<br>P{{pageIndex}}</div>
+    <div class="qr">{{BuildQrCode(paper.Id, pageIndex)}}</div>
   </div>
 </div>
 </body>
@@ -233,6 +234,26 @@ public static class AnswerSheetRenderer
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>生成 QR 码图片（base64 内嵌 HTML）。</summary>
+    private static string BuildQrCode(string paperId, int pageIndex)
+    {
+        try
+        {
+            var payload = $"agorain:sheet:{paperId}:p{pageIndex}";
+            using var qrGenerator = new QRCodeGenerator();
+            var qrData = qrGenerator.CreateQrCode(payload, QRCodeGenerator.ECCLevel.M);
+            var pngQr = new PngByteQRCode(qrData);
+            var png = pngQr.GetGraphic(4);
+            var base64 = Convert.ToBase64String(png);
+            return $"<img src=\"data:image/png;base64,{base64}\" style=\"width:16mm;height:16mm\" />";
+        }
+        catch (Exception ex)
+        {
+            // QRCoder 可能在某些环境不可用，回退为文本
+            return $"<div style=\"font-size:6pt;text-align:center;line-height:1.2\">QR<br/>{Escape(paperId[..8])}…<br/>P{pageIndex}</div>";
+        }
     }
 
     private static string Escape(string s)
