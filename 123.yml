@@ -1,0 +1,73 @@
+version: 1
+subjects:
+- name: 语文
+  simplified_name: 语
+  teacher: ''
+  room: ''
+- name: ''
+  simplified_name: ''
+  teacher: ''
+  room: ''
+schedules:
+- name: 周日
+  classes:
+  - subject: ''
+    start_time: 08:00:00
+    end_time: 08:45:00
+  - subject: ''
+    start_time: 09:00:00
+    end_time: 09:45:00
+  - subject: ''
+    start_time: 10:00:00
+    end_time: 10:45:00
+  - subject: ''
+    start_time: 11:00:00
+    end_time: 11:45:00
+  - subject: ''
+    start_time: 13:00:00
+    end_time: 13:45:00
+  - subject: ''
+    start_time: 14:00:00
+    end_time: 14:45:00
+  - subject: ''
+    start_time: 15:00:00
+    end_time: 15:45:00
+  - subject: ''
+    start_time: 16:00:00
+    end_time: 16:45:00
+  - subject: ''
+    start_time: 17:00:00
+    end_time: 17:45:00
+  enable_day: 7
+  weeks: all
+- name: 周日
+  classes:
+  - subject: 语文
+    start_time: 08:00:00
+    end_time: 08:45:00
+  - subject: 语文
+    start_time: 09:00:00
+    end_time: 09:45:00
+  - subject: 语文
+    start_time: 10:00:00
+    end_time: 10:45:00
+  - subject: 语文
+    start_time: 11:00:00
+    end_time: 11:45:00
+  - subject: 语文
+    start_time: 13:00:00
+    end_time: 13:45:00
+  - subject: 语文
+    start_time: 14:00:00
+    end_time: 14:45:00
+  - subject: 语文
+    start_time: 15:00:00
+    end_time: 15:45:00
+  - subject: 语文
+    start_time: 16:00:00
+    end_time: 16:45:00
+  - subject: 语文
+    start_time: 17:00:00
+    end_time: 17:45:00
+  enable_day: 7
+  weeks: all
