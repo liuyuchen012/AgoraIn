@@ -17,6 +17,10 @@
             ContentTemplate="{DataTemplate pages:ScanPage}"
             Route="scan" />
         <ShellContent
+            Title="答题卡"
+            ContentTemplate="{DataTemplate pages:AnswerSheetScannerPage}"
+            Route="scanner" />
+        <ShellContent
             Title="记录"
             ContentTemplate="{DataTemplate pages:HistoryPage}"
             Route="history" />

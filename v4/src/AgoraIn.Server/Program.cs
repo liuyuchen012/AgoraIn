@@ -60,6 +60,18 @@ builder.Services.AddSignalR();
 // ── DeepSeek AI ──
 builder.Services.AddHttpClient<DeepSeekGradingService>();
 
+// ── 离线授权 ──
+builder.Services.AddScoped<LicenseService>();
+
+// ── SMTP 邮件 ──
+builder.Services.AddSingleton<EmailSender>();
+builder.Services.AddSingleton<EmailRateLimiter>();
+builder.Services.AddHostedService<EmailCodeCleaner>();
+
+// ── 更新检查（GitHub Releases 代理 + 缓存）──
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton<UpdateService>();
+
 // ── Controllers + Swagger ──
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

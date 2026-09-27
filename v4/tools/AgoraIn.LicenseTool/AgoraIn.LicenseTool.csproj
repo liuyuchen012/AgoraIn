@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- AgoraIn 授权码签发工具（离线使用，私钥只保存在本机，不入库）。
+       用法见 README：keygen / fingerprint / generate / verify -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>agorain-license</AssemblyName>
+    <RootNamespace>AgoraIn.LicenseTool</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AgoraIn.Core\AgoraIn.Core.csproj" />
+  </ItemGroup>
+
+</Project>

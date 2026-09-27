@@ -46,6 +46,36 @@ const router = createRouter({
           meta: { title: '课时管理' },
         },
         {
+          path: 'notices',
+          name: 'notices',
+          component: () => import('@/views/NoticesView.vue'),
+          meta: { title: '通知公告' },
+        },
+        {
+          path: 'resources',
+          name: 'resources',
+          component: () => import('@/views/ResourcesView.vue'),
+          meta: { title: '资源库' },
+        },
+        {
+          path: 'exams',
+          name: 'exams',
+          component: () => import('@/views/ExamsView.vue'),
+          meta: { title: '试卷管理' },
+        },
+        {
+          path: 'users',
+          name: 'users',
+          component: () => import('@/views/UsersView.vue'),
+          meta: { title: '用户管理' },
+        },
+        {
+          path: 'license',
+          name: 'license',
+          component: () => import('@/views/LicenseView.vue'),
+          meta: { title: '授权管理' },
+        },
+        {
           path: 'settings',
           name: 'settings',
           component: () => import('@/views/SettingsView.vue'),

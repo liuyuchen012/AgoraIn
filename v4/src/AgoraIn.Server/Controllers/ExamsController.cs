@@ -1,5 +1,7 @@
 using AgoraIn.Core.Entities;
+using AgoraIn.Core.Security;
 using AgoraIn.Server.Models;
+using AgoraIn.Server.Security;
 using AgoraIn.Server.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,6 +15,7 @@ namespace AgoraIn.Server.Controllers;
 [ApiController]
 [Route("api/v4/exams")]
 [Authorize]
+[RequirePermission(Permissions.ExamsManage)]
 public class ExamsController : ControllerBase
 {
     private readonly ServerDbContext _db;

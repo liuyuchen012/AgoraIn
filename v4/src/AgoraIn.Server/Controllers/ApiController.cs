@@ -1,3 +1,5 @@
+using AgoraIn.Core.Security;
+using AgoraIn.Server.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -10,6 +12,7 @@ namespace AgoraIn.Server.Controllers;
 [ApiController]
 [Route("api/v4/classes")]
 [Authorize]
+[RequirePermission(Permissions.ClassesManage)]
 public class ClassesController : ControllerBase
 {
     private readonly ServerDbContext _db;
@@ -61,6 +64,7 @@ public class ClassesController : ControllerBase
 [ApiController]
 [Route("api/v4/students")]
 [Authorize]
+[RequirePermission(Permissions.ClassesManage)]
 public class StudentsController : ControllerBase
 {
     private readonly ServerDbContext _db;
@@ -117,6 +121,7 @@ public class StudentsController : ControllerBase
 [ApiController]
 [Route("api/v4/checkin")]
 [Authorize]
+[RequirePermission(Permissions.CheckInOperate)]
 public class CheckInController : ControllerBase
 {
     private readonly ServerDbContext _db;
@@ -154,6 +159,7 @@ public class CheckInController : ControllerBase
 [ApiController]
 [Route("api/v4/classhours")]
 [Authorize]
+[RequirePermission(Permissions.ClassHoursManage)]
 public class ClassHoursController : ControllerBase
 {
     private readonly ServerDbContext _db;
@@ -187,6 +193,7 @@ public class ClassHoursController : ControllerBase
 [ApiController]
 [Route("api/v4/devices")]
 [Authorize]
+[RequirePermission(Permissions.DevicesManage)]
 public class DevicesController : ControllerBase
 {
     private readonly ServerDbContext _db;
@@ -196,11 +203,26 @@ public class DevicesController : ControllerBase
     public async Task<IActionResult> List()
         => Ok(await _db.Devices.ToListAsync());
 
+    /// <summary>注册设备（受授权限制：未激活/已过期/超出设备上限时拒绝）。</summary>
     [HttpPost("register")]
     [AllowAnonymous]
-    public async Task<IActionResult> Register([FromBody] DeviceRegisterRequest req)
+    public async Task<IActionResult> Register(
+        [FromBody] DeviceRegisterRequest req,
+        [FromServices] Services.LicenseService license,
+        CancellationToken ct)
     {
-        var device = await _db.Devices.FirstOrDefaultAsync(d => d.DeviceUuid == req.Uuid);
+        var device = await _db.Devices.FirstOrDefaultAsync(d => d.DeviceUuid == req.Uuid, ct);
+
+        // 仅「新设备」受授权限制：已注册设备（含重连）不受影响，避免授权到期直接停服
+        if (device == null)
+        {
+            var denial = await license.CheckDeviceRegistrationAsync(ct);
+            if (denial != null)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { error = denial });
+            }
+        }
+
         if (device == null)
         {
             device = new Device { DeviceUuid = req.Uuid, DeviceName = req.Name, PublicKey = req.PublicKey };
@@ -211,7 +233,8 @@ public class DevicesController : ControllerBase
             device.DeviceName = req.Name;
             device.LastSeen = DateTime.Now;
         }
-        await _db.SaveChangesAsync();
+
+        await _db.SaveChangesAsync(ct);
         return Ok(new { deviceId = device.Id });
     }
 

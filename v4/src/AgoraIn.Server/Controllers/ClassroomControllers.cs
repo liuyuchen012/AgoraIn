@@ -1,4 +1,6 @@
 using AgoraIn.Core.Entities;
+using AgoraIn.Core.Security;
+using AgoraIn.Server.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,6 +11,7 @@ namespace AgoraIn.Server.Controllers;
 [ApiController]
 [Route("api/v4/points")]
 [Authorize]
+[RequirePermission(Permissions.PointsManage)]
 public class PointsController : ControllerBase
 {
     private readonly ServerDbContext _db;
@@ -89,6 +92,7 @@ public class PointsController : ControllerBase
 [ApiController]
 [Route("api/v4/duty")]
 [Authorize]
+[RequirePermission(Permissions.DutyManage)]
 public class DutyController : ControllerBase
 {
     private readonly ServerDbContext _db;
@@ -135,6 +139,7 @@ public class DutyController : ControllerBase
 [ApiController]
 [Route("api/v4/notices")]
 [Authorize]
+[RequirePermission(Permissions.NoticesManage)]
 public class NoticesController : ControllerBase
 {
     private readonly ServerDbContext _db;
@@ -194,6 +199,7 @@ public class NoticesController : ControllerBase
 [ApiController]
 [Route("api/v4/resources")]
 [Authorize]
+[RequirePermission(Permissions.ResourcesManage)]
 public class ResourcesController : ControllerBase
 {
     private readonly ServerDbContext _db;
@@ -298,6 +304,7 @@ public class ResourcesController : ControllerBase
 [ApiController]
 [Route("api/v4/messages")]
 [Authorize]
+[RequirePermission(Permissions.MessagesHandle)]
 public class MessagesController : ControllerBase
 {
     private readonly ServerDbContext _db;

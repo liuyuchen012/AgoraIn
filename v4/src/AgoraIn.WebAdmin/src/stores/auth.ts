@@ -5,6 +5,7 @@ import { authApi, TOKEN_KEY, USER_KEY } from '@/api/client'
 interface UserInfo {
   username: string
   role: string
+  permissions: string[]
 }
 
 export const useAuthStore = defineStore('auth', () => {
@@ -15,13 +16,17 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isLoggedIn = computed(() => !!token.value)
   const isAdmin = computed(() => user.value?.role === 'admin')
-  const canManage = computed(() => ['admin', 'teacher'].includes(user.value?.role || ''))
+  const canManage = computed(() => ['admin', 'owner'].includes(user.value?.role || ''))
+
+  function hasPermission(perm: string) {
+    return user.value?.permissions?.includes(perm) ?? false
+  }
 
   async function login(username: string, password: string) {
-    const res: { token: string; role: string; username: string } =
+    const res: { token: string; role: string; username: string; permissions: string[] } =
       await authApi.login(username, password)
     token.value = res.token
-    user.value = { username: res.username, role: res.role }
+    user.value = { username: res.username, role: res.role, permissions: res.permissions || [] }
     localStorage.setItem(TOKEN_KEY, res.token)
     localStorage.setItem(USER_KEY, JSON.stringify(user.value))
   }
@@ -33,5 +38,5 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem(USER_KEY)
   }
 
-  return { token, user, isLoggedIn, isAdmin, canManage, login, logout }
+  return { token, user, isLoggedIn, isAdmin, canManage, hasPermission, login, logout }
 })

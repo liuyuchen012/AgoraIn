@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 
 namespace AgoraIn.Mobile;
 
@@ -14,6 +14,10 @@ public static class MauiProgram
 				fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
 				fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
 			});
+
+		// 注册服务
+		builder.Services.AddSingleton<Services.ApiClient>();
+		builder.Services.AddTransient<Pages.AnswerSheetScannerPage>();
 
 #if DEBUG
 		builder.Logging.AddDebug();

@@ -1,4 +1,6 @@
 using AgoraIn.Core.Entities;
+using AgoraIn.Core.Security;
+using AgoraIn.Server.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,6 +11,7 @@ namespace AgoraIn.Server.Controllers;
 [ApiController]
 [Route("api/v4/timetable")]
 [Authorize]
+[RequirePermission(Permissions.TimetableManage)]
 public class TimetableController : ControllerBase
 {
     private readonly ServerDbContext _db;

@@ -100,6 +100,34 @@
           </Border>
         </StackPanel>
 
+        <!-- 更新检查 -->
+        <StackPanel IsVisible="{Binding IsUpdate}" Spacing="16">
+          <TextBlock Text="更新检查" FontSize="18" FontWeight="SemiBold" />
+          <Border CornerRadius="8" BorderBrush="#E0E4E8" BorderThickness="1" Padding="20">
+            <StackPanel Spacing="14">
+              <Grid ColumnDefinitions="Auto,*">
+                <TextBlock Grid.Column="0" Text="当前版本" VerticalAlignment="Center" FontSize="13" />
+                <TextBlock Grid.Column="1" Text="{Binding CurrentVersion}" Margin="12,0,0,0"
+                           FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+              </Grid>
+              <Grid ColumnDefinitions="Auto,*">
+                <TextBlock Grid.Column="0" Text="最新版本" VerticalAlignment="Center" FontSize="13" />
+                <TextBlock Grid.Column="1" Text="{Binding LatestVersion}" Margin="12,0,0,0"
+                           FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"
+                           Foreground="#4285f4" />
+              </Grid>
+              <TextBlock Text="{Binding UpdateStatus}" FontSize="12" Foreground="#666"
+                         TextWrapping="Wrap" />
+              <StackPanel Orientation="Horizontal" Spacing="12">
+                <Button Content="检查更新" Command="{Binding CheckUpdateCommand}"
+                        IsEnabled="{Binding !Checking}" Padding="16,6" />
+                <Button Content="前往下载" IsVisible="{Binding HasUpdate}"
+                        Padding="16,6" Click="OnOpenDownload" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
         <!-- 关于 -->
         <StackPanel IsVisible="{Binding IsAbout}" Spacing="16">
           <TextBlock Text="关于 AgoraIn" FontSize="18" FontWeight="SemiBold" />

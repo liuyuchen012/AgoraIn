@@ -83,7 +83,7 @@ public sealed class ApiClient
 
     // ── HTTP 基元 ──
 
-    private async Task<T?> GetAsync<T>(string url)
+    public async Task<T?> GetAsync<T>(string url)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, BaseUrl + url);
         AddAuth(req);
@@ -98,6 +98,20 @@ public sealed class ApiClient
         {
             Content = JsonContent.Create(body),
         };
+        AddAuth(req);
+        using var res = await Http.SendAsync(req);
+        if (!res.IsSuccessStatusCode)
+        {
+            var text = await res.Content.ReadAsStringAsync();
+            throw new HttpRequestException($"{(int)res.StatusCode}: {text}");
+        }
+        return await res.Content.ReadFromJsonAsync<T>(JsonOpts);
+    }
+
+    /// <summary>POST multipart/form-data（文件上传用）。</summary>
+    public async Task<T?> PostAsync<T>(string url, HttpContent content)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, BaseUrl + url) { Content = content };
         AddAuth(req);
         using var res = await Http.SendAsync(req);
         if (!res.IsSuccessStatusCode)

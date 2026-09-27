@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="AgoraIn.Mobile.Pages.AnswerSheetScannerPage"
+             Title="扫描答题卡">
+
+    <Grid RowDefinitions="Auto,*,Auto" Padding="16" RowSpacing="12">
+
+        <!-- 顶部：试卷选择 -->
+        <Frame Grid.Row="0" CornerRadius="12" Padding="16" HasShadow="False" BorderColor="#E0E4E8">
+            <StackLayout Spacing="8">
+                <Label Text="选择试卷" FontSize="14" FontAttributes="Bold" TextColor="#303133" />
+                <Picker x:Name="PaperPicker" Title="请选择试卷"
+                        ItemsSource="{Binding Papers}" ItemDisplayBinding="{Binding Title}"
+                        SelectedIndexChanged="OnPaperSelected" />
+            </StackLayout>
+        </Frame>
+
+        <!-- 中间：拍照区域 -->
+        <Grid Grid.Row="1" RowDefinitions="*,Auto" RowSpacing="12">
+            <!-- 预览区 -->
+            <Frame Grid.Row="0" CornerRadius="12" Padding="0" HasShadow="False" BorderColor="#E0E4E8" Clip="True">
+                <Grid>
+                    <Image x:Name="PreviewImage" Aspect="AspectFill" />
+                    <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center" IsVisible="{Binding ShowPlaceholder}">
+                        <Label Text="📷" FontSize="48" HorizontalOptions="Center" />
+                        <Label Text="点击下方按钮拍照或选择图片" FontSize="13" TextColor="#909399"
+                               HorizontalOptions="Center" Margin="0,8,0,0" />
+                    </VerticalStackLayout>
+                </Grid>
+            </Frame>
+
+            <!-- 操作按钮 -->
+            <Grid Grid.Row="1" ColumnDefinitions="*,*" ColumnSpacing="12">
+                <Button Grid.Column="0" Text="📷 拍照" Clicked="OnTakePhoto"
+                        BackgroundColor="#4285f4" TextColor="White" CornerRadius="8" HeightRequest="48" />
+                <Button Grid.Column="1" Text="🖼 相册" Clicked="OnPickPhoto"
+                        BackgroundColor="#34a853" TextColor="White" CornerRadius="8" HeightRequest="48" />
+            </Grid>
+        </Grid>
+
+        <!-- 底部：状态 + 上传 -->
+        <StackLayout Grid.Row="2" Spacing="8">
+            <Frame CornerRadius="8" Padding="12" HasShadow="False" BackgroundColor="#F5F7FA">
+                <StackLayout Spacing="4">
+                    <Label x:Name="StatusLabel" Text="等待扫描…" FontSize="13" TextColor="#606266" />
+                    <Label x:Name="ResultLabel" Text="" FontSize="12" TextColor="#909399" />
+                </StackLayout>
+            </Frame>
+            <Button x:Name="UploadButton" Text="上传识别" Clicked="OnUpload"
+                    BackgroundColor="#ea4335" TextColor="White" CornerRadius="8" HeightRequest="48"
+                    IsEnabled="False" />
+        </StackLayout>
+    </Grid>
+</ContentPage>
