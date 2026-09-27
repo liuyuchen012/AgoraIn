@@ -210,60 +210,7 @@ public class ExamsController : ControllerBase
         return Ok(new { submission.TotalScore, status = submission.Status.ToString() });
     }
 
-    /// <summary>生成空白通用答题卡（浏览器打开后 Ctrl+P 直接打印 A4）。</summary>
-    [HttpGet("papers/{paperId}/sheet")]
-    [AllowAnonymous]
-    public async Task<IActionResult> RenderSheet(string paperId)
-    {
-        var (paper, questions, options) = await LoadPaperAsync(paperId);
-        if (paper == null) return NotFound(new { error = "试卷不存在" });
-
-        var html = AnswerSheetRenderer.Render(paper, questions, options);
-        return Content(html, "text/html; charset=utf-8");
-    }
-
-    /// <summary>生成指定学生的专属答题卡（含姓名 + 学号条码）。</summary>
-    [HttpGet("papers/{paperId}/sheet/{studentId}")]
-    [AllowAnonymous]
-    public async Task<IActionResult> RenderSheetForStudent(string paperId, string studentId)
-    {
-        var (paper, questions, options) = await LoadPaperAsync(paperId);
-        if (paper == null) return NotFound(new { error = "试卷不存在" });
-
-        var student = await _db.Students.FindAsync(studentId);
-        if (student == null) return NotFound(new { error = "学生不存在" });
-
-        var html = AnswerSheetRenderer.Render(
-            paper, questions, options,
-            studentName: student.Name,
-            studentNo: student.StudentNo ?? student.Id);
-        return Content(html, "text/html; charset=utf-8");
-    }
-
-    /// <summary>批量生成全班答题卡（按学号排序，一人一页，浏览器打印为一册）。</summary>
-    [HttpGet("papers/{paperId}/sheets/batch")]
-    [AllowAnonymous]
-    public async Task<IActionResult> RenderBatch(string paperId, [FromQuery] string classId)
-    {
-        var (paper, questions, options) = await LoadPaperAsync(paperId);
-        if (paper == null) return NotFound(new { error = "试卷不存在" });
-
-        var students = await _db.Students
-            .Where(s => s.ClassId == classId)
-            .OrderBy(s => s.StudentNo)
-            .ToListAsync();
-        if (students.Count == 0) return NotFound(new { error = "该班级没有学生" });
-
-        var parts = new List<string>();
-        foreach (var stu in students)
-        {
-            parts.Add(AnswerSheetRenderer.Render(
-                paper, questions, options,
-                studentName: stu.Name,
-                studentNo: stu.StudentNo ?? stu.Id));
-        }
-        return Content(string.Join("\n<hr style=\"page-break-after:always\">\n", parts), "text/html; charset=utf-8");
-    }
+    // sheet 端点已移至 AnswerSheetController（匿名访问）
 
     /// <summary>加载试卷、题目与选项定义。</summary>
     private async Task<(ExamPaper? Paper, List<Question> Questions, Dictionary<string, List<string>> Options)> LoadPaperAsync(string paperId)

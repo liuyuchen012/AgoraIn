@@ -139,10 +139,10 @@ export const examApi = {
   aiGrade: (submissionId: string, questionId: string) =>
     client.post<unknown>(`/exams/submissions/${submissionId}/grade/${questionId}`, {}),
   confirm: (submissionId: string) => client.post<unknown>(`/exams/submissions/${submissionId}/confirm`, {}),
-  // 答题卡渲染
-  sheetUrl: (paperId: string) => `/api/v4/exams/papers/${paperId}/sheet`,
-  sheetForStudent: (paperId: string, studentId: string) => `/api/v4/exams/papers/${paperId}/sheet/${studentId}`,
-  batchSheetUrl: (paperId: string, classId: string) => `/api/v4/exams/papers/${paperId}/sheets/batch?classId=${classId}`,
+  // 答题卡渲染（匿名控制器）
+  sheetUrl: (paperId: string) => `/api/v4/sheet/${paperId}`,
+  sheetForStudent: (paperId: string, studentId: string) => `/api/v4/sheet/${paperId}/student/${studentId}`,
+  batchSheetUrl: (paperId: string, classId: string) => `/api/v4/sheet/${paperId}/batch?classId=${classId}`,
 }
 
 // ── 用户/子账户管理 ──

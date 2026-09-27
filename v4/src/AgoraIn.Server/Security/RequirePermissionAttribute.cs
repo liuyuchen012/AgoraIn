@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc.Filters;
 namespace AgoraIn.Server.Security;
 
 /// <summary>
-/// 细粒度权限校验。如果有 AllowAnonymous 则跳过。
+/// 细粒度权限校验。未认证用户跳过（由 AllowAnonymous 端点使用）。
 /// </summary>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true)]
 public sealed class RequirePermissionAttribute : Attribute, IAuthorizationFilter
@@ -16,9 +16,8 @@ public sealed class RequirePermissionAttribute : Attribute, IAuthorizationFilter
 
     public void OnAuthorization(AuthorizationFilterContext context)
     {
-        // 跳过 AllowAnonymous
-        if (context.ActionDescriptor.EndpointMetadata
-            .Any(a => a is Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute))
+        // 未认证用户跳过（AllowAnonymous 端点不会有 JWT）
+        if (!context.HttpContext.User.Identity?.IsAuthenticated ?? true)
             return;
 
         var role = context.HttpContext.User.FindFirst(ClaimTypes.Role)?.Value
