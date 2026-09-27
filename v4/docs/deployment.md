@@ -290,6 +290,16 @@ A：需按 RID 特化还原（见第 5 节 Windows 部分），不能直接 `dot
 **Q：Web 面板登录后立刻跳回登录页？**
 A：检查 `Jwt:Key` 是否为空或过短；令牌签发失败会导致 401。
 
+**Q：Web 面板登录后立刻提示「登录已过期」并跳回登录页？**
+A：这是服务端签发的 JWT 格式问题（历史版本用 `JwtSecurityToken.ToString()` 返回了调试用 JSON
+而非紧凑序列化），升级到最新服务端即可。若确认版本已最新，请用浏览器开发者工具查看
+`/api/v4/*` 请求的响应头 `WWW-Authenticate`，其中的 `IDX14xxx` 错误码会指出具体原因。
+
+**Q：访问 `http://<host>:5250/login` 返回 404？**
+A：Web 管理面板是单页应用（history 路由），需要服务端把未知路径回退到 `index.html`
+（`app.MapFallbackToFile("index.html")`，已内置）。同时确认 `wwwroot/` 下确实有 Web 面板产物
+（`index.html` + `assets/`）；没有的话按第 3 节把 `dist/` 的内容复制进去。
+
 **Q：ClassIsland 插件提示「无法连接集控平台」？**
 A：检查插件「服务器地址」配置、服务端 `Server:Password` 是否与插件一致；契约见
 [api-contract-classisland.md](./api-contract-classisland.md)。

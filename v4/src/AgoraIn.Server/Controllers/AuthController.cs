@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 
 namespace AgoraIn.Server.Controllers;
@@ -78,16 +79,24 @@ public class AuthController : ControllerBase
             _config["Jwt:Key"] ?? "AgoraIn-v4-default-key-change-in-production!"));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
-        var claims = new[]
+        // 注意：不能用 new JwtSecurityToken(...).ToString() —— 新版 Microsoft.IdentityModel 中
+        // SecurityToken.ToString() 返回的是**调试用 JSON 表示**（claim 名含 URI 时会出现多个点号），
+        // 客户端拿它当 Bearer 令牌会被判为非法格式：
+        //   IDX14122: JWT is not a well formed JWE, there are more than four dots
+        // 必须用 JsonWebTokenHandler.CreateToken（或 JwtSecurityTokenHandler.WriteToken）
+        // 才能得到紧凑序列化（header.payload.signature）的合法 JWS。
+        var descriptor = new SecurityTokenDescriptor
         {
-            new Claim(ClaimTypes.Name, user.Username),
-            new Claim(ClaimTypes.Role, user.Role),
+            Subject = new ClaimsIdentity(
+            [
+                new Claim(ClaimTypes.Name, user.Username),
+                new Claim(ClaimTypes.Role, user.Role),
+            ]),
+            Expires = DateTime.Now.AddHours(24),
+            SigningCredentials = creds,
         };
 
-        return new JwtSecurityToken(
-            expires: DateTime.Now.AddHours(24),
-            signingCredentials: creds,
-            claims: claims).ToString();
+        return new JsonWebTokenHandler().CreateToken(descriptor);
     }
 }
 

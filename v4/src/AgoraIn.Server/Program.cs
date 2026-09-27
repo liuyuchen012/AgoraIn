@@ -122,4 +122,9 @@ app.MapHub<LiveHub>("/hub/live");
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
+// SPA 回退：Web 管理面板使用 history 路由（/login、/dashboard 等），
+// 直接访问或刷新这些路径时服务端并无对应文件，必须回退到 index.html 交给前端路由，
+// 否则会出现「找不到以下 Web 地址的网页：/login HTTP ERROR 404」。
+app.MapFallbackToFile("index.html");
+
 app.Run();
