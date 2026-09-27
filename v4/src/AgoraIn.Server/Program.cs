@@ -9,8 +9,33 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ── EF Core SQLite ──
-var dbPath = Path.Combine(builder.Environment.ContentRootPath, "data", "server.db");
+// ── 数据目录 ──
+// 可用 appsettings.json 的 Data:Directory 或环境变量 Data__Directory 覆盖（默认 ContentRoot/data）。
+// 注意：SQLite 只会创建数据库**文件**，不会创建所在目录；目录缺失会报
+// "SqliteException: SQLite Error 14: 'unable to open database file'"，因此必须显式创建。
+var dataDir = builder.Configuration["Data:Directory"] is { Length: > 0 } configuredDir
+    ? Path.GetFullPath(configuredDir)
+    : Path.Combine(builder.Environment.ContentRootPath, "data");
+
+try
+{
+    Directory.CreateDirectory(dataDir);
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine($"""
+        [致命] 无法创建数据目录：{dataDir}
+        原因：{ex.Message}
+        请检查：
+          1. 该路径的父目录是否存在
+          2. 运行服务的用户对该路径是否有写权限（如 chown -R <用户> /path/to/data）
+          3. 也可在 appsettings.json 中把 Data:Directory 指向可写目录，或设置环境变量 Data__Directory
+        """);
+    throw;
+}
+
+var dbPath = Path.Combine(dataDir, "server.db");
+builder.Services.AddSingleton(new ServerPaths(dataDir));
 builder.Services.AddDbContext<ServerDbContext>(opt => opt.UseSqlite($"Data Source={dbPath}"));
 
 // ── JWT ──
@@ -49,11 +74,28 @@ builder.Services.AddCors(opt => opt.AddDefaultPolicy(p =>
 
 var app = builder.Build();
 
-// ── 数据库自动迁移 ──
+// ── 数据库自动建库 ──
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ServerDbContext>();
-    await db.Database.EnsureCreatedAsync();
+    try
+    {
+        await db.Database.EnsureCreatedAsync();
+    }
+    catch (Exception ex)
+    {
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        logger.LogCritical(ex, """
+            数据库初始化失败。
+              数据库文件：{DbPath}
+              数据目录：  {DataDir}
+            常见原因：
+              1. 数据目录不存在或不可写（SQLite 只建文件、不建目录）——请确认目录已创建且运行用户有写权限
+              2. 路径所在磁盘已满或只读
+              3. 目录被安全策略（如宝塔的防跨站攻击限制）禁止访问
+            """, dbPath, dataDir);
+        throw;
+    }
 }
 
 // ── 首次初始化检查 ──

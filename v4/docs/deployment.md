@@ -78,6 +78,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now agorain
 {
   "Kestrel": { "Endpoints": { "Http": { "Url": "http://0.0.0.0:5250" } } },
   "Jwt": { "Key": "<生产环境请替换为随机密钥>" },
+  "Data": { "Directory": "" },
   "Server": { "Password": "<集控连接密码，留空则 ClassIsland 接口免密>" },
   "DeepSeek": {
     "ApiKey": "<DeepSeek API Key>",
@@ -87,8 +88,20 @@ sudo systemctl daemon-reload && sudo systemctl enable --now agorain
 }
 ```
 
+| 配置项 | 说明 |
+| --- | --- |
+| `Kestrel:Endpoints:Http:Url` | 监听地址与端口（默认 5250） |
+| `Jwt:Key` | JWT 签名密钥，**生产必须替换** |
+| `Data:Directory` | 数据目录（数据库与上传资源）。**留空 = 程序目录下的 `data/`**；宝塔等场景若程序目录不可写，可指向 `/www/wwwroot/xxx/data` 之类 |
+| `Server:Password` | ClassIsland 插件连接密码（留空则该组接口免密，仅建议内网） |
+| `DeepSeek:*` | AI 阅卷配置 |
+
+> **数据目录会自动创建**：服务端启动时若 `data/` 不存在会自动建立（含 `resources/` 子目录），
+> 无需手动 mkdir。若仍报 `SQLite Error 14: unable to open database file`，说明
+> **运行用户对该路径没有写权限**，请执行 `chown -R <运行用户> <数据目录>`（宝塔通常为 `www`）。
+
 > **安全提示**：`Jwt:Key` 与 `DeepSeek:ApiKey` 属敏感信息，生产环境建议用环境变量覆盖
-> （`Jwt__Key`、`DeepSeek__ApiKey`），不要提交到仓库。
+> （`Jwt__Key`、`DeepSeek__ApiKey`、`Data__Directory`），不要提交到仓库。
 
 ### 2.5 域名与 HTTPS 反向代理
 

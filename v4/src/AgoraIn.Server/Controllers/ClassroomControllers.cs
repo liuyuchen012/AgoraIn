@@ -197,12 +197,12 @@ public class NoticesController : ControllerBase
 public class ResourcesController : ControllerBase
 {
     private readonly ServerDbContext _db;
-    private readonly IWebHostEnvironment _env;
+    private readonly ServerPaths _paths;
 
-    public ResourcesController(ServerDbContext db, IWebHostEnvironment env)
+    public ResourcesController(ServerDbContext db, ServerPaths paths)
     {
         _db = db;
-        _env = env;
+        _paths = paths;
     }
 
     /// <summary>资源列表（按班级/科目/标签筛选）。</summary>
@@ -227,7 +227,7 @@ public class ResourcesController : ControllerBase
         if (file == null || file.Length == 0) return BadRequest("请选择文件");
 
         // 本地磁盘存储（IFileStorage 抽象的默认实现）
-        var dir = Path.Combine(_env.ContentRootPath, "data", "resources");
+        var dir = _paths.ResourceDirectory;
         Directory.CreateDirectory(dir);
 
         var safeName = $"{Guid.NewGuid():N}{Path.GetExtension(file.FileName)}";
@@ -273,7 +273,7 @@ public class ResourcesController : ControllerBase
         if (res.Kind == ResourceKind.Link)
             return Redirect(res.Location);
 
-        var fullPath = Path.Combine(_env.ContentRootPath, "data", res.Location);
+        var fullPath = Path.Combine(_paths.DataDirectory, res.Location);
         if (!System.IO.File.Exists(fullPath)) return NotFound("文件不存在");
 
         return PhysicalFile(fullPath, "application/octet-stream", res.Title);
