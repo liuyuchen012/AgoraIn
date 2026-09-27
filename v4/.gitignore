@@ -1,2 +1,5 @@
 # v4 本地产物
 out/
+
+# 家长端小程序（独立仓库 AgoraIn-weixin-amp，单独提交，避免嵌套仓库）
+miniprogram-parent/

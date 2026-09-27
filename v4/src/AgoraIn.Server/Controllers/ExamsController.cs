@@ -1,6 +1,8 @@
+using AgoraIn.Core.Entities;
+using AgoraIn.Server.Models;
+using AgoraIn.Server.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using AgoraIn.Server.Models;
 
 namespace AgoraIn.Server.Controllers;
 
@@ -13,9 +15,9 @@ namespace AgoraIn.Server.Controllers;
 public class ExamsController : ControllerBase
 {
     private readonly ServerDbContext _db;
-    private readonly Services.DeepSeekGradingService _ai;
+    private readonly DeepSeekGradingService _ai;
 
-    public ExamsController(ServerDbContext db, Services.DeepSeekGradingService ai)
+    public ExamsController(ServerDbContext db, DeepSeekGradingService ai)
     {
         _db = db;
         _ai = ai;
@@ -30,7 +32,7 @@ public class ExamsController : ControllerBase
         return Created("", paper);
     }
 
-    /// <summary>上传答题卡图片并触发识别。</summary>
+    /// <summary>上传答题卡图片并触发识别（考号涂卡 + 客观题 OMR）。</summary>
     [HttpPost("submissions")]
     public async Task<IActionResult> UploadSubmission([FromForm] IFormFile file, [FromQuery] string paperId)
     {
@@ -63,12 +65,12 @@ public class ExamsController : ControllerBase
         });
     }
 
-    /// <summary>AI 批改指定题目的学生答案。</summary>
+    /// <summary>AI 批改指定题目的学生答案（填空/简答/作文）。</summary>
     [HttpPost("submissions/{submissionId}/grade/{questionId}")]
     public async Task<IActionResult> AiGrade(string submissionId, string questionId, [FromBody] AiGradingRequest request)
     {
         var response = await _ai.GradeSubjectiveAsync(request);
-        if (response == null) return BadRequest("AI 批改失败，请检查 API 配置");
+        if (response == null) return BadRequest("AI 批改失败，请检查 DeepSeek API 配置");
 
         var result = new QuestionResult
         {
@@ -84,5 +86,23 @@ public class ExamsController : ControllerBase
         _db.QuestionResults.Add(result);
         await _db.SaveChangesAsync();
         return Ok(result);
+    }
+
+    /// <summary>教师确认分数（状态机推进到已确认）。</summary>
+    [HttpPost("submissions/{submissionId}/confirm")]
+    public async Task<IActionResult> Confirm(string submissionId)
+    {
+        var submission = await _db.AnswerSheetSubmissions.FindAsync(submissionId);
+        if (submission == null) return NotFound();
+
+        submission.Status = SubmissionStatus.Confirmed;
+        submission.ConfirmedAt = DateTime.Now;
+
+        // 汇总总分
+        var results = _db.QuestionResults.Where(r => r.SubmissionId == submissionId);
+        submission.TotalScore = results.Sum(r => r.Score ?? 0);
+
+        await _db.SaveChangesAsync();
+        return Ok(new { submission.TotalScore, status = submission.Status.ToString() });
     }
 }
