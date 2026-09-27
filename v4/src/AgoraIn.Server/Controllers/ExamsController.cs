@@ -37,6 +37,7 @@ public class ExamsController : ControllerBase
             {
                 p.Id, p.Title, p.Subject, p.ClassId, p.TotalScore, p.CreatedBy, p.CreatedAt,
                 questionCount = _db.Questions.Count(q => q.PaperId == p.Id),
+                submissionCount = _db.AnswerSheetSubmissions.Count(s => s.PaperId == p.Id),
             })
             .ToListAsync(ct);
         return Ok(papers);
@@ -124,7 +125,16 @@ public class ExamsController : ControllerBase
         return Ok(q);
     }
 
-    /// <summary>提交答题卡图片并触发识别（考号涂卡 + 客观题 OMR）。</summary>
+    /// <summary>某试卷的提交记录列表。</summary>
+    [HttpGet("submissions")]
+    public async Task<IActionResult> ListSubmissions([FromQuery] string paperId, CancellationToken ct)
+    {
+        var list = await _db.AnswerSheetSubmissions
+            .Where(s => s.PaperId == paperId)
+            .OrderByDescending(s => s.SubmittedAt)
+            .ToListAsync(ct);
+        return Ok(list);
+    }
 
     /// <summary>上传答题卡图片并触发识别（考号涂卡 + 客观题 OMR）。</summary>
     [HttpPost("submissions")]
