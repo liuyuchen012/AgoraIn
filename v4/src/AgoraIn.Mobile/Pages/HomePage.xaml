@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage
+    x:Class="AgoraIn.Mobile.Pages.HomePage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    Title="首页"
+    BackgroundColor="#F8F9FA">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="14">
+
+            <!-- 欢迎栏 -->
+            <Border BackgroundColor="#4285f4" StrokeThickness="0"
+                    StrokeShape="RoundRectangle 14" Padding="20">
+                <VerticalStackLayout Spacing="4">
+                    <Label x:Name="WelcomeLabel" Text="你好" FontSize="22"
+                           FontAttributes="Bold" TextColor="White" />
+                    <Label x:Name="RoleLabel" Text="" FontSize="13" TextColor="#D6E4FF" />
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- 功能入口 -->
+            <Border BackgroundColor="White" StrokeThickness="0"
+                    StrokeShape="RoundRectangle 14" Padding="20">
+                <VerticalStackLayout Spacing="14">
+                    <Label Text="快捷操作" FontSize="16" FontAttributes="Bold" />
+
+                    <Button Text="📷 扫码签到" BackgroundColor="#4285f4" TextColor="White"
+                            CornerRadius="10" HeightRequest="46" Clicked="OnScanClicked" />
+                    <Button Text="📋 签到任务" BackgroundColor="#e8f0fe" TextColor="#4285f4"
+                            CornerRadius="10" HeightRequest="46" Clicked="OnTasksClicked" />
+                    <Button Text="🖥 管理仪表盘" x:Name="DashboardButton" BackgroundColor="#e8f0fe"
+                            TextColor="#4285f4" CornerRadius="10" HeightRequest="46"
+                            IsVisible="False" Clicked="OnDashboardClicked" />
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- 班级信息 -->
+            <Border BackgroundColor="White" StrokeThickness="0"
+                    StrokeShape="RoundRectangle 14" Padding="20">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="班级列表" FontSize="16" FontAttributes="Bold" />
+                    <Label x:Name="ClassesLabel" Text="加载中..." FontSize="13" TextColor="#666666" />
+                </VerticalStackLayout>
+            </Border>
+
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

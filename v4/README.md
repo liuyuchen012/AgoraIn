@@ -35,6 +35,31 @@ src/AgoraIn.App/bin/Debug/net10.0/AgoraIn.exe --selftest --out out/selftest-repo
 - `--selftest [module...]`：无头冒烟自测（不启动 UI），退出码 0 = 通过；`--out` 把报告落盘（GUI 子系统在无控制台环境下 stdout 不可见）。
 - 模块化扩展：新领域模块实现 `AgoraIn.Core.SelfTest.ISelfTestModule`，在 `App/Services/SelfTestRunner.cs` 注册即可（如 `--selftest points`）。
 
+## 各端构建
+
+| 项目 | 构建命令 | 说明 |
+| --- | --- | --- |
+| 桌面端 | `dotnet build src/AgoraIn.App` | Avalonia 11，Windows 优先 |
+| 服务端 | `dotnet build src/AgoraIn.Server` | ASP.NET Core，默认端口 5250 |
+| Web 面板 | `cd src/AgoraIn.WebAdmin && npm install && npm run build` | Vue 3 + Vite，产物 `dist/` 供服务端托管 |
+| 移动端（Android） | `dotnet build src/AgoraIn.Mobile -f net10.0-android` | 需 Android SDK |
+| 移动端（Windows） | `dotnet restore src/AgoraIn.Mobile -p:TargetFramework=net10.0-windows10.0.19041.0 -p:RuntimeIdentifier=win-x64`<br>`dotnet build src/AgoraIn.Mobile -f net10.0-windows10.0.19041.0 -r win-x64 --no-restore` | 需先按 RID 还原 |
+| 移动端（iOS） | `dotnet build src/AgoraIn.Mobile -f net10.0-ios` | 需 macOS 或配对 Mac |
+| 家长端小程序 | 微信开发者工具打开 `miniprogram-parent/` | 独立仓库（见下） |
+
+> 移动端 `AgoraIn.Mobile` 未加入 `AgoraIn.sln`：MAUI 多目标需要 RID 特化还原，会干扰主门禁。按上表单独构建。
+
+## 服务端部署
+
+```bash
+bash deploy-server.sh <host> <user> <password>
+# 例：bash deploy-server.sh 192.168.31.3 liuyuchen <password>
+```
+
+脚本执行：本地 publish → scp 上传 → 安装 systemd 服务 → 重启并验证 `/api/v4/setup/status`。
+
+首次初始化：`POST /api/v4/auth/setup` 创建管理员（或在 Web 面板登录页首次打开时自动引导）。
+
 ## Windows 10 兼容
 
 .NET 10 在 Windows 10（ntdll < 19041.5007）上默认 CET 检查会致命报错，`Directory.Build.props` 统一设置 `CETCompat=false`（沿用 v3.2 commit `32509aa` 方案）。

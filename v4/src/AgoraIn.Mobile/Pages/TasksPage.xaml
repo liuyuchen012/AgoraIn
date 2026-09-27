@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage
+    x:Class="AgoraIn.Mobile.Pages.TasksPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    Title="签到任务"
+    BackgroundColor="#F8F9FA">
+
+    <Grid RowDefinitions="Auto,*" Padding="20">
+        <Button Grid.Row="0" Text="刷新任务" BackgroundColor="#e8f0fe" TextColor="#4285f4"
+                CornerRadius="8" HeightRequest="42" Clicked="OnRefreshClicked" Margin="0,0,0,12" />
+
+        <RefreshView Grid.Row="1" x:Name="Refresh" Refreshing="OnRefreshing">
+            <CollectionView x:Name="TaskList">
+                <CollectionView.EmptyView>
+                    <Label Text="暂无签到任务" TextColor="#999999"
+                           HorizontalOptions="Center" VerticalOptions="Center" />
+                </CollectionView.EmptyView>
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Border BackgroundColor="White" StrokeThickness="0"
+                                StrokeShape="RoundRectangle 10" Padding="16" Margin="0,0,0,8">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <VerticalStackLayout Grid.Column="0" Spacing="4">
+                                    <Label Text="{Binding Name}" FontSize="15" FontAttributes="Bold" />
+                                    <Label Text="{Binding ProgressText}" FontSize="13" TextColor="#888888" />
+                                </VerticalStackLayout>
+                                <Label Grid.Column="1" Text="{Binding RateText}" FontSize="15"
+                                       FontAttributes="Bold" TextColor="#4285f4"
+                                       VerticalOptions="Center" />
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </RefreshView>
+
+        <ActivityIndicator Grid.Row="1" x:Name="Busy" IsRunning="False" IsVisible="False"
+                           Color="#4285f4" VerticalOptions="Center" />
+    </Grid>
+</ContentPage>

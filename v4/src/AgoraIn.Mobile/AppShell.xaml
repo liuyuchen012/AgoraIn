@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Shell
+    x:Class="AgoraIn.Mobile.AppShell"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:pages="clr-namespace:AgoraIn.Mobile.Pages"
+    Title="AgoraIn 学生端"
+    FlyoutBehavior="Disabled">
+
+    <TabBar>
+        <ShellContent
+            Title="首页"
+            ContentTemplate="{DataTemplate pages:HomePage}"
+            Route="home" />
+        <ShellContent
+            Title="签到"
+            ContentTemplate="{DataTemplate pages:ScanPage}"
+            Route="scan" />
+        <ShellContent
+            Title="记录"
+            ContentTemplate="{DataTemplate pages:HistoryPage}"
+            Route="history" />
+        <ShellContent
+            Title="我的"
+            ContentTemplate="{DataTemplate pages:ProfilePage}"
+            Route="profile" />
+    </TabBar>
+
+</Shell>

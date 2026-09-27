@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage
+    x:Class="AgoraIn.Mobile.Pages.ScanPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    Title="签到"
+    BackgroundColor="#F8F9FA">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="24" Spacing="16">
+
+            <Label Text="扫码 / 输入签到码" FontSize="20" FontAttributes="Bold"
+                   HorizontalOptions="Center" Margin="0,10,0,6" />
+
+            <Button Text="📷 扫描二维码" BackgroundColor="#4285f4" TextColor="White"
+                    CornerRadius="10" HeightRequest="52" Clicked="OnScanQrClicked" />
+
+            <Label Text="或手动输入签到码" FontSize="13" TextColor="#888888"
+                   HorizontalOptions="Center" Margin="0,10,0,0" />
+
+            <Entry x:Name="CodeEntry" Placeholder="签到码（如 ABC123）" MaxLength="10" />
+            <Entry x:Name="NameEntry" Placeholder="你的姓名" />
+            <Entry x:Name="PasswordEntry" Placeholder="签到密码（如有）" IsPassword="True" />
+
+            <Button x:Name="SubmitButton" Text="提交签到" BackgroundColor="#34a853"
+                    TextColor="White" CornerRadius="10" HeightRequest="48"
+                    Clicked="OnSubmitClicked" />
+
+            <ActivityIndicator x:Name="Busy" IsRunning="False" IsVisible="False"
+                               Color="#4285f4" HorizontalOptions="Center" />
+
+            <!-- 结果 -->
+            <Border x:Name="ResultCard" IsVisible="False" StrokeThickness="0"
+                    StrokeShape="RoundRectangle 12" Padding="20">
+                <VerticalStackLayout Spacing="6">
+                    <Label x:Name="ResultTitle" FontSize="17" FontAttributes="Bold" />
+                    <Label x:Name="ResultDetail" FontSize="14" TextColor="#666666" />
+                </VerticalStackLayout>
+            </Border>
+
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

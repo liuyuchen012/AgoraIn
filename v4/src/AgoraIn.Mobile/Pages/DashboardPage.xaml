@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage
+    x:Class="AgoraIn.Mobile.Pages.DashboardPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    Title="管理仪表盘"
+    BackgroundColor="#F8F9FA">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="14">
+
+            <!-- 统计卡 -->
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                <Border Grid.Column="0" BackgroundColor="White" StrokeThickness="0"
+                        StrokeShape="RoundRectangle 14" Padding="18">
+                    <VerticalStackLayout Spacing="4">
+                        <Label Text="设备总数" FontSize="12" TextColor="#888888" />
+                        <Label x:Name="DeviceCountLabel" Text="—" FontSize="28"
+                               FontAttributes="Bold" TextColor="#4285f4" />
+                    </VerticalStackLayout>
+                </Border>
+                <Border Grid.Column="1" BackgroundColor="White" StrokeThickness="0"
+                        StrokeShape="RoundRectangle 14" Padding="18">
+                    <VerticalStackLayout Spacing="4">
+                        <Label Text="在线设备" FontSize="12" TextColor="#888888" />
+                        <Label x:Name="OnlineCountLabel" Text="—" FontSize="28"
+                               FontAttributes="Bold" TextColor="#34a853" />
+                    </VerticalStackLayout>
+                </Border>
+            </Grid>
+
+            <Button Text="刷新数据" BackgroundColor="#e8f0fe" TextColor="#4285f4"
+                    CornerRadius="8" HeightRequest="42" Clicked="OnRefreshClicked" />
+
+            <ActivityIndicator x:Name="Busy" IsRunning="False" IsVisible="False"
+                               Color="#4285f4" HorizontalOptions="Center" />
+
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

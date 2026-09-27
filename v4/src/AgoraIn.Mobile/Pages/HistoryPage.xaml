@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage
+    x:Class="AgoraIn.Mobile.Pages.HistoryPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    Title="记录"
+    BackgroundColor="#F8F9FA">
+
+    <Grid RowDefinitions="Auto,*" Padding="20">
+        <VerticalStackLayout Grid.Row="0" Spacing="10" Margin="0,0,0,12">
+            <Label Text="我的签到记录" FontSize="20" FontAttributes="Bold" />
+            <Button Text="刷新" BackgroundColor="#e8f0fe" TextColor="#4285f4"
+                    CornerRadius="8" HeightRequest="40" Clicked="OnRefreshClicked" />
+        </VerticalStackLayout>
+
+        <RefreshView Grid.Row="1" x:Name="Refresh" Refreshing="OnRefreshing">
+            <CollectionView x:Name="RecordList">
+                <CollectionView.EmptyView>
+                    <Label Text="暂无签到记录" TextColor="#999999"
+                           HorizontalOptions="Center" VerticalOptions="Center" />
+                </CollectionView.EmptyView>
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Border BackgroundColor="White" StrokeThickness="0"
+                                StrokeShape="RoundRectangle 10" Padding="16" Margin="0,0,0,8">
+                            <VerticalStackLayout Spacing="4">
+                                <Label Text="{Binding Title}" FontSize="15" FontAttributes="Bold" />
+                                <Label Text="{Binding TimeText}" FontSize="13" TextColor="#888888" />
+                            </VerticalStackLayout>
+                        </Border>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </RefreshView>
+
+        <ActivityIndicator Grid.Row="1" x:Name="Busy" IsRunning="False" IsVisible="False"
+                           Color="#4285f4" VerticalOptions="Center" />
+    </Grid>
+</ContentPage>

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage
+    x:Class="AgoraIn.Mobile.Pages.LoginPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    Title="登录"
+    BackgroundColor="#F8F9FA">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="28" Spacing="16" VerticalOptions="Center">
+
+            <Label Text="AgoraIn" FontSize="32" FontAttributes="Bold"
+                   TextColor="#4285f4" HorizontalOptions="Center" />
+            <Label Text="课堂签到打卡 · 学生端" FontSize="14"
+                   TextColor="#888888" HorizontalOptions="Center" Margin="0,0,0,20" />
+
+            <Entry x:Name="ServerEntry" Placeholder="服务器地址（如 http://192.168.1.100:5250）"
+                   Text="http://192.168.31.3:5250" Keyboard="Url" />
+            <Entry x:Name="UsernameEntry" Placeholder="用户名" />
+            <Entry x:Name="PasswordEntry" Placeholder="密码" IsPassword="True" />
+
+            <Label x:Name="ErrorLabel" TextColor="#ea4335" FontSize="13" IsVisible="False" />
+
+            <Button x:Name="LoginButton" Text="登 录" BackgroundColor="#4285f4"
+                    TextColor="White" CornerRadius="8" HeightRequest="48"
+                    Clicked="OnLoginClicked" />
+
+            <ActivityIndicator x:Name="Busy" IsRunning="False" IsVisible="False"
+                               Color="#4285f4" HorizontalOptions="Center" />
+
+            <Label Text="首次使用请联系管理员创建账户" FontSize="12"
+                   TextColor="#bbbbbb" HorizontalOptions="Center" Margin="0,20,0,0" />
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

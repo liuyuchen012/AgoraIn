@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage
+    x:Class="AgoraIn.Mobile.Pages.ProfilePage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    Title="我的"
+    BackgroundColor="#F8F9FA">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="14">
+
+            <Border BackgroundColor="White" StrokeThickness="0"
+                    StrokeShape="RoundRectangle 14" Padding="20">
+                <VerticalStackLayout Spacing="6">
+                    <Label x:Name="UsernameLabel" Text="未登录" FontSize="20" FontAttributes="Bold" />
+                    <Label x:Name="RoleLabel" Text="" FontSize="13" TextColor="#888888" />
+                    <Label x:Name="ServerLabel" Text="" FontSize="12" TextColor="#bbbbbb" />
+                </VerticalStackLayout>
+            </Border>
+
+            <Border BackgroundColor="White" StrokeThickness="0"
+                    StrokeShape="RoundRectangle 14" Padding="20">
+                <VerticalStackLayout Spacing="12">
+                    <Label Text="服务器" FontSize="16" FontAttributes="Bold" />
+                    <Entry x:Name="ServerEntry" Placeholder="http://192.168.1.100:5250" Keyboard="Url" />
+                    <Button Text="保存并重连" BackgroundColor="#e8f0fe" TextColor="#4285f4"
+                            CornerRadius="8" HeightRequest="42" Clicked="OnSaveServerClicked" />
+                </VerticalStackLayout>
+            </Border>
+
+            <Button x:Name="LoginButton" Text="登录" BackgroundColor="#4285f4" TextColor="White"
+                    CornerRadius="10" HeightRequest="46" Clicked="OnLoginClicked" />
+            <Button x:Name="LogoutButton" Text="退出登录" BackgroundColor="#FCE8E6" TextColor="#C5221F"
+                    CornerRadius="10" HeightRequest="46" IsVisible="False" Clicked="OnLogoutClicked" />
+
+            <Label Text="AgoraIn v4.0 · 学生端" FontSize="12" TextColor="#bbbbbb"
+                   HorizontalOptions="Center" Margin="0,20,0,0" />
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>
