@@ -3,6 +3,7 @@ using AgoraIn.Server.Models;
 using AgoraIn.Server.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace AgoraIn.Server.Controllers;
 
@@ -104,5 +105,91 @@ public class ExamsController : ControllerBase
 
         await _db.SaveChangesAsync();
         return Ok(new { submission.TotalScore, status = submission.Status.ToString() });
+    }
+
+    /// <summary>生成空白通用答题卡（浏览器打开后 Ctrl+P 直接打印 A4）。</summary>
+    [HttpGet("papers/{paperId}/sheet")]
+    public async Task<IActionResult> RenderSheet(string paperId)
+    {
+        var (paper, questions, options) = await LoadPaperAsync(paperId);
+        if (paper == null) return NotFound(new { error = "试卷不存在" });
+
+        var html = AnswerSheetRenderer.Render(paper, questions, options);
+        return Content(html, "text/html; charset=utf-8");
+    }
+
+    /// <summary>生成指定学生的专属答题卡（含姓名 + 学号条码）。</summary>
+    [HttpGet("papers/{paperId}/sheet/{studentId}")]
+    public async Task<IActionResult> RenderSheetForStudent(string paperId, string studentId)
+    {
+        var (paper, questions, options) = await LoadPaperAsync(paperId);
+        if (paper == null) return NotFound(new { error = "试卷不存在" });
+
+        var student = await _db.Students.FindAsync(studentId);
+        if (student == null) return NotFound(new { error = "学生不存在" });
+
+        var html = AnswerSheetRenderer.Render(
+            paper, questions, options,
+            studentName: student.Name,
+            studentNo: student.StudentNo ?? student.Id);
+        return Content(html, "text/html; charset=utf-8");
+    }
+
+    /// <summary>批量生成全班答题卡（按学号排序，一人一页，浏览器打印为一册）。</summary>
+    [HttpGet("papers/{paperId}/sheets/batch")]
+    public async Task<IActionResult> RenderBatch(string paperId, [FromQuery] string classId)
+    {
+        var (paper, questions, options) = await LoadPaperAsync(paperId);
+        if (paper == null) return NotFound(new { error = "试卷不存在" });
+
+        var students = await _db.Students
+            .Where(s => s.ClassId == classId)
+            .OrderBy(s => s.StudentNo)
+            .ToListAsync();
+        if (students.Count == 0) return NotFound(new { error = "该班级没有学生" });
+
+        var parts = new List<string>();
+        foreach (var stu in students)
+        {
+            parts.Add(AnswerSheetRenderer.Render(
+                paper, questions, options,
+                studentName: stu.Name,
+                studentNo: stu.StudentNo ?? stu.Id));
+        }
+        return Content(string.Join("\n<hr style=\"page-break-after:always\">\n", parts), "text/html; charset=utf-8");
+    }
+
+    /// <summary>加载试卷、题目与选项定义。</summary>
+    private async Task<(ExamPaper? Paper, List<Question> Questions, Dictionary<string, List<string>> Options)> LoadPaperAsync(string paperId)
+    {
+        var paper = await _db.ExamPapers.FindAsync(paperId);
+        if (paper == null) return (null, [], new Dictionary<string, List<string>>());
+
+        var questions = await _db.Questions
+            .Where(q => q.PaperId == paperId)
+            .OrderBy(q => q.Index)
+            .ToListAsync();
+
+        // 从 OptionsJson 解析选项键（[{key:"A",text:"…"},…]）
+        var options = new Dictionary<string, List<string>>();
+        foreach (var q in questions)
+        {
+            if (string.IsNullOrEmpty(q.OptionsJson)) continue;
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(q.OptionsJson);
+                var keys = doc.RootElement.EnumerateArray()
+                    .Select(o => o.TryGetProperty("key", out var k) ? k.GetString() ?? "" : "")
+                    .Where(s => s.Length > 0)
+                    .ToList();
+                if (keys.Count > 0) options[q.Id] = keys;
+            }
+            catch
+            {
+                // 选项格式异常时忽略，渲染器回落默认 A-D
+            }
+        }
+
+        return (paper, questions, options);
     }
 }

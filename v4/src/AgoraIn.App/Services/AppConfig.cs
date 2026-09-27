@@ -21,6 +21,10 @@ public sealed class AppConfig
     public bool OnlineMode { get; set; }
     public string AdminPasswordHash { get; set; } = "";
 
+    // 课表驱动行为（上下课自动切换模式 / 上课前点名提醒）
+    public bool TimetableDriven { get; set; }
+    public int RemindMinutesBefore { get; set; } = 2;
+
     public AppConfig(string basePath)
     {
         _path = Path.Combine(basePath, "data", "app-config.json");

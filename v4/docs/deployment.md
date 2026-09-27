@@ -1,0 +1,183 @@
+# AgoraIn v4 部署手册
+
+## 1. 环境要求
+
+| 项 | 要求 |
+| --- | --- |
+| 操作系统 | 服务端：Linux（推荐）/ Windows；桌面端：Windows 10 及以上 |
+| .NET | **.NET 10 SDK**（构建）/ ASP.NET Core 10 Runtime（仅运行） |
+| Node.js | ≥ 20（仅构建 Web 管理面板） |
+| 数据库 | SQLite（默认，零配置）/ 可选 PostgreSQL |
+| 端口 | 服务端默认 **5250**；Web 开发服务器 5173 |
+
+## 2. 服务端部署
+
+### 2.1 一键部署（推荐）
+
+```bash
+cd v4
+bash deploy-server.sh <host> <user> <password>
+# 示例：bash deploy-server.sh 192.168.31.3 liuyuchen <your-password>
+```
+
+脚本流程：
+1. `dotnet publish src/AgoraIn.Server -c Release -o ./publish/server`
+2. 上传到服务器 `/home/<user>/agorain-server/`
+3. 安装并启动 systemd 服务 `agorain`
+4. 验证 `GET /api/v4/setup/status`
+
+> 依赖：本机需 `sshpass` 与 `ssh`（Windows 下可用 WSL/Git Bash 执行）。
+
+### 2.2 手动部署
+
+```bash
+# 本地发布
+dotnet publish src/AgoraIn.Server/AgoraIn.Server.csproj -c Release -o ./publish/server
+
+# 上传
+scp -r ./publish/server/* <user>@<host>:/home/<user>/agorain-server/
+
+# 服务器上以 systemd 运行
+sudo tee /etc/systemd/system/agorain.service > /dev/null <<'EOF'
+[Unit]
+Description=AgoraIn v4 Server
+After=network.target
+
+[Service]
+Type=simple
+User=<user>
+WorkingDirectory=/home/<user>/agorain-server
+ExecStart=/home/<user>/agorain-server/AgoraIn.Server
+Restart=always
+RestartSec=5
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=ASPNETCORE_URLS=http://0.0.0.0:5250
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload && sudo systemctl enable --now agorain
+```
+
+### 2.3 首次初始化
+
+1. 浏览器打开 `http://<host>:5250/`，进入 Web 管理面板登录页
+2. 页面检测到 `needsSetup` 时提示创建管理员 → 输入账号密码 → 自动登录
+   （或直接调用 `POST /api/v4/auth/setup`）
+
+### 2.4 配置项（`appsettings.json`）
+
+```json
+{
+  "Kestrel": { "Endpoints": { "Http": { "Url": "http://0.0.0.0:5250" } } },
+  "Jwt": { "Key": "<生产环境请替换为随机密钥>" },
+  "Server": { "Password": "<集控连接密码，留空则 ClassIsland 接口免密>" },
+  "DeepSeek": {
+    "ApiKey": "<DeepSeek API Key>",
+    "BaseUrl": "https://api.deepseek.com",
+    "Model": "deepseek-chat"
+  }
+}
+```
+
+> **安全提示**：`Jwt:Key` 与 `DeepSeek:ApiKey` 属敏感信息，生产环境建议用环境变量覆盖
+> （`Jwt__Key`、`DeepSeek__ApiKey`），不要提交到仓库。
+
+## 3. Web 管理面板部署
+
+Web 端产物由服务端以静态文件托管：
+
+```bash
+cd src/AgoraIn.WebAdmin
+npm install
+npm run build            # 产出 dist/
+# 把 dist/ 内容复制到服务端的 wwwroot/
+cp -r dist/* ../AgoraIn.Server/wwwroot/
+```
+
+开发模式（热更新 + 自动代理到 5250）：
+
+```bash
+npm run dev              # 打开 http://localhost:5173
+```
+
+## 4. 桌面端构建
+
+```bash
+dotnet build src/AgoraIn.App/AgoraIn.App.csproj -c Release
+# 产出：src/AgoraIn.App/bin/Release/net10.0/AgoraIn.exe
+```
+
+Windows 10 兼容：`v4/Directory.Build.props` 已统一设置 `CETCompat=false`
+（.NET 10 在 ntdll < 19041.5007 的 Win10 上默认 CET 检查会致命报错，沿用 v3.2 commit `32509aa` 方案）。
+
+## 5. 移动端构建
+
+### Android
+
+```bash
+dotnet build src/AgoraIn.Mobile -f net10.0-android -c Release
+# 产出 APK：bin/Release/net10.0-android/*.apk
+```
+
+### Windows
+
+```bash
+# 必须先按 RID 还原，再构建（MAUI 多目标要求）
+dotnet restore src/AgoraIn.Mobile -p:TargetFramework=net10.0-windows10.0.19041.0 -p:RuntimeIdentifier=win-x64
+dotnet build src/AgoraIn.Mobile -f net10.0-windows10.0.19041.0 -r win-x64 --no-restore -c Release
+```
+
+### iOS
+
+需 macOS 或与 Mac 配对的 Windows 环境：
+
+```bash
+dotnet build src/AgoraIn.Mobile -f net10.0-ios -c Release
+```
+
+## 6. 家长端小程序
+
+小程序为**独立仓库**（`miniprogram-parent/`，已由 `.gitignore` 排除）：
+
+1. 用微信开发者工具打开 `v4/miniprogram-parent/`
+2. AppID：`wxa2003db2b4693a66`
+3. 首次使用：家长在「绑定孩子」页输入老师提供的 6 位邀请码
+   （老师端在 Web 面板「学生管理 → 生成家长邀请码」或桌面端教师模式生成）
+
+## 7. 质量门禁
+
+```powershell
+powershell -ExecutionPolicy Bypass -File v4/scripts/gate.ps1
+```
+
+- 门禁覆盖 `AgoraIn.sln`（Core / Data / App / Server / tests）
+- `--selftest` 报告落在 `v4/out/selftest-report.txt`（GUI 子系统无控制台，必须用 `--out` 落盘）
+- MAUI 项目不在门禁内，按上文单独构建
+
+## 8. 备份与数据
+
+| 数据 | 位置 | 备份建议 |
+| --- | --- | --- |
+| 服务端数据库 | `<server>/data/server.db` | 每日快照 |
+| 服务端上传资源 | `<server>/data/resources/` | 随数据库一起备份 |
+| 桌面端本地数据 | 客户端目录 `data/` + `workspace.json` | 客户端「文件 → 导出打卡数据」CSV |
+
+## 9. 常见问题
+
+**Q：桌面端提示 `Failed to load ntdll` 或启动即崩溃？**
+A：确认 `CETCompat=false` 已生效（`Directory.Build.props`），且运行在 Windows 10 19041+ 或 Windows 11。
+
+**Q：`dotnet build` 报 MSB3027「文件被占用」？**
+A：先结束在跑的进程：`Stop-Process -Name AgoraIn -Force`。
+
+**Q：MAUI 构建报 `NETSDK1047: 资产文件没有 xx/win-x64 的目标`？**
+A：需按 RID 特化还原（见第 5 节 Windows 部分），不能直接 `dotnet build`。
+
+**Q：Web 面板登录后立刻跳回登录页？**
+A：检查 `Jwt:Key` 是否为空或过短；令牌签发失败会导致 401。
+
+**Q：ClassIsland 插件提示「无法连接集控平台」？**
+A：检查插件「服务器地址」配置、服务端 `Server:Password` 是否与插件一致；契约见
+[api-contract-classisland.md](./api-contract-classisland.md)。

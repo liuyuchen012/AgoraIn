@@ -1,5 +1,0 @@
-<Solution>
-  <Project Path="CallServer/CallServer.csproj" />
-  <Project Path="CallCenter/CallCenter.csproj" />
-  <Project Path="CallPlugin/CallPlugin.csproj" />
-</Solution>

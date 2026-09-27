@@ -110,6 +110,9 @@ public partial class MainWindowViewModel : ObservableObject
     // ═══ 课表编辑器 ═══
     public TimetableViewModel Timetable { get; }
 
+    /// <summary>课表驱动服务（上下课自动切换模式 / 点名提醒 / 课时划消联动）。</summary>
+    public Services.TimetableDriver TimetableDriver { get; }
+
     // ═══ 命令 ═══
     public ICommand AddTabCommand { get; }
     public ICommand CloseTabCommand { get; }
@@ -133,6 +136,23 @@ public partial class MainWindowViewModel : ObservableObject
         ClassHours = new ClassHoursViewModel(baseDir);
         Teacher = new TeacherViewModel(baseDir);
         Timetable = new TimetableViewModel(baseDir);
+
+        // 课表驱动：上课切大屏、下课切控制；上课前提醒点名
+        TimetableDriver = new Services.TimetableDriver(baseDir)
+        {
+            Enabled = _appConfig.TimetableDriven,
+            RemindMinutesBefore = _appConfig.RemindMinutesBefore,
+        };
+        TimetableDriver.ClassStateChanged += (_, isClass) =>
+        {
+            SelectedMode = ModeOptions.First(o =>
+                o.Mode == (isClass ? AppMode.LargeScreen : AppMode.Control));
+            StatusMessage = isClass ? "上课中：已切换大屏模式" : "课间/下课：已切换控制模式";
+        };
+        TimetableDriver.ClassStartingSoon += (_, e) =>
+        {
+            StatusMessage = $"⏰ {e.SlotName} 还有 {e.MinutesBefore} 分钟上课，可开始点名";
+        };
 
         AddTabCommand = new RelayCommand(AddTab);
         CloseTabCommand = new RelayCommand<string?>(CloseTab);

@@ -1,9 +1,0 @@
-<Solution>
-  <Folder Name="/Client/">
-    <Project Path="AgoraInPro/CheckIn.Client.csproj" />
-    <Project Path="Client.Mobile/AgoraIn.Client.Mobile.csproj" />
-  </Folder>
-  <Folder Name="/Shared/">
-    <Project Path="Shared/CheckIn.Shared.csproj" />
-  </Folder>
-</Solution>
