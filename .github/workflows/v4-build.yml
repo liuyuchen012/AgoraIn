@@ -3,12 +3,12 @@ name: v4 build
 # ═══════════════════════════════════════════════════════════════════════
 # AgoraIn v4.0 自动构建
 #
-# ⚠️ 产物配额策略（私有仓库 Actions 产物存储仅 500MB）
-#   自包含发布包很大（桌面端约 60MB/平台 × 5 + 服务端 3 + 移动端 2），
-#   每次 push 都上传会瞬间打满配额。因此：
-#     · push / PR      → 只跑门禁（构建 + 测试），**不产生产物**（零配额占用）
-#     · tag / 手动触发 → 完整构建 + 上传产物（保留 3 天）+ 附到 GitHub Release
-#   正式分发请用 Release 附件（Release 资源不计入 Actions 产物配额）。
+# 触发策略（仓库已公开 → Actions 分钟与产物存储免费）：
+#   · push / PR      → 门禁 + Web 面板 + 桌面端 ×5 + 服务端 ×3（可下载产物）
+#   · tag / 手动触发 → 追加移动端（Android / iOS，最慢）
+#   · 打 tag         → 全部产物额外附到 GitHub Release（长期分发渠道）
+# 说明：自包含包体积较大（桌面端约 112MB 解压 / 约 50MB zip），产物保留 7 天，
+#       过期清理见 .github/workflows/cleanup-artifacts.yml。
 #
 # 产物（tag / 手动触发）：
 #   · 桌面端  AgoraIn-{win-x64,linux-x64,linux-arm64,osx-x64,osx-arm64}.zip
@@ -99,14 +99,13 @@ jobs:
       - name: 构建（含 vue-tsc 类型检查）
         run: npm run build
 
-      # 仅完整构建需要交给服务端打包；push 时跳过以省配额
-      - name: 上传产物（仅 tag / 手动触发）
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+      # 交给服务端作业打包进 wwwroot（体积约 1MB）
+      - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: webadmin-dist
           path: v4/src/AgoraIn.WebAdmin/dist
-          retention-days: 1
+          retention-days: 7
 
   # ══════════════════════════════════════════════════════════════════
   # 3. 桌面端（Avalonia）：Windows / Linux / macOS —— 仅 tag / 手动触发
@@ -114,7 +113,6 @@ jobs:
   desktop:
     name: 桌面端 ${{ matrix.name }}
     needs: test
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -144,14 +142,23 @@ jobs:
             -p:DebugType=none -p:DebugSymbols=false \
             -o publish/desktop
 
-      # 冒烟自测：验证发布产物可运行（GUI 子系统自测在 Linux/macOS 无控制台）
+      # 冒烟自测：验证发布产物可运行
+      # 注意：AgoraIn 是 GUI 子系统（WinExe）程序，PowerShell 用 `& exe` 调用**不会等待**、
+      # $LASTEXITCODE 为空，必须用 Start-Process -Wait -PassThru 取真实退出码。
+      # 另外校验报告内容作为第二道保险（防止退出码未正确传递）。
       - name: 冒烟自测
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          & publish/desktop/AgoraIn.exe --selftest --out publish/selftest-report.txt
-          if ($LASTEXITCODE -ne 0) { throw "自测失败（退出码 $LASTEXITCODE）" }
-          Get-Content publish/selftest-report.txt
+          $report = "publish/selftest-report.txt"
+          $p = Start-Process -FilePath "publish/desktop/AgoraIn.exe" `
+               -ArgumentList "--selftest", "--out", $report `
+               -Wait -PassThru -NoNewWindow
+          if (Test-Path $report) { Get-Content $report } else { throw "自测报告未生成" }
+          if ($p.ExitCode -ne 0) { throw "自测失败（退出码 $($p.ExitCode)）" }
+          if (-not (Select-String -Path $report -Pattern "selftest OK" -Quiet)) {
+            throw "自测报告未包含通过标记 selftest OK"
+          }
 
       - name: 打包（Windows）
         if: runner.os == 'Windows'
@@ -170,7 +177,7 @@ jobs:
         with:
           name: AgoraIn-${{ matrix.name }}
           path: publish/AgoraIn-${{ matrix.name }}.zip
-          retention-days: 3
+          retention-days: 7
 
       # 打 tag 时直接附到 Release（Release 资源不计入 Actions 产物配额）
       - name: 附到 Release
@@ -186,7 +193,6 @@ jobs:
   server:
     name: 服务端 ${{ matrix.name }}
     needs: [test, webadmin]
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -237,7 +243,7 @@ jobs:
         with:
           name: AgoraIn-Server-${{ matrix.name }}
           path: publish/AgoraIn-Server-${{ matrix.name }}.zip
-          retention-days: 3
+          retention-days: 7
 
       - name: 附到 Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -291,7 +297,7 @@ jobs:
           name: AgoraIn-Android
           path: publish/artifacts/*
           if-no-files-found: warn
-          retention-days: 3
+          retention-days: 7
 
       - name: 附到 Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -345,7 +351,7 @@ jobs:
         with:
           name: AgoraIn-iOS
           path: publish/artifacts/*
-          retention-days: 3
+          retention-days: 7
 
       - name: 附到 Release
         if: startsWith(github.ref, 'refs/tags/')
