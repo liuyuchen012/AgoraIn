@@ -212,6 +212,7 @@ public class ExamsController : ControllerBase
 
     /// <summary>生成空白通用答题卡（浏览器打开后 Ctrl+P 直接打印 A4）。</summary>
     [HttpGet("papers/{paperId}/sheet")]
+    [AllowAnonymous]
     public async Task<IActionResult> RenderSheet(string paperId)
     {
         var (paper, questions, options) = await LoadPaperAsync(paperId);
@@ -223,6 +224,7 @@ public class ExamsController : ControllerBase
 
     /// <summary>生成指定学生的专属答题卡（含姓名 + 学号条码）。</summary>
     [HttpGet("papers/{paperId}/sheet/{studentId}")]
+    [AllowAnonymous]
     public async Task<IActionResult> RenderSheetForStudent(string paperId, string studentId)
     {
         var (paper, questions, options) = await LoadPaperAsync(paperId);
@@ -240,6 +242,7 @@ public class ExamsController : ControllerBase
 
     /// <summary>批量生成全班答题卡（按学号排序，一人一页，浏览器打印为一册）。</summary>
     [HttpGet("papers/{paperId}/sheets/batch")]
+    [AllowAnonymous]
     public async Task<IActionResult> RenderBatch(string paperId, [FromQuery] string classId)
     {
         var (paper, questions, options) = await LoadPaperAsync(paperId);
