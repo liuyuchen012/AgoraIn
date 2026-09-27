@@ -296,67 +296,13 @@ jobs:
 
 
   # ══════════════════════════════════════════════════════════════════
-  # 6. 移动端 iOS（MAUI，模拟器构建免签名）—— 仅 tag / 手动触发
-  # ══════════════════════════════════════════════════════════════════
-  ios:
-    name: 移动端 iOS（模拟器）
-    needs: test
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: 安装 MAUI iOS 工作负载
-        run: dotnet workload install maui-ios
-
-      # 模拟器构建无需证书；真机/分发构建需配置 Apple 证书与 Provisioning Profile
-      # 本项目在非 Linux 平台同时多目标 android + ios；还原时必须限定为 ios，
-      # 否则会要求安装 android 工作负载（报 the following workloads must be installed: android）
-      - name: 还原（仅 iOS / iossimulator-arm64）
-        run: |
-          dotnet restore v4/src/AgoraIn.Mobile/AgoraIn.Mobile.csproj \
-            -p:TargetFrameworks=net10.0-ios \
-            -p:RuntimeIdentifier=iossimulator-arm64
-
-      - name: 编译（iossimulator-arm64，免签名）
-        run: |
-          dotnet build v4/src/AgoraIn.Mobile/AgoraIn.Mobile.csproj \
-            -f net10.0-ios -c Release \
-            -p:RuntimeIdentifier=iossimulator-arm64 --no-restore \
-            -p:DebugType=none -p:DebugSymbols=false \
-            -o publish/ios
-
-      - name: 打包 .app
-        shell: bash
-        run: |
-          mkdir -p publish/artifacts
-          APP=$(find publish/ios -maxdepth 4 -name "*.app" -type d | head -1)
-          if [ -n "$APP" ]; then
-            (cd "$(dirname "$APP")" && zip -r -q "$GITHUB_WORKSPACE/publish/artifacts/AgoraIn-iOS-simulator.zip" "$(basename "$APP")")
-            echo "已打包：$APP"
-          else
-            echo "未找到 .app 产物（iOS 构建可能需要签名配置）"
-            exit 1
-          fi
-
-      - name: 上传产物（保留 7 天）
-        uses: actions/upload-artifact@v5
-        with:
-          name: AgoraIn-iOS
-          path: publish/artifacts/*
-          retention-days: 7
-
-  # ══════════════════════════════════════════════════════════════════
-  # 7. 自动发布版本（全部平台构建成功后）
+  # 6. 自动发布版本（全部平台构建成功后）
   #    · push 构建 → 自动打 tag `v4.0.0-build.{运行号}` 并发布（预发布）
   #    · 手动打 tag → 发布正式版（非预发布），使用该 tag
   # ══════════════════════════════════════════════════════════════════
   release:
     name: 发布版本
-    needs: [desktop, server, android, ios]
+    needs: [desktop, server, android]
     # 仅 push 事件（含 tag）；桌面端与服务端必须成功，移动端失败不阻塞发布。
     # 守卫：排除自动生成的构建 tag，防止「发布 → 建 tag → 再触发构建 → 再发布」循环。
     # （默认 GITHUB_TOKEN 创建的事件本就不会触发新运行；此守卫是为将来换 PAT 时仍安全。）
