@@ -48,9 +48,9 @@ jobs:
     name: 质量门禁（build + test）
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
           cache: true
@@ -68,7 +68,7 @@ jobs:
       # 仅在失败时留证，保留 1 天，避免占用产物配额
       - name: 保存测试报告（仅失败时）
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: test-failure-${{ github.run_number }}
           path: '**/TestResults/*.trx'
@@ -86,9 +86,9 @@ jobs:
       run:
         working-directory: v4/src/AgoraIn.WebAdmin
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: npm
@@ -102,7 +102,7 @@ jobs:
 
       # 交给服务端作业打包进 wwwroot（体积约 1MB）
       - name: 上传产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: webadmin-dist
           path: v4/src/AgoraIn.WebAdmin/dist
@@ -125,9 +125,9 @@ jobs:
           - { name: osx-arm64,   os: macos-latest,   rid: osx-arm64 }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
           cache: true
@@ -173,8 +173,8 @@ jobs:
           chmod +x publish/desktop/AgoraIn
           (cd publish && zip -r -q "AgoraIn-${{ matrix.name }}.zip" desktop)
 
-      - name: 上传产物（保留 3 天）
-        uses: actions/upload-artifact@v4
+      - name: 上传产物（保留 7 天）
+        uses: actions/upload-artifact@v5
         with:
           name: AgoraIn-${{ matrix.name }}
           path: publish/AgoraIn-${{ matrix.name }}.zip
@@ -196,9 +196,9 @@ jobs:
           - { name: osx-arm64, os: macos-latest,   rid: osx-arm64 }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
           cache: true
@@ -206,7 +206,7 @@ jobs:
 
       # 把 Web 管理面板产物放进 wwwroot，随服务端一起分发
       - name: 下载 Web 管理面板
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: webadmin-dist
           path: v4/src/AgoraIn.Server/wwwroot
@@ -232,8 +232,8 @@ jobs:
           chmod +x publish/server/AgoraIn.Server
           (cd publish && zip -r -q "AgoraIn-Server-${{ matrix.name }}.zip" server)
 
-      - name: 上传产物（保留 3 天）
-        uses: actions/upload-artifact@v4
+      - name: 上传产物（保留 7 天）
+        uses: actions/upload-artifact@v5
         with:
           name: AgoraIn-Server-${{ matrix.name }}
           path: publish/AgoraIn-Server-${{ matrix.name }}.zip
@@ -248,13 +248,13 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -262,10 +262,18 @@ jobs:
       - name: 安装 MAUI Android 工作负载
         run: dotnet workload install maui-android
 
+      # MAUI 多目标项目必须按「单一 TFM + 单一 RID」单独还原，
+      # 否则 assets 文件缺少 net10.0-android/android-* 目标而报 NETSDK1047
+      - name: 还原（仅 Android / android-arm64）
+        run: |
+          dotnet restore v4/src/AgoraIn.Mobile/AgoraIn.Mobile.csproj \
+            -p:TargetFrameworks=net10.0-android \
+            -p:RuntimeIdentifier=android-arm64
+
       - name: 发布 APK
         run: |
           dotnet publish v4/src/AgoraIn.Mobile/AgoraIn.Mobile.csproj \
-            -f net10.0-android -c Release \
+            -f net10.0-android -c Release -r android-arm64 --no-restore \
             -p:AndroidPackageFormat=apk \
             -p:DebugType=none -p:DebugSymbols=false \
             -o publish/android
@@ -278,8 +286,8 @@ jobs:
           find publish/android -name "*.aab" -exec cp {} publish/artifacts/AgoraIn-Android.aab \;
           ls -lh publish/artifacts || true
 
-      - name: 上传产物（保留 3 天）
-        uses: actions/upload-artifact@v4
+      - name: 上传产物（保留 7 天）
+        uses: actions/upload-artifact@v5
         with:
           name: AgoraIn-Android
           path: publish/artifacts/*
@@ -295,9 +303,9 @@ jobs:
     needs: test
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -305,11 +313,19 @@ jobs:
         run: dotnet workload install maui-ios
 
       # 模拟器构建无需证书；真机/分发构建需配置 Apple 证书与 Provisioning Profile
+      # 本项目在非 Linux 平台同时多目标 android + ios；还原时必须限定为 ios，
+      # 否则会要求安装 android 工作负载（报 the following workloads must be installed: android）
+      - name: 还原（仅 iOS / iossimulator-arm64）
+        run: |
+          dotnet restore v4/src/AgoraIn.Mobile/AgoraIn.Mobile.csproj \
+            -p:TargetFrameworks=net10.0-ios \
+            -p:RuntimeIdentifier=iossimulator-arm64
+
       - name: 编译（iossimulator-arm64，免签名）
         run: |
           dotnet build v4/src/AgoraIn.Mobile/AgoraIn.Mobile.csproj \
             -f net10.0-ios -c Release \
-            -p:RuntimeIdentifier=iossimulator-arm64 \
+            -p:RuntimeIdentifier=iossimulator-arm64 --no-restore \
             -p:DebugType=none -p:DebugSymbols=false \
             -o publish/ios
 
@@ -326,8 +342,8 @@ jobs:
             exit 1
           fi
 
-      - name: 上传产物（保留 3 天）
-        uses: actions/upload-artifact@v4
+      - name: 上传产物（保留 7 天）
+        uses: actions/upload-artifact@v5
         with:
           name: AgoraIn-iOS
           path: publish/artifacts/*
@@ -354,7 +370,7 @@ jobs:
       contents: write
     steps:
       - name: 下载全部构建产物
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: assets
           merge-multiple: true
@@ -383,7 +399,7 @@ jobs:
           fi
 
       - name: 创建 GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: ${{ steps.ver.outputs.tag }}
