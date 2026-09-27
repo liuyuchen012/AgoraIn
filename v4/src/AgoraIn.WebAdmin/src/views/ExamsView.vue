@@ -315,7 +315,7 @@ async function viewSubmissions(row: any) {
   finally { submissionsLoading.value = false }
 }
 
-async function aiGrade(row: any) {
+async function aiGrade(_row: any) {
   ElMessage.info('AI 批改功能需要配置 DeepSeek API Key')
 }
 

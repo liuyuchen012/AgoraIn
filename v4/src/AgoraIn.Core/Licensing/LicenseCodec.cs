@@ -20,7 +20,7 @@ public static class LicenseCodec
 
     /// <summary>生产公钥（RSA-2048，与 v3.2 一致；私钥仅存在于签发工具本地）。</summary>
     public const string RsaPublicKeyXml =
-        "<RSAKeyValue><Modulus>sfTAweuTAZgl/d2hy6hX1BbOwiG4Uzuhj9r35tWXAeCOTln0K6XdqxaL0LXncOO4fKuydivqYPjC7jGF+ICAvm+4ExwJqbsGDw9nRHn3AfGLwm+VFBikusMIEagJso9DgTb2ShOOSoTkzDKODQFHfbZADzc95JpklqN4yhjeCBaJqE0y6/V1xrI/sk/Jmwk2VXOcOR0U7o9Dmza9WX5UWHR0zPfIOnsyqc513MwxEjQ/XFaGpjfAbOf78FnXbZV3tpbI8Ro+aBLo5Jm4YR4AmWy/MLY1Z9uSDQXti8wlRl1o5Rs1MokZ6gzlnXXIlmk1yOjgF82hUuyiSxB30HXYsQ==</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>";
+        "<RSAKeyValue><Modulus>n5QFqpFNJReatau9TOOsB70DL3/tqhh2xa7rHi1Ii3aeh22rBM6PB/DldWzcPrtn5L+wwJrbZcxXUVaphoyI+nCd5SnI7/0yx/6ODUrPFTarq8JJKEonP4HPvvvXXuHOYtYsWGH2kK7t5W/nu9bb6cBd0T/G503+GQz/3+KeG+BD4YHyqnI6fJKEAWsR5wpDQTgO2a78IPb0agyt56+SH821sG/zCaMkV8CMI0dbT+i+tc1oHva+3bIJvEBaZRv3rM8nS/Eu9d9EpcnK+zhRyTrx+pTJIIS/MZvtqYwUejozRrpndD4fBLi1f5N3TFJkV/FqKPJgoRMBwuAxYqV4tQ==</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>";
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {

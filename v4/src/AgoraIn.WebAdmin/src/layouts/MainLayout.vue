@@ -78,7 +78,7 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import { DataLine, School, User, Monitor, Clock, Setting, UserFilled, Key, Bell, FolderOpened, Document, EditPen } from '@element-plus/icons-vue'
+import { DataLine, School, User, Monitor, Clock, Setting, UserFilled, Key, Bell, FolderOpened, Document } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
