@@ -162,27 +162,38 @@ Windows 10 兼容：`v4/Directory.Build.props` 已统一设置 `CETCompat=false`
 
 ## 5. 移动端构建
 
+> **共同注意**：`AgoraIn.Mobile` 是多目标项目（android / ios / windows）。
+> 直接 `publish`/`build` 时隐式还原**不会**包含需要的 RID 目标，会报
+> `NETSDK1047: assets 文件没有 xx/yy 的目标` 或要求安装其它平台的工作负载。
+> 正确做法：**先按「单一 TFM + 单一 RID」显式还原，再带 `--no-restore` 构建**。
+
 ### Android
 
 ```bash
-dotnet build src/AgoraIn.Mobile -f net10.0-android -c Release
-# 产出 APK：bin/Release/net10.0-android/*.apk
+dotnet workload install maui-android
+
+# 先按 TFM + RID 还原，再发布（-r android-arm64 对应绝大多数现代手机）
+dotnet restore src/AgoraIn.Mobile/AgoraIn.Mobile.csproj \
+  -p:TargetFrameworks=net10.0-android -p:RuntimeIdentifier=android-arm64
+dotnet publish src/AgoraIn.Mobile/AgoraIn.Mobile.csproj \
+  -f net10.0-android -c Release -r android-arm64 --no-restore \
+  -p:AndroidPackageFormat=apk -o publish/android
+# 产出 APK：publish/android/*.apk（默认未签名，装机需自行签名）
 ```
 
-### Windows
+### iOS（需 macOS + Xcode）
 
 ```bash
-# 必须先按 RID 还原，再构建（MAUI 多目标要求）
-dotnet restore src/AgoraIn.Mobile -p:TargetFramework=net10.0-windows10.0.19041.0 -p:RuntimeIdentifier=win-x64
-dotnet build src/AgoraIn.Mobile -f net10.0-windows10.0.19041.0 -r win-x64 --no-restore -c Release
-```
+dotnet workload install maui-ios
 
-### iOS
-
-需 macOS 或与 Mac 配对的 Windows 环境：
-
-```bash
-dotnet build src/AgoraIn.Mobile -f net10.0-ios -c Release
+# macOS 上 TargetFrameworks 同时含 android + ios，还原必须限定为 ios，
+# 否则报「the following workloads must be installed: android」
+dotnet restore src/AgoraIn.Mobile/AgoraIn.Mobile.csproj \
+  -p:TargetFrameworks=net10.0-ios -p:RuntimeIdentifier=iossimulator-arm64
+dotnet build src/AgoraIn.Mobile/AgoraIn.Mobile.csproj \
+  -f net10.0-ios -c Release -p:RuntimeIdentifier=iossimulator-arm64 --no-restore \
+  -o publish/ios
+# 产出 .app（模拟器用，免签名）；真机分发需 Apple 证书 + Provisioning Profile
 ```
 
 ## 6. 家长端小程序
