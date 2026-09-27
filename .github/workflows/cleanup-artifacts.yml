@@ -1,0 +1,81 @@
+name: 清理 Actions 产物
+
+# ═══════════════════════════════════════════════════════════════════════
+# 私有仓库的 Actions 产物存储有配额（Free 计划 500MB），自包含发布包体积大，
+# 容易打满导致 "Artifact storage quota has been hit"。
+#
+# 本工作流用于：
+#   · 每周日凌晨自动清理 3 天前的产物
+#   · 手动触发时可立即清空**全部**产物（配额被打满时用这个救急）
+#
+# 注意：清理产物不影响 GitHub Release 附件（Release 资源单独计费，不计入产物配额）。
+# ═══════════════════════════════════════════════════════════════════════
+
+on:
+  schedule:
+    # 每周日 03:00（UTC）
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      delete_all:
+        description: '清空全部产物（配额被打满时选 true）'
+        type: boolean
+        default: false
+      keep_days:
+        description: '保留最近 N 天的产物（delete_all 为 false 时生效）'
+        type: number
+        default: 3
+
+jobs:
+  cleanup:
+    name: 清理旧产物
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: 删除过期产物
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // workflow_dispatch 时读取输入；schedule 触发时用默认值
+            const isManual = ${{ github.event_name == 'workflow_dispatch' }};
+            const deleteAll = isManual && ${{ github.event_name == 'workflow_dispatch' && inputs.delete_all == true }};
+            const keepDays = Number(isManual ? ${{ github.event_name == 'workflow_dispatch' && inputs.keep_days || 3 }} : 3);
+            const cutoff = Date.now() - keepDays * 24 * 3600 * 1000;
+
+            core.info(`模式：${deleteAll ? '清空全部' : `保留最近 ${keepDays} 天`}`);
+
+            let deleted = 0;
+            let freedBytes = 0;
+            let page = 1;
+
+            while (true) {
+              const res = await github.rest.actions.listArtifactsForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100,
+                page,
+              });
+              const items = res.data.artifacts;
+              if (!items.length) break;
+
+              for (const a of items) {
+                const expired = new Date(a.created_at).getTime() < cutoff;
+                if (!deleteAll && !expired) continue;
+
+                await github.rest.actions.deleteArtifact({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: a.id,
+                });
+                freedBytes += a.size_in_bytes || 0;
+                deleted++;
+                core.info(`已删除：${a.name}（${((a.size_in_bytes || 0) / 1048576).toFixed(1)} MB）`);
+              }
+
+              if (items.length < 100) break;
+              page++;
+            }
+
+            const freedMB = (freedBytes / 1048576).toFixed(1);
+            core.notice(`清理完成：删除 ${deleted} 个产物，释放约 ${freedMB} MB`);

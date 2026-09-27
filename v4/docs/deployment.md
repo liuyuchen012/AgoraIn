@@ -206,26 +206,46 @@ powershell -ExecutionPolicy Bypass -File v4/scripts/gate.ps1
 
 ## 7.1 自动构建（GitHub Actions）
 
-工作流：`.github/workflows/v4-build.yml`
+工作流：`.github/workflows/v4-build.yml`（清理：`.github/workflows/cleanup-artifacts.yml`）
 
 | 作业 | 运行环境 | 产物 |
 | --- | --- | --- |
-| 质量门禁 | ubuntu | build + `dotnet test`（trx 报告） |
-| Web 管理面板 | ubuntu | `dist/` 静态产物 |
+| 质量门禁 | ubuntu | build + `dotnet test`（失败时留存 trx，1 天） |
+| Web 管理面板 | ubuntu | `dist/`（约 1MB，供服务端打包用） |
 | 桌面端 ×5 | windows / ubuntu / macos | `AgoraIn-{win-x64, linux-x64, linux-arm64, osx-x64, osx-arm64}.zip`（自包含，解压即用） |
 | 服务端 ×3 | windows / ubuntu / macos | `AgoraIn-Server-{win-x64, linux-x64, osx-arm64}.zip`（已内置 Web 管理面板到 wwwroot） |
 | 移动端 Android | ubuntu | `AgoraIn-Android.apk` / `.aab` |
 | 移动端 iOS | macos | `AgoraIn-iOS-simulator.zip`（模拟器构建，免签名） |
 
-**触发策略**（私有仓库 Actions 分钟计费：macOS ×10、Windows ×2）：
+### 触发策略与产物配额
 
-- `push` 到 `v4.0` / PR（改动 `v4/**`）→ 门禁 + Web 面板 + 桌面端五平台 + 服务端三平台
-- 打 tag（`v4*`）或手动 `workflow_dispatch` → 追加移动端（Android / iOS，最慢）
-- 打 tag 时所有产物自动附到对应的 GitHub Release
+私有仓库的 **Actions 产物存储有配额（Free 计划 500MB）**，而自包含发布包体积很大
+（桌面端约 60MB/平台）。因此按「不浪费配额」原则设计：
 
-**产物签名**：iOS 与 macOS 产物**默认不签名**，仅供内部测试与验证编译；
-正式分发需在仓库 Secrets 中配置 Apple 证书 / 签名密钥后扩展工作流对应步骤。
-Android Release 包同样需要配置 keystore 才会产出已签名 APK。
+| 触发 | 执行内容 | 产物 |
+| --- | --- | --- |
+| `push` / PR（改动 `v4/**`） | 门禁（构建 + 测试）+ Web 面板构建校验 | **不产生产物**（零配额占用） |
+| 打 tag（`v4*`） | 门禁 + Web + 桌面端 ×5 + 服务端 ×3 + Android + iOS | 产物保留 **3 天** + 自动附到 **GitHub Release** |
+| 手动 `workflow_dispatch` | 同 tag（但不建 Release） | 产物保留 3 天 |
+
+> **正式分发请用 GitHub Release 附件**：Release 资源不计入 Actions 产物配额。
+> 产物上传时关闭了调试符号（`DebugType=none`）以显著减小体积。
+
+### 配额被打满时怎么办
+
+报错形如 `Artifact storage quota has been hit` 时，运行 **清理 Actions 产物** 工作流
+（`cleanup-artifacts.yml`，Actions → 该工作流 → Run workflow）：
+
+- `delete_all: true` → **立即清空全部产物**（救急，推荐）
+- 或填 `keep_days: N` → 只删除 N 天前的产物
+
+该工作流也会每周日 03:00（UTC）自动清理 3 天前的产物。
+
+### 产物签名
+
+iOS 与 macOS 产物**默认不签名**，仅供内部测试与验证编译；正式分发需在仓库
+Secrets 中配置 Apple 证书 / 签名密钥后扩展对应步骤。Android Release 包同样需要
+配置 keystore 才会产出已签名 APK。
 
 ## 8. 备份与数据
 
