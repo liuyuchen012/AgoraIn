@@ -50,7 +50,6 @@ CHANGELOG.md
 /docs/
 /screenshots/
 /photo/
-/.github/
 /.playwright-cli/
 /.video_agent/
 
@@ -68,6 +67,10 @@ CHANGELOG.md
 /_pack_cipx.ps1
 /_template.csproj
 /$null
+
+## 历史 CI 与开源期配置（v4 使用 .github/workflows/v4-build.yml）
+/.github/workflows/build.yml
+/.github/FUNDING.yml
 
 ## 本地备份（v3 README 存档，不入库）
 /README.v3.md.bak

@@ -204,6 +204,29 @@ powershell -ExecutionPolicy Bypass -File v4/scripts/gate.ps1
 - `--selftest` 报告落在 `v4/out/selftest-report.txt`（GUI 子系统无控制台，必须用 `--out` 落盘）
 - MAUI 项目不在门禁内，按上文单独构建
 
+## 7.1 自动构建（GitHub Actions）
+
+工作流：`.github/workflows/v4-build.yml`
+
+| 作业 | 运行环境 | 产物 |
+| --- | --- | --- |
+| 质量门禁 | ubuntu | build + `dotnet test`（trx 报告） |
+| Web 管理面板 | ubuntu | `dist/` 静态产物 |
+| 桌面端 ×5 | windows / ubuntu / macos | `AgoraIn-{win-x64, linux-x64, linux-arm64, osx-x64, osx-arm64}.zip`（自包含，解压即用） |
+| 服务端 ×3 | windows / ubuntu / macos | `AgoraIn-Server-{win-x64, linux-x64, osx-arm64}.zip`（已内置 Web 管理面板到 wwwroot） |
+| 移动端 Android | ubuntu | `AgoraIn-Android.apk` / `.aab` |
+| 移动端 iOS | macos | `AgoraIn-iOS-simulator.zip`（模拟器构建，免签名） |
+
+**触发策略**（私有仓库 Actions 分钟计费：macOS ×10、Windows ×2）：
+
+- `push` 到 `v4.0` / PR（改动 `v4/**`）→ 门禁 + Web 面板 + 桌面端五平台 + 服务端三平台
+- 打 tag（`v4*`）或手动 `workflow_dispatch` → 追加移动端（Android / iOS，最慢）
+- 打 tag 时所有产物自动附到对应的 GitHub Release
+
+**产物签名**：iOS 与 macOS 产物**默认不签名**，仅供内部测试与验证编译；
+正式分发需在仓库 Secrets 中配置 Apple 证书 / 签名密钥后扩展工作流对应步骤。
+Android Release 包同样需要配置 keystore 才会产出已签名 APK。
+
 ## 8. 备份与数据
 
 | 数据 | 位置 | 备份建议 |

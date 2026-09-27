@@ -1,0 +1,339 @@
+name: v4 build
+
+# ═══════════════════════════════════════════════════════════════════════
+# AgoraIn v4.0 自动构建
+#
+# 产物（artifact，打 tag 时自动附到 Release）：
+#   · 桌面端      AgoraIn-{win-x64, linux-x64, linux-arm64, osx-x64, osx-arm64}.zip
+#   · 服务端      AgoraIn-Server-{win-x64, linux-x64, osx-arm64}.zip（含 Web 管理面板）
+#   · 移动端      AgoraIn-Android.apk / AgoraIn-Android.aab
+#   · 移动端 iOS  AgoraIn-iOS-simulator（模拟器构建，免签名；真机需证书）
+#
+# 触发策略（私有仓库 Actions 分钟数计费，macOS 10x / Windows 2x）：
+#   · push / PR      → 门禁测试 + Web 面板 + 桌面端三平台 + 服务端三平台
+#   · tag / 手动触发 → 追加移动端（Android / iOS，最慢）
+#
+# 签名说明：iOS、macOS 产物默认**不签名**，仅用于内部测试与验证编译。
+#           正式分发需在仓库 Secrets 中配置证书后扩展对应步骤。
+# ═══════════════════════════════════════════════════════════════════════
+
+on:
+  push:
+    branches: [v4.0]
+    tags: ['v4*']
+    paths:
+      - 'v4/**'
+      - '.github/workflows/v4-build.yml'
+  pull_request:
+    paths: ['v4/**']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+
+jobs:
+  # ══════════════════════════════════════════════════════════════════
+  # 1. 质量门禁：构建 + 单元测试（Linux，成本最低）
+  # ══════════════════════════════════════════════════════════════════
+  test:
+    name: 质量门禁（build + test）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+          cache: true
+          cache-dependency-path: v4/**/*.csproj
+
+      - name: 还原
+        run: dotnet restore v4/AgoraIn.sln
+
+      - name: 构建（Debug，零警告要求）
+        run: dotnet build v4/AgoraIn.sln -c Debug --no-restore
+
+      - name: 单元测试
+        run: dotnet test v4/AgoraIn.sln --no-build -c Debug --logger "trx;LogFileName=test-results.trx"
+
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/test-results.trx'
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ══════════════════════════════════════════════════════════════════
+  # 2. Web 管理面板（Vue 3 → 静态产物，供服务端 wwwroot 托管）
+  # ══════════════════════════════════════════════════════════════════
+  webadmin:
+    name: Web 管理面板
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: v4/src/AgoraIn.WebAdmin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: v4/src/AgoraIn.WebAdmin/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 构建（含 vue-tsc 类型检查）
+        run: npm run build
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: webadmin-dist
+          path: v4/src/AgoraIn.WebAdmin/dist
+          retention-days: 7
+
+  # ══════════════════════════════════════════════════════════════════
+  # 3. 桌面端（Avalonia）：Windows / Linux / macOS
+  # ══════════════════════════════════════════════════════════════════
+  desktop:
+    name: 桌面端 ${{ matrix.name }}
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: win-x64,     os: windows-latest, rid: win-x64 }
+          - { name: linux-x64,   os: ubuntu-latest,  rid: linux-x64 }
+          - { name: linux-arm64, os: ubuntu-latest,  rid: linux-arm64 }
+          - { name: osx-x64,     os: macos-latest,   rid: osx-x64 }
+          - { name: osx-arm64,   os: macos-latest,   rid: osx-arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+          cache: true
+          cache-dependency-path: v4/**/*.csproj
+
+      - name: 发布（自包含）
+        shell: bash
+        run: |
+          dotnet publish v4/src/AgoraIn.App/AgoraIn.App.csproj \
+            -c Release -r ${{ matrix.rid }} --self-contained true \
+            -p:PublishReadyToRun=false \
+            -o publish/desktop
+
+      # 冒烟自测：验证发布产物可运行（仅 Windows，GUI 子系统自测在 Linux/macOS 无控制台）
+      - name: 冒烟自测
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & publish/desktop/AgoraIn.exe --selftest --out publish/selftest-report.txt
+          if ($LASTEXITCODE -ne 0) { throw "自测失败（退出码 $LASTEXITCODE）" }
+          Get-Content publish/selftest-report.txt
+
+      - name: 打包（Windows）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path publish/desktop/* -DestinationPath publish/AgoraIn-${{ matrix.name }}.zip
+
+      - name: 打包（Linux / macOS）
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          chmod +x publish/desktop/AgoraIn
+          (cd publish && zip -r -q "AgoraIn-${{ matrix.name }}.zip" desktop)
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgoraIn-${{ matrix.name }}
+          path: publish/AgoraIn-${{ matrix.name }}.zip
+          retention-days: 14
+
+  # ══════════════════════════════════════════════════════════════════
+  # 4. 服务端（ASP.NET Core）：Windows / Linux / macOS（含 Web 管理面板）
+  # ══════════════════════════════════════════════════════════════════
+  server:
+    name: 服务端 ${{ matrix.name }}
+    needs: [test, webadmin]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: win-x64,   os: windows-latest, rid: win-x64 }
+          - { name: linux-x64, os: ubuntu-latest,  rid: linux-x64 }
+          - { name: osx-arm64, os: macos-latest,   rid: osx-arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+          cache: true
+          cache-dependency-path: v4/**/*.csproj
+
+      # 把 Web 管理面板产物放进 wwwroot，随服务端一起分发
+      - name: 下载 Web 管理面板
+        uses: actions/download-artifact@v4
+        with:
+          name: webadmin-dist
+          path: v4/src/AgoraIn.Server/wwwroot
+
+      - name: 发布（自包含）
+        shell: bash
+        run: |
+          dotnet publish v4/src/AgoraIn.Server/AgoraIn.Server.csproj \
+            -c Release -r ${{ matrix.rid }} --self-contained true \
+            -o publish/server
+
+      - name: 打包（Windows）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path publish/server/* -DestinationPath publish/AgoraIn-Server-${{ matrix.name }}.zip
+
+      - name: 打包（Linux / macOS）
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          chmod +x publish/server/AgoraIn.Server
+          (cd publish && zip -r -q "AgoraIn-Server-${{ matrix.name }}.zip" server)
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgoraIn-Server-${{ matrix.name }}
+          path: publish/AgoraIn-Server-${{ matrix.name }}.zip
+          retention-days: 14
+
+  # ══════════════════════════════════════════════════════════════════
+  # 5. 移动端 Android（MAUI）—— 仅 tag / 手动触发
+  # ══════════════════════════════════════════════════════════════════
+  android:
+    name: 移动端 Android
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 安装 MAUI Android 工作负载
+        run: dotnet workload install maui-android
+
+      - name: 发布 APK
+        run: |
+          dotnet publish v4/src/AgoraIn.Mobile/AgoraIn.Mobile.csproj \
+            -f net10.0-android -c Release \
+            -p:AndroidPackageFormat=apk \
+            -o publish/android
+
+      - name: 收集产物
+        shell: bash
+        run: |
+          mkdir -p publish/artifacts
+          find publish/android -name "*.apk" -exec cp {} publish/artifacts/AgoraIn-Android.apk \;
+          find publish/android -name "*.aab" -exec cp {} publish/artifacts/AgoraIn-Android.aab \;
+          ls -lh publish/artifacts || true
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgoraIn-Android
+          path: publish/artifacts/*
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ══════════════════════════════════════════════════════════════════
+  # 6. 移动端 iOS（MAUI）—— 仅 tag / 手动触发，模拟器构建（免签名）
+  # ══════════════════════════════════════════════════════════════════
+  ios:
+    name: 移动端 iOS（模拟器）
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: 安装 MAUI iOS 工作负载
+        run: dotnet workload install maui-ios
+
+      # 模拟器构建无需证书；真机/分发构建需配置 Apple 证书与 Provisioning Profile
+      - name: 编译（iossimulator-arm64，免签名）
+        run: |
+          dotnet build v4/src/AgoraIn.Mobile/AgoraIn.Mobile.csproj \
+            -f net10.0-ios -c Release \
+            -p:RuntimeIdentifier=iossimulator-arm64 \
+            -o publish/ios
+
+      - name: 打包 .app
+        shell: bash
+        run: |
+          mkdir -p publish/artifacts
+          APP=$(find publish/ios -maxdepth 4 -name "*.app" -type d | head -1)
+          if [ -n "$APP" ]; then
+            (cd "$(dirname "$APP")" && zip -r -q "$GITHUB_WORKSPACE/publish/artifacts/AgoraIn-iOS-simulator.zip" "$(basename "$APP")")
+            echo "已打包：$APP"
+          else
+            echo "未找到 .app 产物（iOS 构建可能需要签名配置）"
+            exit 1
+          fi
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgoraIn-iOS
+          path: publish/artifacts/*
+          retention-days: 14
+
+  # ══════════════════════════════════════════════════════════════════
+  # 7. 打 tag 时把所有产物附到 Release
+  # ══════════════════════════════════════════════════════════════════
+  release:
+    name: 发布 Release
+    # 等待移动端（tag 时才会执行）；某个平台失败不阻塞其余产物发布
+    if: startsWith(github.ref, 'refs/tags/') && !cancelled()
+    needs: [desktop, server, android, ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 下载全部构建产物
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+          pattern: AgoraIn-*
+
+      - name: 附到 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.{zip,apk,aab}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
