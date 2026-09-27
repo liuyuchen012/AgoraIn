@@ -300,6 +300,15 @@ A：Web 管理面板是单页应用（history 路由），需要服务端把未�
 （`app.MapFallbackToFile("index.html")`，已内置）。同时确认 `wwwroot/` 下确实有 Web 面板产物
 （`index.html` + `assets/`）；没有的话按第 3 节把 `dist/` 的内容复制进去。
 
+> 若用 **nginx / 宝塔** 托管 Web 面板（静态文件由 nginx 直接返回，只把 `/api`、`/hub` 反代给服务端），
+> 则回退必须由 nginx 负责，否则 `/login` 会由 nginx 直接 404：
+> ```nginx
+> location / {
+>     root /www/wwwroot/agorain/wwwroot;   # Web 面板 dist 所在目录
+>     try_files $uri $uri/ /index.html;    # 关键：找不到文件就回退到前端入口
+> }
+> ```
+
 **Q：ClassIsland 插件提示「无法连接集控平台」？**
 A：检查插件「服务器地址」配置、服务端 `Server:Password` 是否与插件一致；契约见
 [api-contract-classisland.md](./api-contract-classisland.md)。
