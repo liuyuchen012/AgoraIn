@@ -55,6 +55,11 @@ public sealed class RankingItem
     public int Rank { get; set; }
     public string Name { get; set; } = "";
     public string Time { get; set; } = "";
+
+    /// <summary>金银铜高亮（沿用 v3 语义，视图按此绑定 Classes）。</summary>
+    public bool IsFirst => Rank == 1;
+    public bool IsSecond => Rank == 2;
+    public bool IsThird => Rank == 3;
 }
 
 /// <summary>标签页配置（data/tabs/{id}/config.json）。</summary>

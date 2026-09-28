@@ -39,6 +39,7 @@ public static class SelfTestRunner
     [
         new CoreSelfTestModule(),
         new DataSelfTestModule(),
+        new DomainSelfTestModule(),
     ];
 
     /// <summary>执行自测并输出结果；返回值作为进程退出码（0 = 全部通过）。</summary>

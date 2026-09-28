@@ -56,6 +56,20 @@
       <Setter Property="Foreground" Value="#333333" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
+
+    <!-- ═══ 打卡排名金银铜高亮（沿用 v3 视觉语义，色值取自 App.axaml 集中资源） ═══ -->
+    <Style Selector="TextBlock.rankNum">
+      <Setter Property="Foreground" Value="#333333" />
+    </Style>
+    <Style Selector="TextBlock.rankNum.gold">
+      <Setter Property="Foreground" Value="{DynamicResource Rank.Gold}" />
+    </Style>
+    <Style Selector="TextBlock.rankNum.silver">
+      <Setter Property="Foreground" Value="{DynamicResource Rank.Silver}" />
+    </Style>
+    <Style Selector="TextBlock.rankNum.bronze">
+      <Setter Property="Foreground" Value="{DynamicResource Rank.Bronze}" />
+    </Style>
     <Style Selector="Border.tree-item">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="CornerRadius" Value="4" />
@@ -213,7 +227,10 @@
                         <Border Padding="8,5" Margin="0,1" CornerRadius="4">
                           <Grid ColumnDefinitions="40,*,70">
                             <TextBlock Text="{Binding Rank}" FontWeight="Bold" VerticalAlignment="Center"
-                                       Foreground="#333333" />
+                                       Classes.rankNum="True"
+                                       Classes.gold="{Binding IsFirst}"
+                                       Classes.silver="{Binding IsSecond}"
+                                       Classes.bronze="{Binding IsThird}" />
                             <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" FontSize="13" />
                             <TextBlock Grid.Column="2" Text="{Binding Time}" Foreground="#888888" FontSize="12"
                                        VerticalAlignment="Center" />
@@ -245,7 +262,7 @@
                   <ItemsControl ItemsSource="{Binding Students}" x:CompileBindings="False">
                     <ItemsControl.ItemsPanel>
                       <ItemsPanelTemplate>
-                        <UniformGrid Columns="{Binding ButtonCols}" />
+                        <UniformGrid Columns="{Binding ButtonCols}" Rows="{Binding ButtonRows}" />
                       </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
