@@ -24,10 +24,15 @@
 
 ## 打卡 `checkin`
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/api/v4/checkin/records?taskId=` | 任务打卡记录 |
-| POST | `/api/v4/checkin/records` | 批量提交（按 `taskId+studentId+checkedAt` 幂等去重） |
+| 方法 | 路径 | 说明 | 鉴权 |
+| --- | --- | --- | --- |
+| GET | `/api/v4/checkin/tasks` | 任务列表（含签到进度） | JWT |
+| GET | `/api/v4/checkin/records?taskId=&studentId=` | 打卡记录（可按任务/学生筛选） | JWT |
+| POST | `/api/v4/checkin/records` | 批量提交（按 `taskId+studentId+checkedAt` 幂等去重） | JWT |
+| POST | `/api/v4/checkin/signin-codes` | 生成扫码签到码 `{taskId,classroom?,subject?,password?,expiresMinutes?}` | JWT |
+| GET | `/api/v4/checkin/signin-codes` | 当前生效签到码（大屏渲染二维码用） | JWT |
+| DELETE | `/api/v4/checkin/signin-codes/{id}` | 下码（结束该签到） | JWT |
+| POST | `/api/v4/checkin/scan` | 学生扫码签到 `{code,password?,studentId?,name?}` → `{success,rank,…}`；响应含 SignalR 推送 | 匿名 |
 
 ## 课时 `classhours`
 
@@ -110,6 +115,9 @@
 | GET | `/api/v4/parent/notices?studentId=` | 通知（含已读状态） | JWT |
 | POST | `/api/v4/parent/notices/{id}/read` | 标记已读 | JWT |
 | GET/POST | `/api/v4/parent/messages` | 留言列表 / 发送 | JWT |
+| GET | `/api/v4/parent/resources?studentId=` | 已下发资源列表 | JWT |
+| GET | `/api/v4/parent/resources/{id}/file` | 资源下载（仅已下发资源） | JWT |
+| GET | `/api/v4/parent/child/{studentId}/duty` | 值日表现（完成率 + 记录） | JWT |
 | POST | `/api/v4/parent/invite/{studentId}` | 教师生成 6 位邀请码 | admin/teacher |
 
 > 权限：家长接口会校验「该学生已绑定到当前用户」，越权返回 403。
@@ -118,13 +126,63 @@
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/v4/exams/papers` | 创建试卷 |
-| GET | `/api/v4/exams/papers/{paperId}/sheet` | **空白通用答题卡**（A4 HTML，浏览器打印） |
-| GET | `/api/v4/exams/papers/{paperId}/sheet/{studentId}` | **学生专属卡**（含姓名 + 学号条码） |
-| GET | `/api/v4/exams/papers/{paperId}/sheets/batch?classId=` | **全班批量**（一人一页，打印为一册） |
-| POST | `/api/v4/exams/submissions` | 上传答题卡照片（multipart）→ DeepSeek 识别考号+客观题 |
-| POST | `/api/v4/exams/submissions/{sid}/grade/{qid}` | AI 批改主观题 |
+| GET/POST | `/api/v4/exams/papers` | 试卷列表 / 创建（`isTemplate=true` 可作题库被复用） |
+| PUT/DELETE | `/api/v4/exams/papers/{paperId}` | 更新 / 删除（级联删题） |
+| GET/POST | `/api/v4/exams/papers/{paperId}/questions` | 题目列表 / 添加 |
+| PUT | `/api/v4/exams/papers/{paperId}/questions/{qid}` | 更新题目 |
+| POST | `/api/v4/exams/papers/{paperId}/reuse/{templatePaperId}` | 从题库模板复制题目 |
+| GET | `/api/v4/sheet/{paperId}` | **空白通用答题卡**（A4 HTML，浏览器打印，匿名） |
+| GET | `/api/v4/sheet/{paperId}/student/{studentId}` | **学生专属卡**（含学号条码区，匿名） |
+| GET | `/api/v4/sheet/{paperId}/batch?classId=` | **全班批量**（一人一页带条码，匿名） |
+| GET | `/api/v4/exams/submissions?paperId=` | 提交记录列表 |
+| POST | `/api/v4/exams/submissions` | 上传答题卡照片（multipart）→ 视觉模型识别考号+客观题，客观题自动判分 |
+| POST | `/api/v4/exams/submissions/{sid}/grade-all` | 整卷 AI 批改（主观题逐题调用） |
+| POST | `/api/v4/exams/submissions/{sid}/grade/{qid}` | 单题 AI 批改 |
+| GET | `/api/v4/exams/submissions/{sid}/results` | 逐题结果（含题干/标准答案/满分/置信度/来源） |
+| PUT | `/api/v4/exams/submissions/{sid}/results/{qid}` | 教师复判改分（原结果进 HistoryJson 留痕） |
+| POST | `/api/v4/exams/submissions/{sid}/bind-student` | 确认绑定学生（考号识别 → 学号） |
+| POST | `/api/v4/exams/submissions/{sid}/review` | 标记待人工复判 |
 | POST | `/api/v4/exams/submissions/{sid}/confirm` | 教师确认（汇总总分，状态 → 已确认） |
+| GET | `/api/v4/exams/papers/{paperId}/statistics` | 成绩统计（按学生总分/按题得分率，仅已确认） |
+| GET | `/api/v4/exams/papers/{paperId}/export` | 成绩单导出 CSV（UTF-8 BOM） |
+
+## 点名 `rollcall`
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/v4/rollcall/sessions` | 创建场次 `{classId,mode,subject?,weightFairness?}` |
+| GET | `/api/v4/rollcall/sessions?classId=` | 场次列表（历史） |
+| POST | `/api/v4/rollcall/sessions/{id}/end` | 结束场次 |
+| POST | `/api/v4/rollcall/sessions/{id}/pick` | 点下一名（随机加权/顺序轮转/指定 `studentId`），落点即推送 |
+| POST | `/api/v4/rollcall/records/{recordId}/result` | 标记结果 `{result,pointDelta?}`（非 0 产生积分联动，幂等） |
+| GET | `/api/v4/rollcall/records?sessionId=&studentId=&from=&to=` | 记录查询（导出用） |
+| GET | `/api/v4/rollcall/sessions/{id}/report` | 场次报表（出勤率、逐生被点次数） |
+
+## 座位 `seats`
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/v4/seats/charts?classId=` | 布局列表（含历史快照） |
+| POST | `/api/v4/seats/charts` | 创建布局（自动生成行列网格） |
+| GET | `/api/v4/seats/charts/{id}` | 布局详情（含座位与学生姓名） |
+| DELETE | `/api/v4/seats/charts/{id}` | 删除布局 |
+| PUT | `/api/v4/seats/charts/{id}/activate` | 设为当前生效布局 |
+| PUT | `/api/v4/seats/seats/{seatId}` | 更新座位 `{studentId?,clearStudent,disabled?,groupName?}` |
+| POST | `/api/v4/seats/charts/{id}/shuffle` | 随机换座（换座前自动留存快照） |
+
+## 同步 `sync`
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/v4/sync/pull?since=&take=` | 变更集拉取（班级/学生/任务/课时账户全量 + 记录类按水位增量），返回 `serverTime` 作下次水位；推送复用各资源幂等 POST |
+
+## AI 设置 `settings/ai`（需 system.settings 权限）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/v4/settings/ai` | 读取（模型/视觉模型/温度/maxTokens/低置信度阈值/图像外发开关） |
+| PUT | `/api/v4/settings/ai` | 保存（存 AppSetting，覆盖 appsettings 默认值） |
+| GET | `/api/v4/settings/ai/logs?take=` | AI 调用日志（Token 消耗与失败原因） |
 
 ## 呼叫（ClassIsland）
 
@@ -140,8 +198,10 @@
 
 - Hub 路径：`/hub/live`
 - 客户端调用 `JoinClass(classId)` 加入班级分组
-- 服务端事件：`CheckInUpdate`、`RollCallUpdate`、`PointsUpdate`、`Notification`
+- 服务端事件：`CheckInUpdate`、`RollCallUpdate`、`PointsUpdate`、`Notification`、`SeatChartUpdate`
 - 服务端方法：`BroadcastCheckIn`、`BroadcastRollCall`、`BroadcastPoints`、`SendNotification`
+- 定向推送（`Clients.User`）按 JWT 的 `name_identifier` claim 匹配（本系统以用户名作为用户标识）
+- 服务端在扫码签到、座位变更、点名落点/结果等写入时主动推送
 
 ## 错误约定
 
