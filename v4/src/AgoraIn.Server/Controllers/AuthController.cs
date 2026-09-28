@@ -198,6 +198,9 @@ public class AuthController : ControllerBase
             Subject = new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.Name, username),
+                // SignalR 的 DefaultUserIdProvider 按 NameIdentifier 解析 Clients.User(...)，
+                // 缺该 claim 时定向通知永远匹配不到连接（本系统以用户名作为用户标识）
+                new Claim(ClaimTypes.NameIdentifier, username),
                 new Claim(ClaimTypes.Role, role),
             ]),
             Expires = DateTime.Now.AddHours(24),

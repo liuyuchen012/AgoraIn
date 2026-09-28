@@ -24,6 +24,7 @@ public sealed class ServerDbContext : DbContext
     public DbSet<AgoraIn.Core.Entities.ClassInfo> Classes => Set<AgoraIn.Core.Entities.ClassInfo>();
     public DbSet<AgoraIn.Core.Entities.Student> Students => Set<AgoraIn.Core.Entities.Student>();
     public DbSet<AgoraIn.Core.Entities.CheckInTask> CheckInTasks => Set<AgoraIn.Core.Entities.CheckInTask>();
+    public DbSet<AgoraIn.Core.Entities.TaskRosterEntry> TaskRosterEntries => Set<AgoraIn.Core.Entities.TaskRosterEntry>();
     public DbSet<AgoraIn.Core.Entities.CheckInRecord> CheckInRecords => Set<AgoraIn.Core.Entities.CheckInRecord>();
     public DbSet<AgoraIn.Core.Entities.ClassHourAccount> ClassHourAccounts => Set<AgoraIn.Core.Entities.ClassHourAccount>();
     public DbSet<AgoraIn.Core.Entities.ClassHourRecord> ClassHourRecords => Set<AgoraIn.Core.Entities.ClassHourRecord>();
@@ -49,6 +50,16 @@ public sealed class ServerDbContext : DbContext
     public DbSet<AgoraIn.Core.Entities.ClassPlan> ClassPlans => Set<AgoraIn.Core.Entities.ClassPlan>();
     public DbSet<AgoraIn.Core.Entities.ClassPlanEntry> ClassPlanEntries => Set<AgoraIn.Core.Entities.ClassPlanEntry>();
 
+    // ── 座位 / 点名 / 扫码签到（复用 Core 实体） ──
+    public DbSet<AgoraIn.Core.Entities.SeatChart> SeatCharts => Set<AgoraIn.Core.Entities.SeatChart>();
+    public DbSet<AgoraIn.Core.Entities.Seat> Seats => Set<AgoraIn.Core.Entities.Seat>();
+    public DbSet<AgoraIn.Core.Entities.RollCallSession> RollCallSessions => Set<AgoraIn.Core.Entities.RollCallSession>();
+    public DbSet<AgoraIn.Core.Entities.RollCallRecord> RollCallRecords => Set<AgoraIn.Core.Entities.RollCallRecord>();
+    public DbSet<AgoraIn.Core.Entities.SignInCode> SignInCodes => Set<AgoraIn.Core.Entities.SignInCode>();
+
+    // ── AI 调用日志（Token 消耗可查） ──
+    public DbSet<AiCallLogEntity> AiCallLogs => Set<AiCallLogEntity>();
+
     // ── ClassIsland 呼叫（兼容层） ──
     public DbSet<CallEntity> Calls => Set<CallEntity>();
 
@@ -73,6 +84,15 @@ public sealed class ServerDbContext : DbContext
             .HasIndex(r => new { r.NoticeId, r.ParentUserId }).IsUnique();
         modelBuilder.Entity<AgoraIn.Core.Entities.AppSetting>()
             .HasKey(s => s.Key);
+
+        // 座位 / 点名 / 签到码 / AI 日志的查询索引
+        modelBuilder.Entity<AgoraIn.Core.Entities.SeatChart>().HasIndex(c => c.ClassId);
+        modelBuilder.Entity<AgoraIn.Core.Entities.Seat>().HasIndex(s => s.ChartId);
+        modelBuilder.Entity<AgoraIn.Core.Entities.RollCallSession>().HasIndex(s => new { s.ClassId, s.StartedAt });
+        modelBuilder.Entity<AgoraIn.Core.Entities.RollCallRecord>().HasIndex(r => r.SessionId);
+        modelBuilder.Entity<AgoraIn.Core.Entities.SignInCode>().HasIndex(c => c.Code);
+        modelBuilder.Entity<AgoraIn.Core.Entities.TaskRosterEntry>().HasIndex(r => r.TaskId);
+        modelBuilder.Entity<AiCallLogEntity>().HasIndex(l => l.CreatedAt);
     }
 }
 
@@ -146,6 +166,34 @@ public sealed class EmailCodeEntity
     /// <summary>是否仍可用（未用、未过期、尝试次数未超限）。</summary>
     public bool IsUsable(DateTime now, int maxAttempts = 5)
         => !Used && ExpireAt > now && Attempts < maxAttempts;
+}
+
+/// <summary>
+/// AI 大模型调用日志：供管理端核对 Token 消耗与失败原因（<c>api/v4/settings/ai/logs</c>）。
+/// </summary>
+public sealed class AiCallLogEntity
+{
+    public long Id { get; set; }
+
+    /// <summary>调用场景：recognize（答题卡识别）/ grade（主观题批改）。</summary>
+    public string Endpoint { get; set; } = "";
+
+    /// <summary>实际使用的模型名。</summary>
+    public string Model { get; set; } = "";
+
+    public int? PromptTokens { get; set; }
+    public int? CompletionTokens { get; set; }
+    public int? TotalTokens { get; set; }
+
+    /// <summary>调用耗时（毫秒）。</summary>
+    public int DurationMs { get; set; }
+
+    public bool Success { get; set; }
+
+    /// <summary>失败原因摘要（成功为 null）。</summary>
+    public string? Error { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
 }
 
 /// <summary>已注册的桌面端设备。</summary>

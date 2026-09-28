@@ -65,6 +65,44 @@ public sealed class CheckInTask
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 }
 
+/// <summary>
+/// 扫码签到码（v3 扫码签到语义）：短码 + 签到密码 + 教室/科目。
+/// 学生端凭短码（可选密码）提交签到，服务端按幂等写入 <see cref="CheckInRecord"/>（Source=Scan）。
+/// </summary>
+public sealed class SignInCode
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+
+    /// <summary>短码（6 位大写字母数字，展示于大屏二维码）。</summary>
+    public string Code { get; set; } = "";
+
+    /// <summary>关联签到任务（学生打卡落到的任务 Id）。</summary>
+    public string TaskId { get; set; } = "";
+
+    /// <summary>教室（可空）。</summary>
+    public string? Classroom { get; set; }
+
+    /// <summary>科目（可空）。</summary>
+    public string? Subject { get; set; }
+
+    /// <summary>签到密码（可空 = 无需密码）。</summary>
+    public string? Password { get; set; }
+
+    /// <summary>创建人（教师）。</summary>
+    public string CreatedBy { get; set; } = "";
+
+    /// <summary>是否生效（下码后置 false）。</summary>
+    public bool Active { get; set; } = true;
+
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
+
+    /// <summary>过期时间（null = 不过期）。</summary>
+    public DateTime? ExpiresAt { get; set; }
+
+    /// <summary>是否仍可签到（生效且未过期）。</summary>
+    public bool IsUsable(DateTime now) => Active && (ExpiresAt == null || ExpiresAt > now);
+}
+
 /// <summary>任务名单：任务与学生的关联（v3 name.txt 语义，含展示排序）。</summary>
 public sealed class TaskRosterEntry
 {

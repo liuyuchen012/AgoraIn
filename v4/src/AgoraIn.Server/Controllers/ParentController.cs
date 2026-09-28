@@ -1,3 +1,4 @@
+using AgoraIn.Server.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -6,7 +7,7 @@ namespace AgoraIn.Server.Controllers;
 
 /// <summary>
 /// 家长端 API。前缀 /api/v4/parent
-/// 家长绑定孩子、查看通知/概览、留言。
+/// 家长绑定孩子、查看通知/概览/资源/值日、留言。
 /// </summary>
 [ApiController]
 [Route("api/v4/parent")]
@@ -191,6 +192,82 @@ public class ParentController : ControllerBase
         _db.Messages.Add(msg);
         await _db.SaveChangesAsync();
         return Ok(msg);
+    }
+
+    /// <summary>已下发给家长班的资源列表（按孩子班级过滤）。</summary>
+    [HttpGet("resources")]
+    public async Task<IActionResult> Resources([FromQuery] string studentId)
+    {
+        var username = User.Identity?.Name ?? "";
+        var bound = await _db.ParentBindings.AnyAsync(b =>
+            b.StudentId == studentId && b.ParentUserId == username &&
+            b.Status == Core.Entities.ParentBindingStatus.Bound);
+        if (!bound) return Forbid();
+
+        var stu = await _db.Students.FindAsync(studentId);
+        if (stu == null) return NotFound();
+
+        var resources = await _db.Resources
+            .Where(r => r.PublishedToParents && (r.ClassId == stu.ClassId || r.ClassId == null))
+            .OrderByDescending(r => r.CreatedAt)
+            .Take(100)
+            .ToListAsync();
+        return Ok(resources.Select(r => new
+        {
+            r.Id, r.Title, r.Kind, r.Subject, r.CreatedAt,
+            downloadUrl = $"/api/v4/parent/resources/{r.Id}/file",
+        }));
+    }
+
+    /// <summary>资源文件下载（家长侧，只允许已下发资源）。</summary>
+    [HttpGet("resources/{id}/file")]
+    public async Task<IActionResult> DownloadResource(string id)
+    {
+        var res = await _db.Resources.FindAsync(id);
+        if (res == null || !res.PublishedToParents) return NotFound();
+        if (res.Kind == Core.Entities.ResourceKind.Link)
+            return Redirect(res.Location);
+
+        var paths = HttpContext.RequestServices.GetRequiredService<ServerPaths>();
+        var fullPath = Path.Combine(paths.DataDirectory, res.Location);
+        if (!System.IO.File.Exists(fullPath)) return NotFound("文件不存在");
+        return PhysicalFile(fullPath, "application/octet-stream", res.Title);
+    }
+
+    /// <summary>孩子的值日记录（家长端展示值日表现）。</summary>
+    [HttpGet("child/{studentId}/duty")]
+    public async Task<IActionResult> ChildDuty(string studentId, [FromQuery] int take = 30)
+    {
+        var username = User.Identity?.Name ?? "";
+        var bound = await _db.ParentBindings.AnyAsync(b =>
+            b.StudentId == studentId && b.ParentUserId == username &&
+            b.Status == Core.Entities.ParentBindingStatus.Bound);
+        if (!bound) return Forbid();
+
+        var records = await _db.DutyRecords
+            .Where(r => r.StudentId == studentId)
+            .OrderByDescending(r => r.Date)
+            .Take(Math.Clamp(take, 1, 100))
+            .ToListAsync();
+
+        var postIds = records.Select(r => r.PostId).Distinct().ToList();
+        var posts = await _db.DutyPosts
+            .Where(p => postIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, p => p.Name);
+
+        var total = records.Count;
+        var completed = records.Count(r => r.Completed);
+        return Ok(new
+        {
+            completedCount = completed,
+            totalCount = total,
+            completionRate = total == 0 ? 0 : Math.Round(completed * 100.0 / total, 1),
+            records = records.Select(r => new
+            {
+                r.Date, r.Completed, r.Note,
+                postName = posts.TryGetValue(r.PostId, out var name) ? name : "值日",
+            }),
+        });
     }
 
     /// <summary>获取孩子的成绩概览（受隐私开关控制）。</summary>

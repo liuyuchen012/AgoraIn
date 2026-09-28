@@ -36,7 +36,9 @@ catch (Exception ex)
 
 var dbPath = Path.Combine(dataDir, "server.db");
 builder.Services.AddSingleton(new ServerPaths(dataDir));
-builder.Services.AddDbContext<ServerDbContext>(opt => opt.UseSqlite($"Data Source={dbPath}"));
+// AddDbContextFactory 同时把 ServerDbContext 注册为 scoped 服务，控制器照常注入；
+// 额外提供单例工厂，供 DeepSeekGradingService 等非作用域组件写 AI 调用日志
+builder.Services.AddDbContextFactory<ServerDbContext>(opt => opt.UseSqlite($"Data Source={dbPath}"));
 
 // ── JWT ──
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "AgoraIn-v4-default-key-change-in-production!";
@@ -58,6 +60,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddSignalR();
 
 // ── DeepSeek AI ──
+builder.Services.AddScoped<AiSettingsService>();
 builder.Services.AddHttpClient<DeepSeekGradingService>();
 
 // ── 离线授权 ──
@@ -93,6 +96,9 @@ using (var scope = app.Services.CreateScope())
     try
     {
         await db.Database.EnsureCreatedAsync();
+        // EnsureCreated 只对空库建表；后加入的表（座位/点名/签到码/AI 日志）
+        // 必须在已有库上用 CREATE TABLE IF NOT EXISTS 补齐，否则升级部署直接 no such table
+        await DbSchemaPatch.ApplyAsync(db);
     }
     catch (Exception ex)
     {

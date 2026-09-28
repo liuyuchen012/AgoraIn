@@ -249,7 +249,7 @@ public static class AnswerSheetRenderer
             var base64 = Convert.ToBase64String(png);
             return $"<img src=\"data:image/png;base64,{base64}\" style=\"width:16mm;height:16mm\" />";
         }
-        catch (Exception ex)
+        catch
         {
             // QRCoder 可能在某些环境不可用，回退为文本
             return $"<div style=\"font-size:6pt;text-align:center;line-height:1.2\">QR<br/>{Escape(paperId[..8])}…<br/>P{pageIndex}</div>";

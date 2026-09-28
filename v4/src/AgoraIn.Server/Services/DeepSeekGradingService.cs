@@ -1,32 +1,45 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using AgoraIn.Server.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace AgoraIn.Server.Services;
 
 /// <summary>
-/// DeepSeek AI 题卡识别与批改服务。
-/// 接口兼容 OpenAI 协议（DeepSeek API 兼容 OpenAI chat/completions）。
+/// AI 题卡识别与批改服务（OpenAI 兼容 chat/completions，DeepSeek/GLM-4V/Qwen-VL 等均可）。
+/// 配置优先级：数据库 AppSetting（ai.*，管理端在线可调）&gt; appsettings.json DeepSeek 节。
+/// 每次调用写一条 AiCallLog（Token 消耗与失败原因可查）；答题卡图片识别受隐私开关控制。
 /// </summary>
 public sealed class DeepSeekGradingService
 {
     private readonly HttpClient _http;
+    private readonly AiSettingsService _settings;
+    private readonly IDbContextFactory<ServerDbContext> _dbFactory;
     private readonly IConfiguration _config;
 
-    public DeepSeekGradingService(HttpClient http, IConfiguration config)
+    public DeepSeekGradingService(
+        HttpClient http,
+        AiSettingsService settings,
+        IDbContextFactory<ServerDbContext> dbFactory,
+        IConfiguration config)
     {
         _http = http;
+        _settings = settings;
+        _dbFactory = dbFactory;
         _config = config;
     }
 
     private string ApiKey => _config["DeepSeek:ApiKey"] ?? "";
     private string BaseUrl => _config["DeepSeek:BaseUrl"] ?? "https://api.deepseek.com";
-    private string Model => _config["DeepSeek:Model"] ?? "deepseek-chat";
 
-    /// <summary>识别答题卡图片：考号涂卡 + 客观题 OMR。</summary>
+    /// <summary>识别答题卡图片：考号涂卡 + 客观题 OMR（走视觉模型）。</summary>
     public async Task<OmrResult?> RecognizeAnswerSheetAsync(byte[] imageData, CancellationToken ct = default)
     {
+        var settings = await _settings.LoadAsync(ct);
         if (string.IsNullOrEmpty(ApiKey)) return null;
+
+        // 隐私合规开关（规格 6.9）：关闭后不把学生作答图像发给第三方模型
+        if (!settings.AllowImageToCloud) return null;
 
         var prompt = @"你是一个答题卡识别专家。请识别这张答题卡图片：
 1. 识别顶部的考号涂卡区（OMR气泡），读取考号数字
@@ -39,7 +52,8 @@ public sealed class DeepSeekGradingService
 }
 只返回 JSON，不要其他文字。";
 
-        var result = await CallDeepSeekWithImageAsync(prompt, imageData, ct);
+        var model = string.IsNullOrEmpty(settings.VisionModel) ? settings.Model : settings.VisionModel;
+        var result = await CallAsync(prompt, model, settings, imageData, "recognize", ct);
         if (result == null) return null;
 
         try
@@ -49,9 +63,10 @@ public sealed class DeepSeekGradingService
         catch { return null; }
     }
 
-    /// <summary>AI 批改主观题（填空/简答/作文）。</summary>
+    /// <summary>AI 批改主观题（填空/简答/作文，纯文本走批改模型）。</summary>
     public async Task<AiGradingResponse?> GradeSubjectiveAsync(AiGradingRequest request, CancellationToken ct = default)
     {
+        var settings = await _settings.LoadAsync(ct);
         if (string.IsNullOrEmpty(ApiKey)) return null;
 
         var prompt = $@"你是一个专业的试卷批改老师。请批改以下题目：
@@ -67,7 +82,7 @@ public sealed class DeepSeekGradingService
 {{""score"": 分数, ""comment"": ""评语"", ""confidence"": 0.0-1.0}}
 只返回 JSON，不要其他文字。";
 
-        var result = await CallDeepSeekAsync(prompt, ct);
+        var result = await CallAsync(prompt, settings.Model, settings, null, "grade", ct);
         if (result == null) return null;
 
         try
@@ -77,41 +92,19 @@ public sealed class DeepSeekGradingService
         catch { return null; }
     }
 
-    /// <summary>调用 DeepSeek chat/completions 接口（纯文本）。</summary>
-    private async Task<string?> CallDeepSeekAsync(string prompt, CancellationToken ct)
+    /// <summary>调用 OpenAI 兼容 chat/completions；含重试与调用日志（Token 用量）。</summary>
+    private async Task<string?> CallAsync(
+        string prompt, string model, AiRuntimeSettings settings,
+        byte[]? imageData, string endpoint, CancellationToken ct)
     {
-        try
+        if (string.IsNullOrEmpty(model)) model = "deepseek-chat";
+
+        object BuildRequest() => new
         {
-            var request = new
-            {
-                model = Model,
-                messages = new[] { new { role = "user", content = prompt } },
-                temperature = 0.1,
-                max_tokens = 1024,
-            };
-
-            _http.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", ApiKey);
-
-            var response = await _http.PostAsJsonAsync($"{BaseUrl}/v1/chat/completions", request, ct);
-            response.EnsureSuccessStatusCode();
-
-            var json = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
-            return json.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
-        }
-        catch { return null; }
-    }
-
-    /// <summary>调用 DeepSeek chat/completions 接口（含图片）。</summary>
-    private async Task<string?> CallDeepSeekWithImageAsync(string prompt, byte[] imageData, CancellationToken ct)
-    {
-        try
-        {
-            var base64 = Convert.ToBase64String(imageData);
-            var request = new
-            {
-                model = "deepseek-chat",
-                messages = new[]
+            model,
+            messages = imageData == null
+                ? new object[] { new { role = "user", content = prompt } }
+                : new object[]
                 {
                     new
                     {
@@ -119,31 +112,73 @@ public sealed class DeepSeekGradingService
                         content = new object[]
                         {
                             new { type = "text", text = prompt },
-                            new { type = "image_url", image_url = new { url = $"data:image/jpeg;base64,{base64}" } }
+                            new { type = "image_url", image_url = new { url = $"data:image/jpeg;base64,{Convert.ToBase64String(imageData)}" } }
                         }
                     }
                 },
-                temperature = 0.1,
-                max_tokens = 1024,
-            };
+            temperature = settings.Temperature,
+            max_tokens = settings.MaxTokens,
+        };
 
-            _http.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", ApiKey);
+        _http.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", ApiKey);
 
-            var response = await _http.PostAsJsonAsync($"{BaseUrl}/v1/chat/completions", request, ct);
-            response.EnsureSuccessStatusCode();
+        var retries = Math.Clamp(settings.Retries, 0, 5);
+        var started = Environment.TickCount64;
+        string? error = null;
 
-            var json = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
-            return json.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
+        for (var attempt = 0; attempt <= retries; attempt++)
+        {
+            try
+            {
+                var response = await _http.PostAsJsonAsync($"{BaseUrl}/v1/chat/completions", BuildRequest(), ct);
+                response.EnsureSuccessStatusCode();
+
+                var json = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
+                var content = json.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
+
+                var usage = json.TryGetProperty("usage", out var u) ? u : default;
+                await WriteLogAsync(endpoint, model, usage, Environment.TickCount64 - started,
+                    success: true, error: null, ct);
+                return content;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException && attempt < retries)
+            {
+                error = ex.Message;
+                await Task.Delay(500 * (attempt + 1), ct);
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                break;
+            }
         }
-        catch { return null; }
+
+        await WriteLogAsync(endpoint, model, default, Environment.TickCount64 - started, success: false, error, ct);
+        return null;
     }
 
-    private static void WriteReport(string? path, IReadOnlyList<string> lines)
+    private async Task WriteLogAsync(string endpoint, string model, JsonElement usage, long durationMs, bool success, string? error, CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(path)) return;
-        var dir = Path.GetDirectoryName(Path.GetFullPath(path));
-        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        File.WriteAllLines(path, lines);
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync(ct);
+            db.AiCallLogs.Add(new AiCallLogEntity
+            {
+                Endpoint = endpoint,
+                Model = model,
+                PromptTokens = usage.ValueKind == JsonValueKind.Object && usage.TryGetProperty("prompt_tokens", out var p) && p.TryGetInt32(out var pi) ? pi : null,
+                CompletionTokens = usage.ValueKind == JsonValueKind.Object && usage.TryGetProperty("completion_tokens", out var cp) && cp.TryGetInt32(out var ci) ? ci : null,
+                TotalTokens = usage.ValueKind == JsonValueKind.Object && usage.TryGetProperty("total_tokens", out var tp) && tp.TryGetInt32(out var ti) ? ti : null,
+                DurationMs = (int)Math.Clamp(durationMs, 0, int.MaxValue),
+                Success = success,
+                Error = error,
+            });
+            await db.SaveChangesAsync(ct);
+        }
+        catch
+        {
+            // 日志失败不影响主流程
+        }
     }
 }
