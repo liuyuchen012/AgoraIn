@@ -8,6 +8,8 @@ public partial class AnswerSheetScannerPage : ContentPage
     private byte[]? _imageBytes;
     private string? _selectedPaperId;
 
+    public AnswerSheetScannerPage() : this(App.Api) { }
+
     public AnswerSheetScannerPage(Services.ApiClient api)
     {
         InitializeComponent();

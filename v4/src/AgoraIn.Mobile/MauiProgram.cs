@@ -17,7 +17,6 @@ public static class MauiProgram
 
 		// 注册服务
 		builder.Services.AddSingleton<Services.ApiClient>();
-		builder.Services.AddTransient<Pages.AnswerSheetScannerPage>();
 
 #if DEBUG
 		builder.Logging.AddDebug();
