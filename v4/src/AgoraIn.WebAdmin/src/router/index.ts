@@ -46,6 +46,12 @@ const router = createRouter({
           meta: { title: '课时管理' },
         },
         {
+          path: 'schedule',
+          name: 'schedule',
+          component: () => import('@/views/ScheduleView.vue'),
+          meta: { title: '课程表' },
+        },
+        {
           path: 'notices',
           name: 'notices',
           component: () => import('@/views/NoticesView.vue'),
@@ -64,6 +70,18 @@ const router = createRouter({
           meta: { title: '试卷管理' },
         },
         {
+          path: 'scores',
+          name: 'scores',
+          component: () => import('@/views/ScoresView.vue'),
+          meta: { title: '成绩统计' },
+        },
+        {
+          path: 'messages',
+          name: 'messages',
+          component: () => import('@/views/MessagesView.vue'),
+          meta: { title: '家长消息' },
+        },
+        {
           path: 'users',
           name: 'users',
           component: () => import('@/views/UsersView.vue'),
@@ -80,6 +98,12 @@ const router = createRouter({
           name: 'settings',
           component: () => import('@/views/SettingsView.vue'),
           meta: { title: '系统设置' },
+        },
+        {
+          path: 'ai-settings',
+          name: 'ai-settings',
+          component: () => import('@/views/AiSettingsView.vue'),
+          meta: { title: 'AI 批改设置' },
         },
       ],
     },

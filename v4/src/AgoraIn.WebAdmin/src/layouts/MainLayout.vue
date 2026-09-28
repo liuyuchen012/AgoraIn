@@ -28,6 +28,10 @@
           <el-icon><Clock /></el-icon>
           <span>课时管理</span>
         </el-menu-item>
+        <el-menu-item index="/schedule">
+          <el-icon><Calendar /></el-icon>
+          <span>课程表</span>
+        </el-menu-item>
         <el-menu-item index="/notices">
           <el-icon><Bell /></el-icon>
           <span>通知公告</span>
@@ -40,6 +44,14 @@
           <el-icon><Document /></el-icon>
           <span>试卷管理</span>
         </el-menu-item>
+        <el-menu-item index="/scores">
+          <el-icon><TrendCharts /></el-icon>
+          <span>成绩统计</span>
+        </el-menu-item>
+        <el-menu-item index="/messages">
+          <el-icon><ChatDotRound /></el-icon>
+          <span>家长消息</span>
+        </el-menu-item>
         <el-menu-item index="/users">
           <el-icon><UserFilled /></el-icon>
           <span>用户管理</span>
@@ -51,6 +63,10 @@
         <el-menu-item index="/settings">
           <el-icon><Setting /></el-icon>
           <span>系统设置</span>
+        </el-menu-item>
+        <el-menu-item index="/ai-settings">
+          <el-icon><MagicStick /></el-icon>
+          <span>AI 批改设置</span>
         </el-menu-item>
       </el-menu>
     </el-aside>
@@ -78,7 +94,7 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import { DataLine, School, User, Monitor, Clock, Setting, UserFilled, Key, Bell, FolderOpened, Document } from '@element-plus/icons-vue'
+import { DataLine, School, User, Monitor, Clock, Setting, UserFilled, Key, Bell, FolderOpened, Document, Calendar, TrendCharts, ChatDotRound, MagicStick } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()

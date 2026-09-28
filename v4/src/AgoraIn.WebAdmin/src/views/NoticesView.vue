@@ -22,8 +22,27 @@
             <span v-else>立即</span>
           </template>
         </el-table-column>
+        <el-table-column label="操作" width="110" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="showUnread(row)">未读名单</el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
+
+    <!-- 未读名单对话框 -->
+    <el-dialog v-model="unreadVisible" :title="`已读回执 — ${unreadNotice?.title || ''}`" width="420px">
+      <div v-if="unread">
+        <el-alert v-if="unread.unreadCount === 0" type="success" :closable="false" title="全部已读" />
+        <template v-else>
+          <p style="margin:0 0 8px">未读家长（按学生）：<el-tag type="danger">{{ unread.unreadCount }}</el-tag></p>
+          <el-tag v-for="s in unread.students" :key="s" style="margin:0 8px 8px 0">{{ s }}</el-tag>
+        </template>
+      </div>
+      <template #footer>
+        <el-button @click="unreadVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="dialogVisible" title="发布公告" width="520px" destroy-on-close>
       <el-form :model="form" label-width="80px">
@@ -61,6 +80,17 @@ const list = ref<any[]>([])
 const classes = ref<ClassRow[]>([])
 const dialogVisible = ref(false)
 const form = reactive({ title: '', content: '', classId: '', publishAt: '' })
+
+// 未读名单
+const unreadVisible = ref(false)
+const unreadNotice = ref<any>(null)
+const unread = ref<{ unreadCount: number; students: string[] } | null>(null)
+
+async function showUnread(row: any) {
+  unreadNotice.value = row
+  unread.value = await noticeApi.unread(row.id)
+  unreadVisible.value = true
+}
 
 async function loadList() {
   loading.value = true

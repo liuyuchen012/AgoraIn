@@ -84,13 +84,26 @@ export const deviceApi = {
 
 // ── 打卡 ──
 export const checkinApi = {
-  records: (taskId: string) => client.get<unknown[]>('/checkin/records', { params: { taskId } }),
+  records: (taskId?: string, studentId?: string) =>
+    client.get<unknown[]>('/checkin/records', {
+      params: { ...(taskId ? { taskId } : {}), ...(studentId ? { studentId } : {}) },
+    }),
+  // 扫码签到（v3 语义：短码 + 签到密码 + 教室/科目）
+  createSignInCode: (data: { taskId: string; classroom?: string; subject?: string; password?: string; expiresMinutes?: number }) =>
+    client.post<SignInCodeRow>('/checkin/signin-codes', data),
+  listSignInCodes: () => client.get<SignInCodeRow[]>('/checkin/signin-codes'),
+  deactivateSignInCode: (id: string) => client.delete<void>(`/checkin/signin-codes/${id}`),
 }
 
 // ── 课时 ──
 export const classhourApi = {
   accounts: (classId?: string) =>
     client.get<ClassHourAccountRow[]>('/classhours/accounts', { params: classId ? { classId } : {} }),
+  /** 手工划消/赠送课时（delta 正 = 赠送，负 = 划消） */
+  adjust: (studentId: string, delta: number, note: string) =>
+    client.post<{ count: number }>('/classhours/records', [
+      { studentId, date: new Date().toISOString().slice(0, 10), delta, note, source: 0 },
+    ]),
 }
 
 // ── 仪表盘 ──
@@ -102,6 +115,9 @@ export const dashboardApi = {
 export const noticeApi = {
   list: (classId?: string) => client.get<unknown[]>('/notices', { params: classId ? { classId } : {} }),
   create: (data: unknown) => client.post<unknown>('/notices', data),
+  /** 未读名单（已绑定家长 - 已读回执） */
+  unread: (noticeId: string) =>
+    client.get<{ unreadCount: number; students: string[] }>(`/notices/${noticeId}/unread`),
 }
 
 // ── 资源库 ──
@@ -136,13 +152,86 @@ export const examApi = {
     fd.append('file', file)
     return client.post<unknown>(`/exams/submissions?paperId=${paperId}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
   },
-  aiGrade: (submissionId: string, questionId: string) =>
-    client.post<unknown>(`/exams/submissions/${submissionId}/grade/${questionId}`, {}),
+  /** 整卷 AI 批改（主观题逐题调用大模型） */
+  gradeAll: (submissionId: string) =>
+    client.post<{ graded: number; status: string }>(`/exams/submissions/${submissionId}/grade-all`, {}),
+  aiGrade: (submissionId: string, questionId: string, data?: unknown) =>
+    client.post<unknown>(`/exams/submissions/${submissionId}/grade/${questionId}`, data ?? {}),
+  /** 逐题结果（含题干/标准答案/满分） */
+  getResults: (submissionId: string) => client.get<ResultRow[]>(`/exams/submissions/${submissionId}/results`),
+  /** 教师复判/改分 */
+  overrideResult: (submissionId: string, questionId: string, data: { score: number; comment?: string }) =>
+    client.put<unknown>(`/exams/submissions/${submissionId}/results/${questionId}`, data),
+  /** 确认绑定学生（考号识别 → 学号） */
+  bindStudent: (submissionId: string, studentId: string) =>
+    client.post<unknown>(`/exams/submissions/${submissionId}/bind-student`, { studentId }),
+  /** 标记待人工复判 */
+  review: (submissionId: string) =>
+    client.post<{ status: string }>(`/exams/submissions/${submissionId}/review`, {}),
   confirm: (submissionId: string) => client.post<unknown>(`/exams/submissions/${submissionId}/confirm`, {}),
+  /** 成绩统计与导出 */
+  statistics: (paperId: string) => client.get<StatisticsRow>(`/exams/papers/${paperId}/statistics`),
+  exportCsvUrl: (paperId: string) => `/api/v4/exams/papers/${paperId}/export`,
+  /** 题库复用：从模板试卷复制题目 */
+  reuse: (paperId: string, templatePaperId: string) =>
+    client.post<{ copied: number }>(`/exams/papers/${paperId}/reuse/${templatePaperId}`, {}),
   // 答题卡渲染（匿名控制器）
   sheetUrl: (paperId: string) => `/api/v4/sheet/${paperId}`,
   sheetForStudent: (paperId: string, studentId: string) => `/api/v4/sheet/${paperId}/student/${studentId}`,
-  batchSheetUrl: (paperId: string, classId: string) => `/api/v4/sheet/${paperId}/batch?classId=${classId}`,
+  batchSheetUrl: (paperIdId: string, classId: string) => `/api/v4/sheet/${paperIdId}/batch?classId=${classId}`,
+}
+
+// ── 点名 ──
+export const rollcallApi = {
+  sessions: (classId?: string) =>
+    client.get<RollCallSessionRow[]>('/rollcall/sessions', { params: classId ? { classId } : {} }),
+  createSession: (data: { classId: string; mode: number; subject?: string; weightFairness?: boolean }) =>
+    client.post<RollCallSessionRow>('/rollcall/sessions', data),
+  endSession: (id: string) => client.post<unknown>(`/rollcall/sessions/${id}/end`, {}),
+  pick: (id: string, studentId?: string) =>
+    client.post<{ recordId: string; studentId: string; studentName: string }>(`/rollcall/sessions/${id}/pick`, { studentId }),
+  markResult: (recordId: string, result: number, pointDelta = 0) =>
+    client.post<unknown>(`/rollcall/records/${recordId}/result`, { result, pointDelta }),
+  records: (params?: { sessionId?: string; studentId?: string; from?: string; to?: string }) =>
+    client.get<unknown[]>('/rollcall/records', { params }),
+  report: (id: string) => client.get<ReportRow>(`/rollcall/sessions/${id}/report`),
+}
+
+// ── 座位 ──
+export const seatApi = {
+  charts: (classId: string) => client.get<SeatChartRow[]>('/seats/charts', { params: { classId } }),
+  chart: (id: string) =>
+    client.get<{ chart: SeatChartRow; seats: SeatRow[] }>(`/seats/charts/${id}`),
+  createChart: (data: { classId: string; name: string; rows: number; cols: number; podium: number }) =>
+    client.post<SeatChartRow>('/seats/charts', data),
+  removeChart: (id: string) => client.delete<void>(`/seats/charts/${id}`),
+  activate: (id: string) => client.put<unknown>(`/seats/charts/${id}/activate`, {}),
+  updateSeat: (seatId: string, data: { studentId?: string; clearStudent?: boolean; disabled?: boolean; groupName?: string }) =>
+    client.put<unknown>(`/seats/seats/${seatId}`, data),
+  shuffle: (id: string, excludeStudentIds?: string[]) =>
+    client.post<{ snapshotId: string; moved: number }>(`/seats/charts/${id}/shuffle`, { excludeStudentIds }),
+}
+
+// ── CSES 课表 ──
+export const timetableApi = {
+  get: (classId?: string) => client.get<TimetableRow>('/timetable', { params: classId ? { classId } : {} }),
+  createSubject: (data: { name: string; color?: string; teacher?: string; classId?: string }) =>
+    client.post<unknown>('/timetable/subjects', data),
+  deleteSubject: (id: string) => client.delete<void>(`/timetable/subjects/${id}`),
+  saveLayout: (data: { id?: string; name: string; classId?: string; entries: { index: number; startTime: string; endTime: string; isBreak: boolean; name?: string }[] }) =>
+    client.post<{ id: string; name: string }>('/timetable/layouts', data),
+  savePlan: (data: { id?: string; name: string; classId?: string; timeLayoutId: string; isActive: boolean; entries: { weekDay: number; slotIndex: number; subjectId: string }[] }) =>
+    client.post<{ id: string; name: string }>('/timetable/plans', data),
+  active: (classId?: string) => client.get<{ hasPlan: boolean }>('/timetable/active', { params: classId ? { classId } : {} }),
+}
+
+// ── 师生留言（教师端） ──
+export const messageApi = {
+  conversations: () => client.get<MessageConversationRow[]>('/messages/conversations'),
+  conversation: (parentUserId: string, studentId?: string) =>
+    client.get<MessageRow[]>(`/messages/conversation/${parentUserId}`, { params: studentId ? { studentId } : {} }),
+  reply: (data: { parentUserId: string; studentId?: string; classId?: string; content: string }) =>
+    client.post<unknown>('/messages/reply', data),
 }
 
 // ── 用户/子账户管理 ──
@@ -245,6 +334,149 @@ export interface SmtpConfig {
   enableSsl: boolean
   displayName: string
   updatedAt?: string
+}
+
+// ── AI 批改设置（需 system.settings 权限） ──
+export const aiApi = {
+  get: () => client.get<AiSettings>('/settings/ai'),
+  save: (data: AiSettings) => client.put<AiSettings>('/settings/ai', data),
+  logs: (take = 100) =>
+    client.get<{ totalTokens: number; logs: AiLogRow[] }>('/settings/ai/logs', { params: { take } }),
+}
+
+export interface AiSettings {
+  model: string
+  visionModel: string
+  temperature: number
+  maxTokens: number
+  allowImageToCloud: boolean
+  humanReviewThreshold: number
+  retries: number
+}
+
+export interface AiLogRow {
+  id: number
+  endpoint: string
+  model: string
+  promptTokens: number | null
+  completionTokens: number | null
+  totalTokens: number | null
+  durationMs: number
+  success: boolean
+  error: string | null
+  createdAt: string
+}
+
+export interface SignInCodeRow {
+  id: string
+  code: string
+  taskId: string
+  classroom?: string | null
+  subject?: string | null
+  hasPassword?: boolean
+  createdAt: string
+  expiresAt?: string | null
+}
+
+export interface RollCallSessionRow {
+  id: string
+  classId: string
+  mode: number
+  subject?: string | null
+  startedAt: string
+  endedAt?: string | null
+  weightFairness: boolean
+  calledCount: number
+}
+
+export interface ReportRow {
+  totalCalled: number
+  present: number
+  late: number
+  absent: number
+  pending: number
+  attendanceRate: number
+  perStudent: { studentId: string; studentName: string; calledTimes: number; present: number; late: number; absent: number; pending: number }[]
+}
+
+export interface SeatChartRow {
+  id: string
+  classId: string
+  name: string
+  rows: number
+  cols: number
+  podium: number
+  isActive: boolean
+  createdAt: string
+  seatCount?: number
+  occupiedCount?: number
+}
+
+export interface SeatRow {
+  id: string
+  row: number
+  col: number
+  disabled: boolean
+  groupName?: string | null
+  studentId?: string | null
+  studentName?: string | null
+}
+
+export interface TimetableRow {
+  subjects: { id: string; name: string; color?: string | null; teacher?: string | null; classId?: string | null }[]
+  timeLayouts: { id: string; name: string; entries: { index: number; startTime: string; endTime: string; kind: number; name?: string }[] }[]
+  classPlans: { id: string; name: string; classId?: string; timeLayoutId: string; isActive: boolean; entries: { weekDay: number; slotIndex: number; subjectId: string }[] }[]
+}
+
+export interface MessageConversationRow {
+  parentUserId: string
+  studentId?: string | null
+  className?: string
+  lastMessage: string
+  lastTime: string
+  messageCount: number
+  hasFlagged: boolean
+}
+
+export interface MessageRow {
+  id: string
+  senderRole: number
+  senderName: string
+  content: string
+  isImage: boolean
+  flagged: boolean
+  createdAt: string
+}
+
+export interface ResultRow {
+  questionId: string
+  index: number
+  type: number
+  content?: string | null
+  standardAnswer?: string | null
+  fullScore: number
+  rubric?: string | null
+  aiGradingEnabled?: boolean | null
+  recognizedAnswer?: string | null
+  score?: number | null
+  comment?: string | null
+  confidence?: number | null
+  source?: string | null
+  gradedAt?: string | null
+}
+
+export interface StatisticsRow {
+  paperId: string
+  paperTitle: string
+  totalPaperScore: number
+  confirmedCount: number
+  pendingCount: number
+  avgScore: number
+  maxScore: number
+  minScore: number
+  passRate: number
+  perStudent: { studentId: string; studentName: string; totalScore: number; attempts: number }[]
+  perQuestion: { questionId: string; index: number; type: number; fullScore: number; answerCount: number; avgScore: number; scoreRate: number; fullScoreCount: number }[]
 }
 
 export { TOKEN_KEY, USER_KEY }
