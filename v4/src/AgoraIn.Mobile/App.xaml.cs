@@ -10,6 +10,18 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
+
+        // 全局异常处理：捕获未处理异常防止闪退
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            var ex = e.ExceptionObject as Exception;
+            System.Diagnostics.Debug.WriteLine($"[FATAL] {ex?.Message}\n{ex?.StackTrace}");
+        };
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            System.Diagnostics.Debug.WriteLine($"[Task] {e.Exception?.Message}");
+            e.SetObserved();
+        };
     }
 
     protected override Window CreateWindow(IActivationState? activationState)
