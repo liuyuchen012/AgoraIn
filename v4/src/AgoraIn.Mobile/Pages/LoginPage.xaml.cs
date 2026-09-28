@@ -28,7 +28,7 @@ public partial class LoginPage : ContentPage
         {
             await App.Api.LoginAsync(username, password);
             Preferences.Default.Set("agorain_last_username", username);
-            await Shell.Current.GoToAsync("//home");
+            AppShell.SwitchToMain();
         }
         catch (Exception ex)
         {

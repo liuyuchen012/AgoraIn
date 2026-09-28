@@ -13,12 +13,7 @@ public partial class HomePage : ContentPage
     {
         base.OnAppearing();
 
-        // 未登录跳登录页
-        if (!App.Api.IsLoggedIn)
-        {
-            await Shell.Current.GoToAsync("//login");
-            return;
-        }
+        if (!App.Api.IsLoggedIn) return;
 
         var user = App.Api.CurrentUser;
         WelcomeLabel.Text = $"你好，{user?.Username ?? "同学"}";

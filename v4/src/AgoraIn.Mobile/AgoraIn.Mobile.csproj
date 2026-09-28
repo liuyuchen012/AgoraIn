@@ -16,7 +16,7 @@
 		<MauiXamlInflator>SourceGen</MauiXamlInflator>
 
 		<!-- 显示名 -->
-		<ApplicationTitle>AgoraIn 学生端</ApplicationTitle>
+		<ApplicationTitle>AgoraIn</ApplicationTitle>
 
 		<!-- 应用标识 -->
 		<ApplicationId>cn.agorain.mobile</ApplicationId>

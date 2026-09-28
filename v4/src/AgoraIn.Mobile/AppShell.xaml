@@ -4,24 +4,36 @@
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
     xmlns:pages="clr-namespace:AgoraIn.Mobile.Pages"
-    Title="AgoraIn 学生端"
+    Title="AgoraIn"
     FlyoutBehavior="Disabled">
 
-    <TabBar>
+    <ShellContent
+        x:Name="LoginTab"
+        Title="登录"
+        ContentTemplate="{DataTemplate pages:LoginPage}"
+        Route="login"
+        Shell.TabBarIsVisible="False"
+        Shell.NavBarIsVisible="False" />
+
+    <TabBar x:Name="MainTab">
         <ShellContent
             Title="首页"
+            Icon="tab_home.png"
             ContentTemplate="{DataTemplate pages:HomePage}"
             Route="home" />
         <ShellContent
             Title="签到"
+            Icon="tab_scan.png"
             ContentTemplate="{DataTemplate pages:ScanPage}"
             Route="scan" />
         <ShellContent
             Title="记录"
+            Icon="tab_history.png"
             ContentTemplate="{DataTemplate pages:HistoryPage}"
             Route="history" />
         <ShellContent
             Title="我的"
+            Icon="tab_profile.png"
             ContentTemplate="{DataTemplate pages:ProfilePage}"
             Route="profile" />
     </TabBar>

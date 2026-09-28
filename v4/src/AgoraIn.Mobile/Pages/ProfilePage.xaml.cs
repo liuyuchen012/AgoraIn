@@ -28,14 +28,14 @@ public partial class ProfilePage : ContentPage
         _ => role,
     };
 
-    private async void OnLoginClicked(object? sender, EventArgs e)
-        => await Shell.Current.GoToAsync("//login");
+    private void OnLoginClicked(object? sender, EventArgs e)
+        => AppShell.SwitchToLogin();
 
     private async void OnLogoutClicked(object? sender, EventArgs e)
     {
         var ok = await DisplayAlertAsync("退出登录", "确定要退出当前账户吗？", "退出", "取消");
         if (!ok) return;
         App.Api.Logout();
-        await Shell.Current.GoToAsync("//login");
+        AppShell.SwitchToLogin();
     }
 }

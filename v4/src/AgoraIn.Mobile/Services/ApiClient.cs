@@ -61,9 +61,9 @@ public sealed class ApiClient
 
     // ── 学生端接口 ──
 
-    /// <summary>打卡任务列表。</summary>
+    /// <summary>打卡任务列表（含签到进度）。</summary>
     public Task<List<CheckInTaskItem>?> GetTasksAsync()
-        => GetAsync<List<CheckInTaskItem>>("/api/v4/checkin/records?taskId=");
+        => GetAsync<List<CheckInTaskItem>>("/api/v4/checkin/tasks");
 
     /// <summary>学生签到（扫码/输码）。</summary>
     public Task<ScanResult?> SubmitScanAsync(string code, string name, string password)

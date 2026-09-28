@@ -17,7 +17,7 @@ public partial class HistoryPage : ContentPage
         base.OnAppearing();
         if (!App.Api.IsLoggedIn)
         {
-            await Shell.Current.GoToAsync("//login");
+            AppShell.SwitchToLogin();
             return;
         }
         await LoadAsync();
