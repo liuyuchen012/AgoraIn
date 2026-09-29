@@ -57,6 +57,9 @@
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
+		<!-- 真机扫码（MIT 许可证，闭源合规） -->
+		<PackageReference Include="ZXing.Net.MAUI" Version="0.10.4" />
+		<PackageReference Include="ZXing.Net.MAUI.Controls" Version="0.10.4" />
 	</ItemGroup>
 
 </Project>

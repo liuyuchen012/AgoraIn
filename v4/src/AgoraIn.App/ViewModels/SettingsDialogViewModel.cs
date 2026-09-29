@@ -23,6 +23,9 @@ public partial class SettingsDialogViewModel : ObservableObject
     [ObservableProperty] private int _startupModeIndex; // 0=大屏 1=控制 2=教师
     public IReadOnlyList<string> StartupModes { get; } = ["大屏模式", "控制模式", "教师模式"];
 
+    [ObservableProperty] private int _themeIndex; // 0=跟随系统 1=明 2=暗
+    public IReadOnlyList<string> Themes { get; } = ["跟随系统", "明亮", "暗黑"];
+
     // 远程连接（服务器地址已锁定为官方域名，不可编辑）
     /// <summary>固定服务端地址（只读展示）。</summary>
     public string ServerAddress => Core.AppConstants.ServerBaseUrl;

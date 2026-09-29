@@ -56,6 +56,10 @@
           <el-icon><UserFilled /></el-icon>
           <span>用户管理</span>
         </el-menu-item>
+        <el-menu-item v-if="auth.isManager" index="/regions">
+          <el-icon><OfficeBuilding /></el-icon>
+          <span>区域管理</span>
+        </el-menu-item>
         <el-menu-item index="/license">
           <el-icon><Key /></el-icon>
           <span>授权管理</span>
@@ -94,7 +98,7 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import { DataLine, School, User, Monitor, Clock, Setting, UserFilled, Key, Bell, FolderOpened, Document, Calendar, TrendCharts, ChatDotRound, MagicStick } from '@element-plus/icons-vue'
+import { DataLine, School, User, Monitor, Clock, Setting, UserFilled, Key, Bell, FolderOpened, Document, Calendar, TrendCharts, ChatDotRound, MagicStick, OfficeBuilding } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()

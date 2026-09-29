@@ -1,0 +1,65 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:models="clr-namespace:AgoraIn.App.Views"
+        mc:Ignorable="d" d:DesignWidth="520" d:DesignHeight="560"
+        x:Class="AgoraIn.App.Views.FirstRunWizard"
+        Title="欢迎使用 AgoraIn"
+        Width="520" Height="580"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False"
+        ExtendClientAreaToDecorationsHint="False"
+        SystemDecorations="Full"
+        Background="{DynamicResource App.Background}">
+
+  <StackPanel Margin="28" Spacing="18">
+
+    <StackPanel Spacing="6" HorizontalAlignment="Center">
+      <TextBlock Text="欢迎使用 AgoraIn v4" FontSize="24" FontWeight="Bold" HorizontalAlignment="Center" />
+      <TextBlock Text="首次启动向导 — 用 30 秒完成基础配置，随时可在「设置」中修改"
+                 FontSize="12" Foreground="#888888" HorizontalAlignment="Center" />
+    </StackPanel>
+
+    <Border CornerRadius="8" BorderBrush="#E0E4E8" BorderThickness="1" Padding="16">
+      <StackPanel Spacing="10">
+        <TextBlock Text="班级名称" FontSize="13" FontWeight="SemiBold" />
+        <TextBox x:Name="ClassNameBox" Watermark="如：三年级2班 / 机构名" />
+      </StackPanel>
+    </Border>
+
+    <Border CornerRadius="8" BorderBrush="#E0E4E8" BorderThickness="1" Padding="16">
+      <StackPanel Spacing="10">
+        <TextBlock Text="学生按钮网格" FontSize="13" FontWeight="SemiBold" />
+        <Grid ColumnDefinitions="Auto,80,Auto,80" >
+          <TextBlock Grid.Column="0" Text="行数" VerticalAlignment="Center" />
+          <NumericUpDown x:Name="RowsBox" Grid.Column="1" Value="6" Minimum="1" Maximum="20" />
+          <TextBlock Grid.Column="2" Text="列数" VerticalAlignment="Center" Margin="16,0,0,0" />
+          <NumericUpDown x:Name="ColsBox" Grid.Column="3" Value="6" Minimum="1" Maximum="20" />
+        </Grid>
+      </StackPanel>
+    </Border>
+
+    <Border CornerRadius="8" BorderBrush="#E0E4E8" BorderThickness="1" Padding="16">
+      <StackPanel Spacing="10">
+        <TextBlock Text="启动场景" FontSize="13" FontWeight="SemiBold" />
+        <ComboBox x:Name="ModeBox" Width="220" HorizontalAlignment="Left"
+                  SelectedIndex="0" ItemsSource="{x:Static models:FirstRunWizard.Modes}" />
+        <TextBlock Text="上课打卡用「大屏模式」；管理操作用「控制模式」" FontSize="11" Foreground="#888888" />
+      </StackPanel>
+    </Border>
+
+    <Border CornerRadius="8" BorderBrush="#E0E4E8" BorderThickness="1" Padding="16">
+      <StackPanel Spacing="10">
+        <TextBlock Text="界面主题" FontSize="13" FontWeight="SemiBold" />
+        <ComboBox x:Name="ThemeBox" Width="220" HorizontalAlignment="Left"
+                  SelectedIndex="0" ItemsSource="{x:Static models:FirstRunWizard.Themes}" />
+      </StackPanel>
+    </Border>
+
+    <Button x:Name="FinishButton" Content="完成并进入系统" Height="44" CornerRadius="8"
+            Background="{DynamicResource Brand.Primary}" Foreground="White"
+            FontWeight="SemiBold" Click="OnFinishClicked" />
+
+  </StackPanel>
+</Window>

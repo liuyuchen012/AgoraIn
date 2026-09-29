@@ -11,6 +11,12 @@ const router = createRouter({
       meta: { public: true },
     },
     {
+      path: '/register',
+      name: 'register',
+      component: () => import('@/views/RegisterView.vue'),
+      meta: { public: true },
+    },
+    {
       path: '/',
       component: () => import('@/layouts/MainLayout.vue'),
       redirect: '/dashboard',
@@ -86,6 +92,12 @@ const router = createRouter({
           name: 'users',
           component: () => import('@/views/UsersView.vue'),
           meta: { title: '用户管理' },
+        },
+        {
+          path: 'regions',
+          name: 'regions',
+          component: () => import('@/views/RegionsView.vue'),
+          meta: { title: '区域管理' },
         },
         {
           path: 'license',

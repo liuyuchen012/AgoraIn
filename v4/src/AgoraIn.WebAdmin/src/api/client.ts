@@ -51,12 +51,47 @@ const client = {
 // ── 认证 ──
 export const authApi = {
   login: (username: string, password: string) =>
-    client.post<{ token: string; role: string; username: string; permissions: string[] }>('/auth/login', { username, password }),
+    client.post<{ token: string; role: string; username: string; permissions: string[]; region?: string; isManager?: boolean }>('/auth/login', { username, password }),
   setup: (username: string, password: string) =>
     client.post<{ message: string }>('/auth/setup', { username, password }),
   changePassword: (oldPassword: string, newPassword: string) =>
     client.post<{ message: string }>('/auth/change-password', { oldPassword, newPassword }),
   setupStatus: () => client.get<{ needsSetup: boolean }>('/setup/status'),
+}
+
+// ── 自助注册（区域主账号 / 家长加入区域） ──
+export const registerApi = {
+  sendCode: (email: string) => client.post<{ message: string }>('/account/send-code', { email, purpose: 'register' }),
+  register: (data: {
+    email: string; code: string; username: string; password: string;
+    displayName?: string; agreeTerms: boolean;
+    mode: 'region' | 'join'; regionName?: string; regionId?: string;
+  }) => client.post<{ message: string; loginName?: string; regionId?: string }>('/account/register', data),
+}
+
+// ── 区域（租户）管理：仅主区域 manager 可用 ──
+export const regionApi = {
+  list: () => client.get<RegionRow[]>('/regions'),
+  create: (data: { regionId?: string; name: string; ownerUsername: string; ownerPassword: string; ownerDisplayName?: string }) =>
+    client.post<RegionRow>('/regions', data),
+  issueCode: (regionId: string, months: number, maxDevices: number) =>
+    client.post<{ activationCode: string; months: number; maxDevices: number }>(`/regions/${regionId}/issue-code`, { months, maxDevices }),
+  remove: (regionId: string) => client.delete<void>(`/regions/${regionId}`),
+}
+
+export interface RegionRow {
+  id: number
+  regionId: string
+  name: string
+  devicePassword?: string
+  ownerUsername: string
+  activated: boolean
+  expireAt?: string | null
+  maxDevices: number
+  activatedAt?: string | null
+  createdAt: string
+  isActive: boolean
+  remainingDays: number
 }
 
 // ── 班级 ──
@@ -175,10 +210,21 @@ export const examApi = {
   /** 题库复用：从模板试卷复制题目 */
   reuse: (paperId: string, templatePaperId: string) =>
     client.post<{ copied: number }>(`/exams/papers/${paperId}/reuse/${templatePaperId}`, {}),
-  // 答题卡渲染（匿名控制器）
-  sheetUrl: (paperId: string) => `/api/v4/sheet/${paperId}`,
-  sheetForStudent: (paperId: string, studentId: string) => `/api/v4/sheet/${paperId}/student/${studentId}`,
-  batchSheetUrl: (paperIdId: string, classId: string) => `/api/v4/sheet/${paperIdId}/batch?classId=${classId}`,
+  // 答题卡渲染（匿名控制器；iframe 不带 JWT，区域用户需显式带 region 参数）
+  sheetUrl: (paperId: string) => `/api/v4/sheet/${paperId}${regionQuery()}`,
+  sheetForStudent: (paperId: string, studentId: string) => `/api/v4/sheet/${paperId}/student/${studentId}${regionQuery()}`,
+  batchSheetUrl: (paperIdId: string, classId: string) => `/api/v4/sheet/${paperIdId}/batch?classId=${classId}${regionQuery('&')}`,
+}
+
+/** 当前登录区域（从 localStorage 读取，避免循环依赖 pinia） */
+function regionQuery(prefix = '?'): string {
+  try {
+    const user = JSON.parse(localStorage.getItem(USER_KEY) || 'null')
+    const region = user?.region || 'manager'
+    return region === 'manager' ? '' : `${prefix}region=${encodeURIComponent(region)}`
+  } catch {
+    return ''
+  }
 }
 
 // ── 点名 ──

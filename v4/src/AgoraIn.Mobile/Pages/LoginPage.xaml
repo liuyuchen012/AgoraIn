@@ -36,7 +36,13 @@
             <ActivityIndicator x:Name="Busy" IsRunning="False" IsVisible="False"
                                Color="#4285f4" HorizontalOptions="Center" />
 
-            <Label Text="首次使用请联系管理员创建账户" FontSize="12"
+            <Button Text="注册账户（家长 / 机构）" BackgroundColor="Transparent" TextColor="#4285f4"
+                    Clicked="OnGoRegisterClicked" />
+
+            <Label Text="登录名格式：用户名@区域代号（主区域为 用户名@manager）" FontSize="11"
+                   TextColor="#999999" HorizontalOptions="Center" />
+
+            <Label Text="首次使用可自助注册，或联系管理员创建账户" FontSize="12"
                    TextColor="#bbbbbb" HorizontalOptions="Center" Margin="0,20,0,0" />
         </VerticalStackLayout>
     </ScrollView>

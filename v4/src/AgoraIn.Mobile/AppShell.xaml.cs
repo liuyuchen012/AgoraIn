@@ -10,6 +10,7 @@ public partial class AppShell : Shell
 		Routing.RegisterRoute("tasks", typeof(Pages.TasksPage));
 		Routing.RegisterRoute("dashboard", typeof(Pages.DashboardPage));
 		Routing.RegisterRoute("scanner", typeof(Pages.AnswerSheetScannerPage));
+		Routing.RegisterRoute("register", typeof(Pages.RegisterPage));
 
 		// 根据登录状态决定初始页面
 		if (App.Api.IsLoggedIn)

@@ -21,7 +21,7 @@
         <el-form-item>
           <el-input
             v-model="form.username"
-            placeholder="用户名"
+            placeholder="用户名（子区域：用户名@区域代号，主区域：用户名@manager）"
             size="large"
             :prefix-icon="User"
           />
@@ -50,6 +50,10 @@
           {{ needsSetup ? '创建管理员并登录' : '登录' }}
         </el-button>
       </el-form>
+
+      <div class="register-hint">
+        没有账户？<router-link to="/register" class="link">注册区域 / 家长注册</router-link>
+      </div>
 
       <div class="footer">AgoraIn v4.0 · 闭源商业软件</div>
     </el-card>
@@ -162,5 +166,17 @@ h1 {
   font-size: 12px;
   color: #c0c4cc;
   margin-top: 24px;
+}
+
+.register-hint {
+  text-align: center;
+  font-size: 13px;
+  color: #909399;
+  margin-top: 14px;
+}
+
+.register-hint .link {
+  color: #4285f4;
+  text-decoration: none;
 }
 </style>

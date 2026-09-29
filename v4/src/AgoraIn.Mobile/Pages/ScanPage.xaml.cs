@@ -2,6 +2,8 @@ namespace AgoraIn.Mobile.Pages;
 
 public partial class ScanPage : ContentPage
 {
+    private bool _cameraOn;
+
     public ScanPage()
     {
         InitializeComponent();
@@ -18,10 +20,18 @@ public partial class ScanPage : ContentPage
                 return;
             }
 
-            var result = await ScanAsync();
-            if (!string.IsNullOrEmpty(result))
+            // ZXing.Net.MAUI：相机视图通过 IsVisible 切换挂载/卸载，自动开始/停止预览
+            _cameraOn = !_cameraOn;
+            CameraCard.IsVisible = _cameraOn;
+            ScanButton.Text = _cameraOn ? "📷 关闭相机" : "📷 开启相机扫码";
+            if (_cameraOn)
             {
-                CodeEntry.Text = ExtractCode(result);
+                CameraView.Options = new ZXing.Net.Maui.BarcodeReaderOptions
+                {
+                    Formats = ZXing.Net.Maui.BarcodeFormat.QrCode | ZXing.Net.Maui.BarcodeFormat.Code128,
+                    AutoRotate = true,
+                    Multiple = false,
+                };
             }
         }
         catch (Exception ex)
@@ -30,12 +40,30 @@ public partial class ScanPage : ContentPage
         }
     }
 
-    /// <summary>调用平台扫码能力（MAUI 无内置扫码，此处留待接入 ZXing.Net.Maui）。</summary>
-    private Task<string?> ScanAsync()
+    /// <summary>识别到条码：提取签到码，关闭相机并自动提交。</summary>
+    private void OnBarcodesDetected(object? sender, ZXing.Net.Maui.BarcodeDetectionEventArgs e)
     {
-        // 说明：接入 ZXing.Net.Maui 包后替换为真实扫码实现。
-        // 当前保留手动输码路径，扫码为可选增强。
-        return Task.FromResult<string?>(null);
+        var value = e.Results?.FirstOrDefault()?.Value;
+        if (string.IsNullOrEmpty(value)) return;
+
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            if (!_cameraOn) return;
+            _cameraOn = false;
+            CameraCard.IsVisible = false;
+            ScanButton.Text = "📷 开启相机扫码";
+
+            CodeEntry.Text = ExtractCode(value);
+            SetBusy(true);
+            try
+            {
+                await SubmitAsync();
+            }
+            finally
+            {
+                SetBusy(false);
+            }
+        });
     }
 
     /// <summary>从扫码结果中提取签到码（支持 URL 或纯码）。</summary>
@@ -54,23 +82,10 @@ public partial class ScanPage : ContentPage
 
     private async void OnSubmitClicked(object? sender, EventArgs e)
     {
-        var code = CodeEntry.Text?.Trim() ?? "";
-        var name = NameEntry.Text?.Trim() ?? "";
-        var password = PasswordEntry.Text ?? "";
-
-        if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(name))
-        {
-            await DisplayAlertAsync("提示", "请填写签到码和姓名", "知道了");
-            return;
-        }
-
         SetBusy(true);
         try
         {
-            var res = await App.Api.SubmitScanAsync(code, name, password);
-            ShowResult(res?.Success == true,
-                res?.Success == true ? "签到成功" : "签到失败",
-                res?.Rank is int rank ? $"你是第 {rank} 位签到的同学" : res?.Message ?? "");
+            await SubmitAsync();
         }
         catch (Exception ex)
         {
@@ -80,6 +95,24 @@ public partial class ScanPage : ContentPage
         {
             SetBusy(false);
         }
+    }
+
+    private async Task SubmitAsync()
+    {
+        var code = CodeEntry.Text?.Trim() ?? "";
+        var name = NameEntry.Text?.Trim() ?? "";
+        var password = PasswordEntry.Text ?? "";
+
+        if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(name))
+        {
+            ShowResult(false, "请补全信息", "请填写签到码和姓名");
+            return;
+        }
+
+        var res = await App.Api.SubmitScanAsync(code, name, password);
+        ShowResult(res?.Success == true,
+            res?.Success == true ? "签到成功" : "签到失败",
+            res?.Rank is int rank ? $"你是第 {rank} 位签到的同学" : res?.Message ?? "");
     }
 
     private void ShowResult(bool ok, string title, string detail)

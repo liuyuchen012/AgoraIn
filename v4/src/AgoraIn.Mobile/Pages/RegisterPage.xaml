@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage
+    x:Class="AgoraIn.Mobile.Pages.RegisterPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    Title="注册"
+    BackgroundColor="#F8F9FA">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="24" Spacing="14" MaximumWidthRequest="560">
+
+            <Label Text="注册 AgoraIn 账户" FontSize="22" FontAttributes="Bold"
+                   HorizontalOptions="Center" Margin="0,12,0,0" />
+            <Label Text="家长注册加入孩子的区域；机构注册创建独立区域"
+                   FontSize="13" TextColor="#888888" HorizontalOptions="Center" />
+
+            <Picker x:Name="ModePicker" SelectedIndexChanged="OnModeChanged">
+                <Picker.ItemsSource>
+                    <x:Array Type="{x:Type x:String}">
+                        <x:String>家长注册（加入已有区域）</x:String>
+                        <x:String>机构注册（创建新区域）</x:String>
+                    </x:Array>
+                </Picker.ItemsSource>
+            </Picker>
+
+            <Entry x:Name="EmailEntry" Placeholder="邮箱（接收验证码）" Keyboard="Email" />
+            <Grid ColumnDefinitions="*,110" ColumnSpacing="8">
+                <Entry x:Name="CodeEntry" Placeholder="邮箱验证码" />
+                <Button x:Name="SendCodeButton" Grid.Column="1" Text="获取验证码" BackgroundColor="#4285f4"
+                        TextColor="White" CornerRadius="8" Clicked="OnSendCodeClicked" />
+            </Grid>
+            <Entry x:Name="UsernameEntry" Placeholder="用户名（字母/数字/下划线/短横线，不含 @）" />
+            <Entry x:Name="PasswordEntry" Placeholder="密码（至少 6 位）" IsPassword="True" />
+
+            <!-- 家长模式：区域代号 -->
+            <Entry x:Name="RegionIdEntry" Placeholder="区域代号（向学校/机构索取）" />
+            <!-- 机构模式：区域名称 -->
+            <Entry x:Name="RegionNameEntry" Placeholder="区域名称（机构/学校名称，不可重复）" IsVisible="False" />
+
+            <CheckBox x:Name="AgreeCheck" HorizontalOptions="Start" IsChecked="False" />
+            <Label Text="我已阅读并同意服务条款与隐私政策" FontSize="13" TextColor="#666666" />
+
+            <Button x:Name="SubmitButton" Text="注册" BackgroundColor="#34a853" TextColor="White"
+                    CornerRadius="10" HeightRequest="50" Clicked="OnSubmitClicked" />
+
+            <Button Text="已有账户？返回登录" BackgroundColor="Transparent" TextColor="#4285f4"
+                    Clicked="OnBackToLoginClicked" />
+
+            <ActivityIndicator x:Name="Busy" IsRunning="False" IsVisible="False"
+                               Color="#4285f4" HorizontalOptions="Center" />
+
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

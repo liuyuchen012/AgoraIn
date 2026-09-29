@@ -21,6 +21,15 @@ public sealed class AppConfig
     public bool OnlineMode { get; set; } = true;
     public string AdminPasswordHash { get; set; } = "";
 
+    /// <summary>界面主题："system"（跟随系统）/ "light"（明）/ "dark"（暗）。</summary>
+    public string Theme { get; set; } = "system";
+
+    /// <summary>班级名称（首次启动向导收集，用于界面展示）。</summary>
+    public string ClassName { get; set; } = "";
+
+    /// <summary>首次启动向导是否已完成。</summary>
+    public bool WizardDone { get; set; }
+
     // 课表驱动行为（上下课自动切换模式 / 上课前点名提醒）
     public bool TimetableDriven { get; set; }
     public int RemindMinutesBefore { get; set; } = 2;

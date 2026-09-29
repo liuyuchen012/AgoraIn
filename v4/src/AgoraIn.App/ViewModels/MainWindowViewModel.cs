@@ -62,6 +62,12 @@ public partial class MainWindowViewModel : ObservableObject
     private string _webPanelHint = "当前系统不支持内嵌浏览器（仅 Windows + WebView2 支持）。可在浏览器中打开下方地址使用完整管理功能。";
     public string WebPanelHint { get => _webPanelHint; set => SetProperty(ref _webPanelHint, value); }
 
+    /// <summary>当前主题设置（供设置对话框回显："system"/"light"/"dark"）。</summary>
+    public string AppConfigTheme => _appConfig.Theme;
+
+    /// <summary>应用配置（首次启动向导写入用）。</summary>
+    public Services.AppConfig AppConfig => _appConfig;
+
     /// <summary>循环切换模式：大屏→控制→教师→大屏。</summary>
     public void CycleMode()
     {
@@ -93,6 +99,13 @@ public partial class MainWindowViewModel : ObservableObject
         _appConfig.RemindMinutesBefore = vm.RemindMinutesBefore;
         _appConfig.StartupMode = vm.StartupModeIndex;
         _appConfig.OnlineMode = vm.OnlineMode;
+        _appConfig.Theme = vm.ThemeIndex switch
+        {
+            1 => "light",
+            2 => "dark",
+            _ => "system",
+        };
+        App.ApplyTheme(_appConfig.Theme);
         _appConfig.Save();
 
         StatusMessage = "设置已保存";

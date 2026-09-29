@@ -12,7 +12,12 @@ public partial class LoginPage : ContentPage
         ServerLabel.Text = App.Api.BaseUrl;
     }
 
-    private async void OnLoginClicked(object? sender, EventArgs e)
+    private async void OnGoRegisterClicked(object? sender, EventArgs e)
+    {
+        await Shell.Current.GoToAsync("register");
+    }
+
+private async void OnLoginClicked(object? sender, EventArgs e)
     {
         var username = UsernameEntry.Text?.Trim() ?? "";
         var password = PasswordEntry.Text ?? "";

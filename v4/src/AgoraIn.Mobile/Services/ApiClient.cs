@@ -69,6 +69,23 @@ public sealed class ApiClient
     public Task<ScanResult?> SubmitScanAsync(string code, string name, string password)
         => PostAsync<ScanResult>("/api/v4/checkin/scan", new { code, name, password });
 
+    /// <summary>发送注册邮箱验证码。</summary>
+    public Task<SendCodeResult?> SendRegisterCodeAsync(string email)
+        => PostAsync<SendCodeResult>("/api/v4/account/send-code", new { email, purpose = "register" });
+
+    /// <summary>
+    /// 自助注册。mode=join 家长加入已有区域（regionId 必填）；
+    /// mode=region 机构注册创建新区域（regionName 必填，注册后需主区域激活码激活）。
+    /// </summary>
+    public Task<RegisterResult?> RegisterAsync(
+        string email, string code, string username, string password,
+        string mode, string? regionId, string? regionName, bool agreeTerms = true)
+        => PostAsync<RegisterResult>("/api/v4/account/register", new
+        {
+            email, code, username, password, mode, regionId, regionName,
+            displayName = username, agreeTerms,
+        });
+
     /// <summary>个人历史记录。</summary>
     public Task<List<CheckInRecordItem>?> GetHistoryAsync(string studentId)
         => GetAsync<List<CheckInRecordItem>>($"/api/v4/checkin/records?studentId={Uri.EscapeDataString(studentId)}");
@@ -157,6 +174,21 @@ public sealed class ScanResult
     public bool Success { get; set; }
     public string? Message { get; set; }
     public int? Rank { get; set; }
+}
+
+public sealed class SendCodeResult
+{
+    public string? Message { get; set; }
+}
+
+public sealed class RegisterResult
+{
+    public string? Message { get; set; }
+    public string? Username { get; set; }
+    public string? RegionId { get; set; }
+    public string? LoginName { get; set; }
+    public string? Role { get; set; }
+    public string? Error { get; set; }
 }
 
 public sealed class CheckInRecordItem

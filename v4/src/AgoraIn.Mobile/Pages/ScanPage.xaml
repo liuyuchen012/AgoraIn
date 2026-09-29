@@ -3,6 +3,7 @@
     x:Class="AgoraIn.Mobile.Pages.ScanPage"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:zxing="clr-namespace:ZXing.Net.Maui.Controls;assembly=ZXing.Net.MAUI"
     Title="签到"
     BackgroundColor="#F8F9FA">
 
@@ -12,7 +13,14 @@
             <Label Text="扫码 / 输入签到码" FontSize="20" FontAttributes="Bold"
                    HorizontalOptions="Center" Margin="0,10,0,6" />
 
-            <Button Text="📷 扫描二维码" BackgroundColor="#4285f4" TextColor="White"
+            <!-- 真机扫码（ZXing.Net.MAUI）：默认隐藏，点按钮开启 -->
+            <Border x:Name="CameraCard" IsVisible="False" StrokeThickness="0"
+                    StrokeShape="RoundRectangle 12" HeightRequest="320">
+                <zxing:CameraBarcodeReaderView x:Name="CameraView"
+                                               BarcodesDetected="OnBarcodesDetected" />
+            </Border>
+
+            <Button x:Name="ScanButton" Text="📷 开启相机扫码" BackgroundColor="#4285f4" TextColor="White"
                     CornerRadius="10" HeightRequest="52" Clicked="OnScanQrClicked" />
 
             <Label Text="或手动输入签到码" FontSize="13" TextColor="#888888"

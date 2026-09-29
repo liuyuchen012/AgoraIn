@@ -98,6 +98,12 @@ public partial class MainWindow : Window
                 Core.AppMode.Teacher => 2,
                 _ => 0,
             },
+            ThemeIndex = _vm.AppConfigTheme switch
+            {
+                "light" => 1,
+                "dark" => 2,
+                _ => 0,
+            },
             TimetableDriven = _vm.TimetableDriver.Enabled,
             RemindMinutesBefore = _vm.TimetableDriver.RemindMinutesBefore,
         };
@@ -150,6 +156,13 @@ public partial class MainWindow : Window
     {
         base.OnOpened(e);
         ApplyRoundedCornerPreference();
+
+        // 首次启动：弹出向导完成基础配置
+        if (_vm != null && !_vm.AppConfig.WizardDone)
+        {
+            var wizard = new FirstRunWizard(_vm.AppConfig);
+            wizard.ShowDialog(this);
+        }
     }
 
     private void ApplyRoundedCornerPreference()
