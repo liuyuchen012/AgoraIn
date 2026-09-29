@@ -63,10 +63,10 @@ export const authApi = {
 export const registerApi = {
   sendCode: (email: string) => client.post<{ message: string }>('/account/send-code', { email, purpose: 'register' }),
   register: (data: {
-    email: string; code: string; username: string; password: string;
+    email?: string; code?: string; username: string; password: string;
     displayName?: string; agreeTerms: boolean;
-    mode: 'region' | 'join'; regionName?: string; regionId?: string;
-  }) => client.post<{ message: string; loginName?: string; regionId?: string }>('/account/register', data),
+    mode: 'region' | 'join'; regionName?: string; regionId?: string; inviteCode?: string;
+  }) => client.post<{ message: string; loginName?: string; regionId?: string; studentName?: string }>('/account/register', data),
 }
 
 // ── 区域（租户）管理：仅主区域 manager 可用 ──
@@ -210,6 +210,17 @@ export const examApi = {
   /** 题库复用：从模板试卷复制题目 */
   reuse: (paperId: string, templatePaperId: string) =>
     client.post<{ copied: number }>(`/exams/papers/${paperId}/reuse/${templatePaperId}`, {}),
+  /** 上传试卷文件（docx/pdf/txt，可带答案文件）AI 识别出题 */
+  importFile: (paperId: string, questionFile: File, answerFile?: File) => {
+    const fd = new FormData()
+    fd.append('questionFile', questionFile)
+    if (answerFile) fd.append('answerFile', answerFile)
+    return client.post<{ imported: number; questions: unknown[] }>(`/exams/papers/${paperId}/import-file`, fd,
+      { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 })
+  },
+  /** AI 生成缺失的标准答案与评分要点 */
+  aiGenerateAnswers: (paperId: string) =>
+    client.post<{ updated: number; total: number }>(`/exams/papers/${paperId}/ai-generate-answers`, {}, { timeout: 300000 }),
   // 答题卡渲染（匿名控制器；iframe 不带 JWT，区域用户需显式带 region 参数）
   sheetUrl: (paperId: string) => `/api/v4/sheet/${paperId}${regionQuery()}`,
   sheetForStudent: (paperId: string, studentId: string) => `/api/v4/sheet/${paperId}/student/${studentId}${regionQuery()}`,
@@ -269,6 +280,22 @@ export const timetableApi = {
   savePlan: (data: { id?: string; name: string; classId?: string; timeLayoutId: string; isActive: boolean; entries: { weekDay: number; slotIndex: number; subjectId: string }[] }) =>
     client.post<{ id: string; name: string }>('/timetable/plans', data),
   active: (classId?: string) => client.get<{ hasPlan: boolean }>('/timetable/active', { params: classId ? { classId } : {} }),
+  /** 导入 ClassIsland 档案（.json/.yml 文件或文本） */
+  importCses: (file: File, classId?: string) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    if (classId) fd.append('classId', classId)
+    return client.post<{ importedSubjects: number; importedSlots: number; layoutName: string }>('/timetable/import-cses', fd,
+      { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
+  /** 导出 ClassIsland 档案 JSON 地址 */
+  exportCsesUrl: (classId?: string) => `/api/v4/timetable/export-cses${classId ? `?classId=${encodeURIComponent(classId)}` : ''}`,
+  /** 推送课表给 ClassIsland 插件（插件 profile_pull 拉取覆盖本地档案） */
+  push: (classId?: string) => {
+    const fd = new FormData()
+    if (classId) fd.append('classId', classId)
+    return client.post<{ pushed: boolean; version: number }>('/timetable/push', fd)
+  },
 }
 
 // ── 师生留言（教师端） ──
@@ -315,6 +342,11 @@ export const smtpApi = {
 export const parentApi = {
   createInvite: (studentId: string) =>
     client.post<{ inviteCode: string; studentName: string }>(`/parent/invite/${studentId}`, {}),
+  /** 批量生成/获取全班邀请码 */
+  batchInvite: (classId: string) =>
+    client.get<{ studentId: string; studentNo?: string; studentName: string; inviteCode: string }[]>('/parent/invite/batch', { params: { classId } }),
+  /** 全班邀请码 CSV 导出地址 */
+  batchInviteCsvUrl: (classId: string) => `/api/v4/parent/invite/batch/export?classId=${encodeURIComponent(classId)}`,
 }
 
 // ── 数据类型 ──
@@ -385,7 +417,7 @@ export interface SmtpConfig {
 // ── AI 批改设置（需 system.settings 权限） ──
 export const aiApi = {
   get: () => client.get<AiSettings>('/settings/ai'),
-  save: (data: AiSettings) => client.put<AiSettings>('/settings/ai', data),
+  save: (data: Partial<AiSettings>) => client.put<AiSettings>('/settings/ai', data),
   logs: (take = 100) =>
     client.get<{ totalTokens: number; logs: AiLogRow[] }>('/settings/ai/logs', { params: { take } }),
 }
@@ -398,6 +430,10 @@ export interface AiSettings {
   allowImageToCloud: boolean
   humanReviewThreshold: number
   retries: number
+  gradingPromptTemplate?: string | null
+  hasApiKey?: boolean
+  apiKeyMasked?: string
+  apiKey?: string
 }
 
 export interface AiLogRow {

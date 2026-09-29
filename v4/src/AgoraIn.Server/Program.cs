@@ -67,6 +67,8 @@ builder.Services.AddHttpClient<DeepSeekGradingService>();
 builder.Services.AddScoped<LicenseService>();
 // ── 多区域：区域激活码签发/校验 ──
 builder.Services.AddScoped<RegionCodeService>();
+// ── ClassIsland 档案导入/导出/推送 ──
+builder.Services.AddScoped<ClassIslandProfileService>();
 
 // ── SMTP 邮件 ──
 builder.Services.AddSingleton<EmailSender>();

@@ -78,7 +78,7 @@ public partial class RegisterPage : ContentPage
         }
         if (JoinMode && string.IsNullOrEmpty(regionId))
         {
-            await DisplayAlertAsync("提示", "请填写区域代号（向学校/机构索取）", "知道了");
+            await DisplayAlertAsync("提示", "请填写老师颁发的绑定邀请码", "知道了");
             return;
         }
         if (!JoinMode && string.IsNullOrEmpty(regionName))
@@ -98,8 +98,10 @@ public partial class RegisterPage : ContentPage
             var res = await App.Api.RegisterAsync(
                 email, code, username, password,
                 JoinMode ? "join" : "region",
-                regionId,
-                JoinMode ? null : regionName);
+                regionId: null,
+                regionName: JoinMode ? null : regionName,
+                inviteCode: JoinMode ? regionId.ToUpperInvariant() : null,
+                agreeTerms: true);
 
             await DisplayAlertAsync("注册成功",
                 $"{res?.Message}{(string.IsNullOrEmpty(res?.RegionId) ? "" : $"\n区域代号：{res.RegionId}\n登录名：{res.LoginName}")}",

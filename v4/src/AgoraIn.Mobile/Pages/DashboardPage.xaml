@@ -32,6 +32,17 @@
             <Button Text="刷新数据" BackgroundColor="#e8f0fe" TextColor="#4285f4"
                     CornerRadius="8" HeightRequest="42" Clicked="OnRefreshClicked" />
 
+            <!-- 教师功能入口 -->
+            <Label Text="教师功能" FontSize="16" FontAttributes="Bold" Margin="0,10,0,0" />
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                <Button Grid.Column="0" Text="📄 答题卡扫卡" BackgroundColor="#4285f4" TextColor="White"
+                        CornerRadius="10" HeightRequest="52" Clicked="OnScanSheetClicked" />
+                <Button Grid.Column="1" Text="✍️ 阅卷与出分" BackgroundColor="#34a853" TextColor="White"
+                        CornerRadius="10" HeightRequest="52" Clicked="OnGradingClicked" />
+            </Grid>
+            <Label Text="扫卡：拍摄答题卡照片上传识别；阅卷：查看 AI 批改结果、人工改分并确认出分"
+                   FontSize="11" TextColor="#999999" />
+
             <ActivityIndicator x:Name="Busy" IsRunning="False" IsVisible="False"
                                Color="#4285f4" HorizontalOptions="Center" />
 

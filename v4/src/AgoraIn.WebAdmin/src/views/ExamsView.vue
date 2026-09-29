@@ -53,6 +53,8 @@
             </div>
             <div style="display:flex;gap:8px">
               <el-button @click="showReuse">从题库复用</el-button>
+              <el-button @click="showImportFile">文件导题</el-button>
+              <el-button @click="aiGenerateAnswers" :loading="generatingAnswers">AI 生成答案</el-button>
               <el-button @click="previewSheet(editingPaper)">预览答题卡</el-button>
               <el-button type="primary" @click="saveAll">保存全部</el-button>
             </div>
@@ -183,6 +185,27 @@
         <el-button @click="printSheet">🖨 打印</el-button>
         <el-button type="primary" @click="downloadSheet(currentPreviewPaper)">📥 下载 PDF</el-button>
         <el-button @click="previewVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 文件导题对话框：docx/pdf/txt，题目与答案可一个文件或两个文件 -->
+    <el-dialog v-model="importVisible" title="上传试卷文件 AI 自动出题" width="480px">
+      <el-form label-width="90px">
+        <el-form-item label="试卷文件">
+          <input type="file" accept=".docx,.pdf,.txt" @change="(e:any) => importQFile = e.target.files?.[0] || null" />
+        </el-form-item>
+        <el-form-item label="答案文件">
+          <input type="file" accept=".docx,.pdf,.txt" @change="(e:any) => importAFile = e.target.files?.[0] || null" />
+          <div style="font-size:11px;color:#909399">可选：答案与题目在同一个文件时留空；分开存放时上传答案文件（含评分细则）</div>
+        </el-form-item>
+      </el-form>
+      <p style="color:#909399;font-size:12px">
+        支持 docx / pdf / txt。AI 解析后逐题生成（题型/选项/答案/分值/评分要点/知识点），
+        主观题自动生成评分要点供 AI 阅卷使用。
+      </p>
+      <template #footer>
+        <el-button @click="importVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!importQFile" :loading="importing" @click="doImportFile">上传并解析</el-button>
       </template>
     </el-dialog>
 
@@ -412,6 +435,13 @@ const currentSubmission = ref<any>(null)
 const bindStudentId = ref('')
 const students = ref<StudentRow[]>([])
 
+// 文件导题
+const importVisible = ref(false)
+const importQFile = ref<File | null>(null)
+const importAFile = ref<File | null>(null)
+const importing = ref(false)
+const generatingAnswers = ref(false)
+
 // 成绩统计
 const statsVisible = ref(false)
 const stats = ref<any>(null)
@@ -549,6 +579,37 @@ async function doReuse() {
     reuseVisible.value = false
     loadQuestions(editingPaper.value.id)
   } catch {}
+}
+
+// ── 文件导题与 AI 生成答案 ──
+function showImportFile() {
+  importQFile.value = null
+  importAFile.value = null
+  importVisible.value = true
+}
+
+async function doImportFile() {
+  if (!editingPaper.value?.id) { ElMessage.warning('请先保存试卷再导入题目'); return }
+  if (!importQFile.value) return
+  importing.value = true
+  try {
+    const r = await examApi.importFile(editingPaper.value.id, importQFile.value, importAFile.value || undefined)
+    ElMessage.success(`AI 已识别并导入 ${r.imported} 题`)
+    importVisible.value = false
+    await loadQuestions(editingPaper.value.id)
+  } catch {} finally { importing.value = false }
+}
+
+async function aiGenerateAnswers() {
+  if (!editingPaper.value?.id) { ElMessage.warning('请先保存试卷'); return }
+  generatingAnswers.value = true
+  try {
+    const r = await examApi.aiGenerateAnswers(editingPaper.value.id)
+    ElMessage.success(r.updated > 0
+      ? `AI 已为 ${r.updated}/${r.total} 题生成标准答案/评分要点`
+      : '所有题目均已有答案与评分要点，无需生成')
+    await loadQuestions(editingPaper.value.id)
+  } catch {} finally { generatingAnswers.value = false }
 }
 
 // ── 扫卡记录与批改闭环 ──

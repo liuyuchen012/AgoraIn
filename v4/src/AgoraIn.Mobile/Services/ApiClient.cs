@@ -79,16 +79,39 @@ public sealed class ApiClient
     /// </summary>
     public Task<RegisterResult?> RegisterAsync(
         string email, string code, string username, string password,
-        string mode, string? regionId, string? regionName, bool agreeTerms = true)
+        string mode, string? regionId, string? regionName, string? inviteCode = null, bool agreeTerms = true)
         => PostAsync<RegisterResult>("/api/v4/account/register", new
         {
-            email, code, username, password, mode, regionId, regionName,
+            email, code, username, password, mode, regionId, regionName, inviteCode,
             displayName = username, agreeTerms,
         });
 
     /// <summary>个人历史记录。</summary>
     public Task<List<CheckInRecordItem>?> GetHistoryAsync(string studentId)
         => GetAsync<List<CheckInRecordItem>>($"/api/v4/checkin/records?studentId={Uri.EscapeDataString(studentId)}");
+
+    // ── 教师阅卷 / 出分 ──
+
+    /// <summary>试卷列表。</summary>
+    public Task<List<ExamPaperItem>?> GetPapersAsync()
+        => GetAsync<List<ExamPaperItem>?>("/api/v4/exams/papers");
+
+    /// <summary>某试卷的扫卡提交列表。</summary>
+    public Task<List<SubmissionItem>?> GetSubmissionsAsync(string paperId)
+        => GetAsync<List<SubmissionItem>?>($"/api/v4/exams/submissions?paperId={Uri.EscapeDataString(paperId)}");
+
+    /// <summary>逐题结果（含题干/满分/识别答案/AI 建议分）。</summary>
+    public Task<List<QuestionResultItem>?> GetSubmissionResultsAsync(string submissionId)
+        => GetAsync<List<QuestionResultItem>?>($"/api/v4/exams/submissions/{submissionId}/results");
+
+    /// <summary>教师人工改分（留痕，状态推进到待人工）。</summary>
+    public Task<object?> OverrideResultAsync(string submissionId, string questionId, double score, string? comment)
+        => PutAsync<object>($"/api/v4/exams/submissions/{submissionId}/results/{questionId}",
+            new { score, comment });
+
+    /// <summary>确认成绩（状态 → 已确认，计入统计并出分）。</summary>
+    public Task<ConfirmResult?> ConfirmSubmissionAsync(string submissionId)
+        => PostAsync<ConfirmResult>($"/api/v4/exams/submissions/{submissionId}/confirm", new { });
 
     /// <summary>管理员仪表盘数据。</summary>
     public Task<DashboardData?> GetDashboardAsync()
@@ -106,6 +129,22 @@ public sealed class ApiClient
         AddAuth(req);
         using var res = await Http.SendAsync(req);
         if (!res.IsSuccessStatusCode) return default;
+        return await res.Content.ReadFromJsonAsync<T>(JsonOpts);
+    }
+
+    private async Task<T?> PutAsync<T>(string url, object body)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Put, BaseUrl + url)
+        {
+            Content = JsonContent.Create(body),
+        };
+        AddAuth(req);
+        using var res = await Http.SendAsync(req);
+        if (!res.IsSuccessStatusCode)
+        {
+            var text = await res.Content.ReadAsStringAsync();
+            throw new HttpRequestException($"{(int)res.StatusCode}: {text}");
+        }
         return await res.Content.ReadFromJsonAsync<T>(JsonOpts);
     }
 
@@ -174,6 +213,48 @@ public sealed class ScanResult
     public bool Success { get; set; }
     public string? Message { get; set; }
     public int? Rank { get; set; }
+}
+
+public sealed class ExamPaperItem
+{
+    public string Id { get; set; } = "";
+    public string Title { get; set; } = "";
+    public string? Subject { get; set; }
+    public double TotalScore { get; set; }
+    public int QuestionCount { get; set; }
+    public int SubmissionCount { get; set; }
+}
+
+public sealed class SubmissionItem
+{
+    public string Id { get; set; } = "";
+    public string? StudentId { get; set; }
+    public string? StudentName { get; set; }
+    public string? StudentRef { get; set; }
+    public int Status { get; set; }
+    public double? TotalScore { get; set; }
+    public string? SubmittedAt { get; set; }
+}
+
+public sealed class QuestionResultItem
+{
+    public string QuestionId { get; set; } = "";
+    public int Index { get; set; }
+    public int Type { get; set; }
+    public string? Content { get; set; }
+    public string? StandardAnswer { get; set; }
+    public double FullScore { get; set; }
+    public string? RecognizedAnswer { get; set; }
+    public double? Score { get; set; }
+    public string? Comment { get; set; }
+    public double? Confidence { get; set; }
+    public string? Source { get; set; }
+}
+
+public sealed class ConfirmResult
+{
+    public double TotalScore { get; set; }
+    public string? Status { get; set; }
 }
 
 public sealed class SendCodeResult

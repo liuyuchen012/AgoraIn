@@ -335,10 +335,110 @@ public class ParentInviteController : ControllerBase
         return Ok(new { inviteCode = code, studentName = stu.Name });
     }
 
-    private static string GenerateCode()
+        private static string GenerateCode()
     {
         const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
         var rng = new Random();
         return new string(Enumerable.Range(0, 6).Select(_ => chars[rng.Next(chars.Length)]).ToArray());
     }
+
+    /// <summary>批量生成/获取全班学生的绑定邀请码（已存在待绑码的学生直接复用）。</summary>
+    [HttpGet("batch")]
+    public async Task<IActionResult> Batch([FromQuery] string classId, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(classId)) return BadRequest(new { error = "缺少 classId" });
+        var students = await _db.Students
+            .Where(s => s.ClassId == classId && s.Status == Core.Entities.StudentStatus.Enrolled)
+            .OrderBy(s => s.StudentNo).ThenBy(s => s.Name)
+            .ToListAsync(ct);
+
+        var pendingBindings = await _db.ParentBindings
+            .Where(b => b.Status == Core.Entities.ParentBindingStatus.Pending)
+            .ToListAsync(ct);
+        var pendingByStudent = pendingBindings.GroupBy(b => b.StudentId).ToDictionary(g => g.Key, g => g.First());
+
+        var result = new List<object>();
+        foreach (var stu in students)
+        {
+            string code;
+            if (pendingByStudent.TryGetValue(stu.Id, out var existing))
+            {
+                code = existing.InviteCode;
+            }
+            else
+            {
+                code = GenerateCode();
+                // 防碰撞
+                while (await _db.ParentBindings.AnyAsync(b => b.InviteCode == code, ct))
+                    code = GenerateCode();
+                _db.ParentBindings.Add(new Core.Entities.ParentBinding
+                {
+                    StudentId = stu.Id,
+                    InviteCode = code,
+                    Status = Core.Entities.ParentBindingStatus.Pending,
+                });
+            }
+            result.Add(new { studentId = stu.Id, studentNo = stu.StudentNo, studentName = stu.Name, inviteCode = code });
+        }
+        await _db.SaveChangesAsync(ct);
+        return Ok(result);
+    }
+
+    /// <summary>全班邀请码导出 CSV（UTF-8 BOM，Excel 可直接打开；教师打印/发放用）。</summary>
+    [HttpGet("batch/export")]
+    public async Task<IActionResult> BatchExport([FromQuery] string classId, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(classId)) return BadRequest(new { error = "缺少 classId" });
+
+        // 复用批量生成逻辑（临时请求内直接实现，避免内部 HTTP 调用）
+        var students = await _db.Students
+            .Where(s => s.ClassId == classId && s.Status == Core.Entities.StudentStatus.Enrolled)
+            .OrderBy(s => s.StudentNo).ThenBy(s => s.Name)
+            .ToListAsync(ct);
+        var pendingBindings = await _db.ParentBindings
+            .Where(b => b.Status == Core.Entities.ParentBindingStatus.Pending)
+            .ToListAsync(ct);
+        var pendingByStudent = pendingBindings.GroupBy(b => b.StudentId).ToDictionary(g => g.Key, g => g.First());
+
+        var className = (await _db.Classes.FindAsync([classId], ct))?.Name ?? "";
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("\uFEFF班级,学号,学生姓名,绑定邀请码");
+        foreach (var stu in students)
+        {
+            string code;
+            if (pendingByStudent.TryGetValue(stu.Id, out var existing))
+            {
+                code = existing.InviteCode;
+            }
+            else
+            {
+                code = GenerateCode();
+                while (await _db.ParentBindings.AnyAsync(b => b.InviteCode == code, ct))
+                    code = GenerateCode();
+                _db.ParentBindings.Add(new Core.Entities.ParentBinding
+                {
+                    StudentId = stu.Id,
+                    InviteCode = code,
+                    Status = Core.Entities.ParentBindingStatus.Pending,
+                });
+            }
+            sb.AppendLine($"{EscapeCsv(className)},{EscapeCsv(stu.StudentNo)},{EscapeCsv(stu.Name)},{code}");
+        }
+        await _db.SaveChangesAsync(ct);
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(sb.ToString());
+        return File(bytes, "text/csv; charset=utf-8",
+            $"邀请码_{EscapeFileName(className)}_{DateTime.Now:yyyyMMddHHmm}.csv");
+    }
+
+    private static string EscapeCsv(string? value)
+    {
+        value ??= "";
+        return value.Contains(',') || value.Contains('"') || value.Contains('\n')
+            ? $"\"{value.Replace("\"", "\"\"")}\""
+            : value;
+    }
+
+    private static string EscapeFileName(string value)
+        => string.Join("_", value.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
 }

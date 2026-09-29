@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using AgoraIn.Core.Entities;
 using AgoraIn.Core.Security;
 using AgoraIn.Server.Models;
@@ -125,11 +126,209 @@ public class ExamsController : ControllerBase
         return Ok(q);
     }
 
+    /// <summary>
+    /// 上传试卷文件（docx/pdf/txt）AI 自动识别题目并生成答题卡题目。
+    /// 支持两种上传方式（便于教师）：
+    ///  · 单文件：题目与答案在同一个文件（questionFile）
+    ///  · 双文件：题目文件（questionFile）+ 答案文件（answerFile，可选）
+    /// </summary>
+    [HttpPost("papers/{paperId}/import-file")]
+    [RequestSizeLimit(30 * 1024 * 1024)]
+    public async Task<IActionResult> ImportFile(
+        string paperId,
+        [FromForm] IFormFile? questionFile,
+        [FromForm] IFormFile? answerFile,
+        CancellationToken ct)
+    {
+        if (questionFile == null || questionFile.Length == 0)
+            return BadRequest(new { error = "请上传试卷文件（docx / pdf / txt）" });
+
+        var questionText = await ExtractTextAsync(questionFile, ct);
+        if (string.IsNullOrWhiteSpace(questionText))
+            return BadRequest(new { error = "无法从文件中提取文本（请确认文件未加密且含可提取的文字层）" });
+
+        var answerText = answerFile is { Length: > 0 } ? await ExtractTextAsync(answerFile, ct) : null;
+
+        var extracted = await _ai.ExtractQuestionsAsync(questionText, answerText, ct);
+        if (extracted == null)
+            return BadRequest(new { error = "AI 解析失败，请检查 AI 服务配置（需在「AI 批改设置」填写 API 密钥）" });
+        if (extracted.Count == 0)
+            return BadRequest(new { error = "AI 未能从文件中识别出题目，请检查文件内容" });
+
+        var startIndex = await _db.Questions
+            .Where(q => q.PaperId == paperId)
+            .Select(q => (int?)q.Index)
+            .MaxAsync(ct) ?? -1;
+
+        var created = new List<Question>();
+        foreach (var eq in extracted)
+        {
+            var q = new Question
+            {
+                PaperId = paperId,
+                Index = ++startIndex,
+                Type = ParseQuestionType(eq.Type),
+                Content = eq.Content,
+                Score = eq.Score > 0 ? eq.Score : 2,
+                StandardAnswer = eq.StandardAnswer,
+                OptionsJson = eq.Options is { Count: > 0 }
+                    ? JsonSerializer.Serialize(eq.Options.Select(o => new { key = o.Key, text = o.Text ?? "" }).ToList())
+                    : null,
+                Rubric = eq.Rubric,
+                KnowledgeTagsJson = eq.KnowledgeTags is { Count: > 0 } ? JsonSerializer.Serialize(eq.KnowledgeTags) : null,
+                AiGradingEnabled = null,
+            };
+            _db.Questions.Add(q);
+            created.Add(q);
+        }
+        await _db.SaveChangesAsync(ct);
+        await RefreshPaperTotalAsync(paperId);
+
+        return Ok(new
+        {
+            imported = created.Count,
+            questions = created.OrderBy(q => q.Index).Select(q => new
+            {
+                q.Id, q.Index, type = q.Type.ToString(), q.Content, q.Score,
+                q.StandardAnswer, q.Rubric,
+            }),
+        });
+    }
+
+    /// <summary>AI 生成标准答案与评分要点（只处理缺失项；开启 AI 后主观题阅卷提示词随 rubric 自动生效）。</summary>
+    [HttpPost("papers/{paperId}/ai-generate-answers")]
+    public async Task<IActionResult> AiGenerateAnswers(string paperId, CancellationToken ct)
+    {
+        var questions = await _db.Questions
+            .Where(q => q.PaperId == paperId)
+            .OrderBy(q => q.Index)
+            .ToListAsync(ct);
+        if (questions.Count == 0) return NotFound(new { error = "试卷暂无题目" });
+
+        var updated = 0;
+        foreach (var q in questions)
+        {
+            var needAnswer = string.IsNullOrWhiteSpace(q.StandardAnswer);
+            var needRubric = q.Type >= QuestionType.Blank && string.IsNullOrWhiteSpace(q.Rubric);
+            if (!needAnswer && !needRubric) continue;
+
+            var result = await _ai.GenerateAnswerAsync(q.Type.ToString(), q.Content, q.Score, q.Rubric, ct);
+            if (result == null) continue;
+
+            if (needAnswer && !string.IsNullOrWhiteSpace(result.Value.StandardAnswer))
+                q.StandardAnswer = result.Value.StandardAnswer;
+            if (needRubric && !string.IsNullOrWhiteSpace(result.Value.Rubric))
+                q.Rubric = result.Value.Rubric;
+            updated++;
+        }
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { updated, total = questions.Count });
+    }
+
+    /// <summary>从上传文件提取文本（docx / pdf / txt）。</summary>
+    private static async Task<string> ExtractTextAsync(IFormFile file, CancellationToken ct)
+    {
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        await using var ms = new MemoryStream();
+        await file.CopyToAsync(ms, ct);
+
+        if (ext == ".txt" || ext == ".md")
+            return System.Text.Encoding.UTF8.GetString(ms.ToArray());
+
+        if (ext == ".docx")
+        {
+            // docx = zip：读 word/document.xml 并剥除 XML 标签
+            using var archive = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Read);
+            var entry = archive.GetEntry("word/document.xml");
+            if (entry == null) return "";
+            await using var es = entry.Open();
+            using var reader = new StreamReader(es);
+            var xml = await reader.ReadToEndAsync(ct);
+            var text = System.Text.RegularExpressions.Regex.Replace(xml, @"<w:p[ >]", "\n<w:p ")
+                + "\n";
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"<[^>]+>", "");
+            return System.Net.WebUtility.HtmlDecode(text)
+                .Replace("\r", "").Trim();
+        }
+
+        if (ext == ".pdf")
+        {
+            var text = ExtractPdfText(ms.ToArray());
+            return text;
+        }
+
+        return "";
+    }
+
+    /// <summary>
+    /// 内置轻量 PDF 文本提取：解压 FlateDecode 内容流，解析 Tj/TJ 文本算子。
+    /// 覆盖常见"文字层 PDF"；扫描件/图片型 PDF 无文字层时返回空，由调用方提示改用 docx/txt。
+    /// </summary>
+    private static string ExtractPdfText(byte[] bytes)
+    {
+        var raw = System.Text.Encoding.Latin1.GetString(bytes);
+        var sb = new System.Text.StringBuilder();
+
+        // 逐个 stream ... endstream 块尝试解压并提取文本
+        var offset = 0;
+        while (true)
+        {
+            var streamStart = raw.IndexOf("stream", offset, StringComparison.Ordinal);
+            if (streamStart < 0) break;
+            var dataStart = streamStart + "stream".Length;
+            if (raw[dataStart] == '\r') dataStart++;
+            if (raw[dataStart] == '\n') dataStart++;
+            var dataEnd = raw.IndexOf("endstream", dataStart, StringComparison.Ordinal);
+            if (dataEnd < 0) break;
+            offset = dataEnd + "endstream".Length;
+
+            byte[] chunk;
+            try
+            {
+                var src = System.Text.Encoding.Latin1.GetBytes(raw[dataStart..dataEnd]);
+                using var input = new MemoryStream(src);
+                using var deflate = new System.IO.Compression.DeflateStream(input, System.IO.Compression.CompressionMode.Decompress);
+                using var output = new MemoryStream();
+                deflate.CopyTo(output);
+                chunk = output.ToArray();
+            }
+            catch
+            {
+                continue; // 未压缩或其他滤镜的流跳过
+            }
+
+            var content = System.Text.Encoding.Latin1.GetString(chunk);
+            // 提取 (text) Tj / [(…) …] TJ / ' 与 " 算子中的可读文本
+            foreach (var m in System.Text.RegularExpressions.Regex.Matches(content, @"\((?:\\.|[^\\()])*\)"))
+            {
+                var t = m.ToString()![1..^1]
+                    .Replace("\\(", "(").Replace("\\)", ")").Replace("\\\\", "\\");
+                sb.Append(t);
+            }
+            if (sb.Length > 0) sb.AppendLine();
+        }
+
+        var result = sb.ToString().Trim();
+        // 启发式：乱码或无有效中文/字母时视为无可提取文字层
+        if (result.Length < 10) return "";
+        return result;
+    }
+
+    private static QuestionType ParseQuestionType(string raw) => raw.Trim().ToLowerInvariant() switch
+    {
+        "single" or "单选" or "singlechoice" => QuestionType.SingleChoice,
+        "multiple" or "多选" or "multiplechoice" => QuestionType.MultipleChoice,
+        "judge" or "判断" or "truefalse" => QuestionType.Judge,
+        "blank" or "填空" or "fillintheblank" => QuestionType.Blank,
+        "short" or "简答" or "shortanswer" => QuestionType.ShortAnswer,
+        "essay" or "作文" => QuestionType.Essay,
+        _ => QuestionType.SingleChoice,
+    };
+
     /// <summary>从题库模板（IsTemplate=true 的试卷）复制题目到目标试卷。</summary>
     [HttpPost("papers/{paperId}/reuse/{templatePaperId}")]
     public async Task<IActionResult> ReuseQuestions(string paperId, string templatePaperId)
-    {
-        var paper = await _db.ExamPapers.FindAsync(paperId);
+    {        var paper = await _db.ExamPapers.FindAsync(paperId);
         if (paper == null) return NotFound("目标试卷不存在");
         var template = await _db.ExamPapers.FindAsync(templatePaperId);
         if (template == null) return NotFound("题库模板不存在");
@@ -231,8 +430,9 @@ public class ExamsController : ControllerBase
                 if (!byIndex.TryGetValue(ans.Index, out var q)) continue;
                 lowestConfidence = Math.Min(lowestConfidence, ans.Confidence);
 
-                if (IsObjective(q.Type) && !string.IsNullOrEmpty(q.StandardAnswer))
+                if (IsObjective(q.Type) && q.AiGradingEnabled != false && !string.IsNullOrEmpty(q.StandardAnswer))
                 {
+                    // 客观题且教师未关闭 AI 判分：识别后与标准答案比对自动判分
                     var correct = NormalizeAnswer(ans.Answer) == NormalizeAnswer(q.StandardAnswer);
                     _db.QuestionResults.Add(new QuestionResult
                     {
@@ -248,7 +448,8 @@ public class ExamsController : ControllerBase
                 }
                 else
                 {
-                    // 主观题：先存识别内容，等待 AI 批改或人工
+                    // 主观题，或教师指定人工判分（AiGradingEnabled=false）的客观题：
+                    // 先存识别内容，等待教师阅卷（"待人工"）
                     _db.QuestionResults.Add(new QuestionResult
                     {
                         SubmissionId = submission.Id,

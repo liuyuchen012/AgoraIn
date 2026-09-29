@@ -117,7 +117,10 @@ public class AccountController : ControllerBase
         var username = req.Username?.Trim() ?? "";
         var mode = string.Equals(req.Mode, "join", StringComparison.OrdinalIgnoreCase) ? "join" : "region";
 
-        if (!IsValidEmail(email))
+        // 家长（join）凭邀请码注册，码即凭据，无需邮箱验证；机构（region）须邮箱验证码（v3.2 语义）
+        var requireEmail = mode == "region";
+
+        if (requireEmail && !IsValidEmail(email))
             return BadRequest(new { error = "请输入正确的邮箱地址。" });
 
         if (username.Length < 3 || username.Length > 32)
@@ -133,30 +136,33 @@ public class AccountController : ControllerBase
         if (!req.AgreeTerms)
             return BadRequest(new { error = "请先阅读并同意服务条款与隐私政策。" });
 
-        // 邮箱全局唯一（便于找回密码）
-        if (await _db.Users.AnyAsync(u => u.Email == email && u.IsActive, ct))
-            return BadRequest(new { error = "该邮箱已被注册。" });
-
-        // 校验邮箱验证码
-        var codeError = await ConsumeCodeAsync(email, "register", req.Code ?? "", ct);
-        if (codeError != null) return BadRequest(new { error = codeError });
-
         User user;
-        string regionId;
         if (mode == "join")
         {
-            // ── 加入已有区域（家长/学生自助注册，App/小程序通用）──
-            regionId = req.RegionId?.Trim().ToLowerInvariant() ?? "";
-            var region = await _db.Regions.FirstOrDefaultAsync(r => r.RegionId == regionId, ct);
-            if (region == null)
-                return BadRequest(new { error = "区域代号不存在，请向机构索取正确的区域代号。" });
-            if (!region.IsActive)
-                return BadRequest(new { error = "该区域尚未激活或已到期，请稍后再试。" });
+            // ── 加入已有区域（家长凭教师颁发的绑定邀请码注册，码即凭据，无需邮箱验证）──
+            var inviteCode = req.InviteCode?.Trim().ToUpperInvariant() ?? "";
+            if (string.IsNullOrEmpty(inviteCode))
+                return BadRequest(new { error = "请输入教师颁发的绑定邀请码。" });
 
-            if (await _db.Users.AnyAsync(u => u.Username == username && u.RegionId == regionId, ct))
+            // 邀请码是跨区域的凭据：匿名请求区域上下文为主区域，须忽略区域过滤器查找
+            var binding = await _db.ParentBindings
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(b => b.InviteCode == inviteCode && b.Status == Core.Entities.ParentBindingStatus.Pending, ct);
+            if (binding == null)
+                return BadRequest(new { error = "邀请码无效或已被使用，请向老师索取新的邀请码。" });
+
+            var student = await _db.Students
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(s => s.Id == binding.StudentId, ct);
+            if (student == null)
+                return BadRequest(new { error = "邀请码对应的学生不存在。" });
+
+            var parentRegion = Microsoft.EntityFrameworkCore.EF.Property<string>(student, "RegionId");
+            if (string.IsNullOrEmpty(parentRegion)) parentRegion = AgoraIn.Server.Security.RegionContext.ManagerRegion;
+
+            if (await _db.Users.AnyAsync(u => u.Username == username && u.RegionId == parentRegion, ct))
                 return BadRequest(new { error = "该用户名在当前区域已被占用。" });
 
-            // 自助注册仅开放家长角色（教师/学生子账户由区域管理员创建）
             user = new User
             {
                 Username = username,
@@ -164,19 +170,27 @@ public class AccountController : ControllerBase
                 Role = AppRoles.Parent,
                 DisplayName = string.IsNullOrWhiteSpace(req.DisplayName) ? username : req.DisplayName!.Trim(),
                 Email = email,
-                RegionId = regionId,
+                RegionId = parentRegion,
                 IsActive = true,
             };
             _db.Users.Add(user);
+
+            // 注册即完成孩子绑定
+            binding.ParentUserId = username;
+            binding.ParentAlias = string.IsNullOrWhiteSpace(req.DisplayName) ? username : req.DisplayName!.Trim();
+            binding.Status = Core.Entities.ParentBindingStatus.Bound;
+            binding.BoundAt = DateTime.Now;
+
             await _db.SaveChangesAsync(ct);
 
-            _logger.LogInformation("家长自助注册成功：{Username}@{Region}（{Email}）", username, regionId, email);
+            _logger.LogInformation("家长凭邀请码注册成功：{Username}@{Region} 绑定学生 {StudentId}", username, parentRegion, student.Id);
             return Ok(new
             {
-                message = "注册成功，请用「用户名@区域代号」登录。",
+                message = "注册成功并已绑定孩子，请用「用户名@区域代号」登录。",
                 username,
-                regionId,
-                loginName = $"{username}@{regionId}",
+                regionId = parentRegion,
+                loginName = $"{username}@{parentRegion}",
+                studentName = student.Name,
                 role = AppRoles.Parent,
             });
         }
@@ -187,6 +201,12 @@ public class AccountController : ControllerBase
             return BadRequest(new { error = "请填写区域名称（如机构/学校名称）。" });
         if (await _db.Regions.AnyAsync(r => r.Name == regionName, ct))
             return BadRequest(new { error = "区域名称已存在（区域名称不可重复）。" });
+
+        // 邮箱验证（仅机构注册要求；邮箱全局唯一便于找回密码）
+        if (await _db.Users.AnyAsync(u => u.Email == email && u.IsActive, ct))
+            return BadRequest(new { error = "该邮箱已被注册。" });
+        var codeError = await ConsumeCodeAsync(email, "register", req.Code ?? "", ct);
+        if (codeError != null) return BadRequest(new { error = codeError });
 
         var newRegionId = string.IsNullOrWhiteSpace(req.RegionId) ? GenerateRegionId() : req.RegionId!.Trim().ToLowerInvariant();
         if (!System.Text.RegularExpressions.Regex.IsMatch(newRegionId, @"^[a-z0-9_-]{3,32}$"))
@@ -322,7 +342,7 @@ public record SendCodeRequest(string? Email, string? Purpose);
 public record RegisterRequest(
     string? Email, string? Code, string? Username, string? Password,
     string? DisplayName, bool AgreeTerms,
-    // region = 创建新区域（默认，v3.2 语义）；join = 加入已有区域（家长/学生自助）
-    string? Mode, string? RegionName, string? RegionId);
+    // region = 创建新区域（默认，v3.2 语义，需邮箱验证码）；join = 家长凭绑定邀请码注册（需 inviteCode）
+    string? Mode, string? RegionName, string? RegionId, string? InviteCode);
 
 public record ResetPasswordRequest(string? Email, string? Code, string? NewPassword);

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage
+    x:Class="AgoraIn.Mobile.Pages.GradingPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    Title="阅卷与出分"
+    BackgroundColor="#F8F9FA">
+
+    <Grid RowDefinitions="Auto,*" Padding="20,14,20,10" RowSpacing="10">
+
+        <!-- 步骤条 -->
+        <HorizontalStackLayout Grid.Row="0" Spacing="8">
+            <Button x:Name="BackButton" Text="←" BackgroundColor="#e8f0fe" TextColor="#4285f4"
+                    CornerRadius="8" WidthRequest="42" HeightRequest="38" Clicked="OnBackClicked" />
+            <Label x:Name="CrumbLabel" Text="① 选择试卷" FontSize="17" FontAttributes="Bold"
+                   VerticalOptions="Center" />
+        </HorizontalStackLayout>
+
+        <!-- 步骤 1：试卷列表 -->
+        <ScrollView Grid.Row="1">
+            <VerticalStackLayout x:Name="PapersView" Spacing="10">
+                <ActivityIndicator x:Name="PapersBusy" IsRunning="False" IsVisible="False" Color="#4285f4"
+                                   HorizontalOptions="Center" />
+                <Label x:Name="PapersEmpty" Text="暂无试卷，请先在网页端创建" TextColor="#999999"
+                       HorizontalOptions="Center" Margin="0,40" IsVisible="False" />
+                <!-- 试卷卡片由代码生成 -->
+            </VerticalStackLayout>
+        </ScrollView>
+    </Grid>
+</ContentPage>

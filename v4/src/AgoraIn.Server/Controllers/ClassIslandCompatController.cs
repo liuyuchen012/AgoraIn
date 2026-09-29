@@ -165,6 +165,34 @@ public class ClassIslandCompatController : ControllerBase
         if (string.IsNullOrEmpty(expected)) return true;
         return password == expected;
     }
+
+    // ═══════════════ api/profile_pull（课表档案下发，插件升级后消费） ═══════════════
+
+    /// <summary>
+    /// 拉取服务端推送的课表档案：插件轮询此接口，拿到新版本号即把返回的 CSES 档案
+    /// 写入 ClassIsland 本地档案文件（覆盖现有档案）。契约见 v4/docs/api-contract-classisland.md。
+    /// </summary>
+    [HttpPost("profile_pull")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ProfilePull([FromBody] ProfilePullRequest req, [FromServices] Services.ClassIslandProfileService profile)
+    {
+        if (!CheckPassword(req.Password))
+            return Unauthorized(new { error = "连接密码错误" });
+
+        var region = string.IsNullOrWhiteSpace(req.Region) ? Security.RegionContext.ManagerRegion : req.Region!.Trim();
+        var (profileJson, version) = await profile.PullAsync(region);
+        if (profileJson == null)
+            return Ok(new { has_profile = false, version = 0 });
+
+        return Ok(new
+        {
+            has_profile = true,
+            version,
+            region,
+            // CSES 档案原文（JSON）：插件直接整文件写入 ClassIsland 档案路径即可覆盖
+            profile = profileJson,
+        });
+    }
 }
 
 // ═══════════════ 请求模型 ═══════════════
@@ -178,3 +206,5 @@ public record CallsAckRequest(int Id, string? Uuid, string? Password);
 public record CreateCallRequest(
     string Type, string? Title, string? Message,
     int MinutesBefore, string? StudentNames, string? TargetUuid);
+
+public record ProfilePullRequest(string? Password, string? Region);

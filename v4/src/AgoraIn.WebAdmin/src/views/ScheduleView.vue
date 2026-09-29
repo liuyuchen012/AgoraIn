@@ -2,10 +2,19 @@
   <el-card shadow="never" class="page-card">
     <template #header>
       <div class="card-header">
-        <span class="card-title">课程表（CSES）</span>
-        <el-select v-model="classId" clearable placeholder="全部班级" style="width:200px" @change="loadTimetable">
-          <el-option v-for="c in classes" :key="c.id" :label="c.name" :value="c.id!" />
-        </el-select>
+        <span class="card-title">课程表（CSES / ClassIsland）</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <el-select v-model="classId" clearable placeholder="全部班级" style="width:180px" @change="loadTimetable">
+            <el-option v-for="c in classes" :key="c.id" :label="c.name" :value="c.id!" />
+          </el-select>
+          <el-upload :show-file-list="false" accept=".json,.yml,.yaml" :before-upload="importCsesFile">
+            <el-button size="small" type="primary" plain>导入 ClassIsland 档案</el-button>
+          </el-upload>
+          <el-button size="small" @click="exportCses">导出档案</el-button>
+          <el-tooltip content="把当前课表推送到服务器，ClassIsland 插件轮询拉取后自动覆盖本地档案" placement="bottom">
+            <el-button size="small" type="success" @click="pushToPlugin">推送给插件</el-button>
+          </el-tooltip>
+        </div>
       </div>
     </template>
 
@@ -209,6 +218,25 @@ async function savePlan() {
 }
 
 function fmtTime(t: string) { return (t || '').slice(0, 5) }
+
+// ── ClassIsland 档案导入 / 导出 / 推送 ──
+async function importCsesFile(file: File) {
+  try {
+    const r = await timetableApi.importCses(file, classId.value || undefined)
+    ElMessage.success(`已导入 ${r.importedSubjects} 个科目、${r.importedSlots} 节课（布局：${r.layoutName}）`)
+    await loadTimetable()
+  } catch {}
+  return false
+}
+
+function exportCses() {
+  window.open(timetableApi.exportCsesUrl(classId.value || undefined), '_blank')
+}
+
+async function pushToPlugin() {
+  const r = await timetableApi.push(classId.value || undefined)
+  ElMessage.success(`已推送到服务器（版本 v${r.version}），ClassIsland 插件将在下次轮询时覆盖本地档案`)
+}
 </script>
 
 <style scoped>

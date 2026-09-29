@@ -7,6 +7,8 @@
           <el-select v-model="classId" placeholder="全部班级" clearable style="width: 180px" @change="loadData">
             <el-option v-for="c in classes" :key="c.id" :label="c.name" :value="c.id" />
           </el-select>
+          <el-button size="small" type="success" plain :disabled="!classId" @click="batchInvite">批量生成邀请码</el-button>
+          <el-button size="small" :disabled="!classId" @click="exportInvites">导出邀请码 (CSV)</el-button>
         </div>
         <div>
           <el-button size="small" @click="loadData">刷新</el-button>
@@ -62,6 +64,22 @@
     </template>
   </el-dialog>
 
+  <el-dialog v-model="batchVisible" title="全班家长绑定邀请码" width="520px">
+    <el-alert type="info" :closable="false" style="margin-bottom:10px"
+              title="家长在 App/小程序用邀请码注册后即自动绑定对应孩子；也可打印 CSV 发放。" />
+    <el-table :data="batchInvites" size="small" max-height="360" border>
+      <el-table-column prop="studentNo" label="学号" width="70" />
+      <el-table-column prop="studentName" label="学生" width="100" />
+      <el-table-column prop="inviteCode" label="邀请码" width="110">
+        <template #default="{ row }"><span style="font-family:monospace;font-weight:600">{{ row.inviteCode }}</span></template>
+      </el-table-column>
+    </el-table>
+    <template #footer>
+      <el-button @click="batchVisible = false">关闭</el-button>
+      <el-button type="primary" @click="exportInvites">导出 CSV</el-button>
+    </template>
+  </el-dialog>
+
   <el-dialog v-model="inviteVisible" title="家长绑定邀请码" width="380px">
     <div class="invite-box">
       <div class="invite-code">{{ inviteCode }}</div>
@@ -77,6 +95,24 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { studentApi, classApi, parentApi, type StudentRow, type ClassRow } from '@/api/client'
+
+// 批量邀请码
+const batchVisible = ref(false)
+const batchInvites = ref<{ studentId: string; studentNo?: string; studentName: string; inviteCode: string }[]>([])
+
+async function batchInvite() {
+  if (!classId.value) return
+  try {
+    batchInvites.value = await parentApi.batchInvite(classId.value)
+    batchVisible.value = true
+  } catch {}
+}
+
+function exportInvites() {
+  if (!classId.value) return
+  window.open(parentApi.batchInviteCsvUrl(classId.value), '_blank')
+}
+
 
 const loading = ref(false)
 const saving = ref(false)

@@ -8,6 +8,15 @@
     </template>
 
     <el-form :model="form" label-width="180px" style="max-width:640px" v-loading="loading">
+      <el-form-item label="API 密钥">
+        <el-input v-model="apiKeyInput" type="password" show-password
+                  :placeholder="form.hasApiKey ? `已配置（${form.apiKeyMasked}），输入新值覆盖，留空不变` : '尚未配置，请输入 API 密钥'"
+                  style="max-width:420px" />
+        <div style="width:100%">
+          <el-button v-if="form.hasApiKey" link type="danger" size="small" @click="clearApiKey">清除密钥（回落服务器配置）</el-button>
+        </div>
+        <div class="tip">密钥保存在服务端数据库（读取时脱敏），优先于 appsettings.json 的 DeepSeek:ApiKey；OpenAI 兼容协议</div>
+      </el-form-item>
       <el-form-item label="批改模型（文本）">
         <el-input v-model="form.model" placeholder="如：deepseek-chat / glm-4-flash" />
         <div class="tip">OpenAI 兼容协议；模型名、密钥由服务器 appsettings.json 的 DeepSeek:ApiKey/BaseUrl 决定</div>
@@ -33,6 +42,11 @@
       <el-form-item label="允许发送作答图像给大模型">
         <el-switch v-model="form.allowImageToCloud" />
         <div class="tip">隐私开关（默认开启）：关闭后学生作答图像不发送给第三方模型，主观题只支持教师手判</div>
+      </el-form-item>
+      <el-form-item label="主观题阅卷提示词模板">
+        <el-input v-model="form.gradingPromptTemplate" type="textarea" :rows="7"
+                  placeholder="留空使用内置默认模板。占位符：{Type} 题型 / {Question} 题干 / {StudentAnswer} 学生答案 / {StandardAnswer} 标准答案 / {Rubric} 评分要点 / {MaxScore} 满分" />
+        <div class="tip">模板会与每题的评分要点（rubric）组合生成 AI 阅卷提示词；修改后对所有主观题 AI 批改即时生效</div>
       </el-form-item>
       <el-form-item>
         <el-button type="primary" :loading="saving" @click="save">保存设置</el-button>
@@ -75,7 +89,9 @@ const saving = ref(false)
 const form = ref<AiSettings>({
   model: '', visionModel: '', temperature: 0.1, maxTokens: 1024,
   allowImageToCloud: true, humanReviewThreshold: 0.6, retries: 2,
+  gradingPromptTemplate: null, hasApiKey: false, apiKeyMasked: '',
 })
+const apiKeyInput = ref('')
 const logs = ref<{ totalTokens: number; logs: AiLogRow[] } | null>(null)
 
 onMounted(loadAll)
@@ -91,8 +107,24 @@ async function loadAll() {
 async function save() {
   saving.value = true
   try {
-    form.value = await aiApi.save(form.value)
+    // apiKey 仅在输入了新值时提交（undefined = 服务端保持不变）
+    const payload: Record<string, unknown> = { ...form.value }
+    delete payload.hasApiKey
+    delete payload.apiKeyMasked
+    if (apiKeyInput.value.trim()) payload.apiKey = apiKeyInput.value.trim()
+    else delete payload.apiKey
+    form.value = await aiApi.save(payload)
+    apiKeyInput.value = ''
     ElMessage.success('已保存（即时生效）')
+  } finally { saving.value = false }
+}
+
+async function clearApiKey() {
+  saving.value = true
+  try {
+    form.value = await aiApi.save({ apiKey: '' })
+    apiKeyInput.value = ''
+    ElMessage.success('已清除在线密钥，回落服务器配置')
   } finally { saving.value = false }
 }
 

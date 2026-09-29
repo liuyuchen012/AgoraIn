@@ -33,7 +33,7 @@
             <Entry x:Name="PasswordEntry" Placeholder="密码（至少 6 位）" IsPassword="True" />
 
             <!-- 家长模式：区域代号 -->
-            <Entry x:Name="RegionIdEntry" Placeholder="区域代号（向学校/机构索取）" />
+            <Entry x:Name="RegionIdEntry" Placeholder="绑定邀请码（向老师索取 6 位码，注册即绑定孩子）" />
             <!-- 机构模式：区域名称 -->
             <Entry x:Name="RegionNameEntry" Placeholder="区域名称（机构/学校名称，不可重复）" IsVisible="False" />
 

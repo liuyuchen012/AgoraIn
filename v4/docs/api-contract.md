@@ -19,7 +19,7 @@
 | 方法 | 路径 | 说明 | 鉴权 |
 | --- | --- | --- | --- |
 | POST | `/api/v4/account/send-code` | 发送邮箱验证码 `{email,purpose}` | 匿名 |
-| POST | `/api/v4/account/register` | 注册；`mode=region`（默认）创建新区域并成为主账号（区域名称全局唯一，代号全局唯一）；`mode=join` 加入已有区域（需 `regionId`） | 匿名 |
+| POST | `/api/v4/account/register` | 注册；`mode=region`（默认）创建新区域并成为主账号（需邮箱验证码，区域名称全局唯一）；`mode=join` **家长凭绑定邀请码注册**（需 `inviteCode`，注册即绑定孩子，无需邮箱） | 匿名 |
 | POST | `/api/v4/account/reset-password` | 重置密码 `{email,code,newPassword}` | 匿名 |
 
 ## 区域 `regions`（多租户管理）
@@ -124,6 +124,9 @@
 | POST | `/api/v4/timetable/layouts` | 保存时间布局（全量覆盖节次） |
 | POST | `/api/v4/timetable/plans` | 保存班级课表（全量覆盖排课） |
 | GET | `/api/v4/timetable/active?classId=` | 当前生效课表（供桌面端课表驱动） |
+| POST | `/api/v4/timetable/import-cses` | 导入 ClassIsland 档案（.json/.yml 文件或 `text` 字段，自动识别 JSON/YAML） | JWT |
+| GET | `/api/v4/timetable/export-cses?classId=` | 导出 ClassIsland 档案 JSON | JWT |
+| POST | `/api/v4/timetable/push` | 推送课表：写入推送存储并递增版本号，插件轮询 `api/profile_pull` 覆盖本地档案 | JWT |
 
 ## 家长端 `parent`
 
@@ -141,6 +144,8 @@
 | GET | `/api/v4/parent/resources/{id}/file` | 资源下载（仅已下发资源） | JWT |
 | GET | `/api/v4/parent/child/{studentId}/duty` | 值日表现（完成率 + 记录） | JWT |
 | POST | `/api/v4/parent/invite/{studentId}` | 教师生成 6 位邀请码 | admin/teacher |
+| GET | `/api/v4/parent/invite/batch?classId=` | 批量生成/获取全班邀请码（已有待绑码直接复用） | admin/teacher |
+| GET | `/api/v4/parent/invite/batch/export?classId=` | 全班邀请码导出 CSV（UTF-8 BOM） | admin/teacher |
 
 > 权限：家长接口会校验「该学生已绑定到当前用户」，越权返回 403。
 
@@ -153,6 +158,8 @@
 | GET/POST | `/api/v4/exams/papers/{paperId}/questions` | 题目列表 / 添加 |
 | PUT | `/api/v4/exams/papers/{paperId}/questions/{qid}` | 更新题目 |
 | POST | `/api/v4/exams/papers/{paperId}/reuse/{templatePaperId}` | 从题库模板复制题目 |
+| POST | `/api/v4/exams/papers/{paperId}/import-file` | 上传试卷文件（docx/pdf/txt；`questionFile` + 可选 `answerFile`，支持题目答案同文件或分两个文件）AI 识别出题并生成答题卡题目 | JWT |
+| POST | `/api/v4/exams/papers/{paperId}/ai-generate-answers` | AI 生成缺失的标准答案与评分要点（评分要点即 AI 阅卷提示词素材） | JWT |
 | GET | `/api/v4/sheet/{paperId}` | **空白通用答题卡**（A4 HTML，浏览器打印，匿名） |
 | GET | `/api/v4/sheet/{paperId}/student/{studentId}` | **学生专属卡**（含学号条码区，匿名） |
 | GET | `/api/v4/sheet/{paperId}/batch?classId=` | **全班批量**（一人一页带条码，匿名） |
@@ -203,8 +210,8 @@
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/v4/settings/ai` | 读取（模型/视觉模型/温度/maxTokens/低置信度阈值/图像外发开关） |
-| PUT | `/api/v4/settings/ai` | 保存（存 AppSetting，覆盖 appsettings 默认值） |
+| GET | `/api/v4/settings/ai` | 读取（模型/视觉模型/温度/低置信度阈值/**API 密钥脱敏**/图像外发开关/**阅卷提示词模板**） |
+| PUT | `/api/v4/settings/ai` | 保存（`apiKey`：null=不变、空串=清除、非空=更新，存 AppSetting） |
 | GET | `/api/v4/settings/ai/logs?take=` | AI 调用日志（Token 消耗与失败原因） |
 
 ## 呼叫（ClassIsland）

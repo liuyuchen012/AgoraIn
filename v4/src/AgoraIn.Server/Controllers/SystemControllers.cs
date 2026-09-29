@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AgoraIn.Core.Security;
 using AgoraIn.Server.Models;
 using AgoraIn.Server.Security;
@@ -24,20 +25,69 @@ public class AiSettingsController : ControllerBase
         _settings = settings;
     }
 
-    /// <summary>读取 AI 批改设置。</summary>
+    /// <summary>读取 AI 批改设置（API 密钥脱敏返回）。</summary>
     [HttpGet]
-    public async Task<IActionResult> Get(CancellationToken ct) => Ok(await _settings.LoadAsync(ct));
-
-    /// <summary>保存 AI 批改设置（数据库覆盖 appsettings 默认值）。</summary>
-    [HttpPut]
-    public async Task<IActionResult> Save([FromBody] AiRuntimeSettings req, CancellationToken ct)
+    public async Task<IActionResult> Get(CancellationToken ct)
     {
-        if (req.Temperature is < 0 or > 2) return BadRequest("温度须在 0-2 之间");
-        if (req.MaxTokens is < 128 or > 32768) return BadRequest("maxTokens 须在 128-32768 之间");
-        if (req.HumanReviewThreshold is < 0 or > 1) return BadRequest("低置信度阈值须在 0-1 之间");
-        await _settings.SaveAsync(req, ct);
-        return Ok(await _settings.LoadAsync(ct));
+        var s = await _settings.LoadAsync(ct);
+        return Ok(new
+        {
+            s.Model, s.VisionModel, s.Temperature, s.MaxTokens,
+            s.AllowImageToCloud, s.HumanReviewThreshold, s.Retries,
+            s.GradingPromptTemplate,
+            hasApiKey = !string.IsNullOrEmpty(s.ApiKey),
+            apiKeyMasked = MaskKey(s.ApiKey),
+        });
     }
+
+    /// <summary>
+    /// 保存 AI 批改设置。apiKey 语义：null/缺省 = 不变；空串 = 清除（回落 appsettings）；非空 = 更新。
+    /// </summary>
+    [HttpPut]
+    public async Task<IActionResult> Save([FromBody] JsonElement body, CancellationToken ct)
+    {
+        var current = await _settings.LoadAsync(ct);
+
+        var s = new AiRuntimeSettings
+        {
+            ApiKey = current.ApiKey,
+            Model = body.TryGetProperty("model", out var m) ? m.GetString() ?? current.Model : current.Model,
+            VisionModel = body.TryGetProperty("visionModel", out var vm) ? vm.GetString() ?? "" : current.VisionModel,
+            Temperature = body.TryGetProperty("temperature", out var t) && t.TryGetDouble(out var tv) ? tv : current.Temperature,
+            MaxTokens = body.TryGetProperty("maxTokens", out var mt) && mt.TryGetInt32(out var mv) ? mv : current.MaxTokens,
+            AllowImageToCloud = !body.TryGetProperty("allowImageToCloud", out var ai) || ai.ValueKind != JsonValueKind.False,
+            HumanReviewThreshold = body.TryGetProperty("humanReviewThreshold", out var ht) && ht.TryGetDouble(out var hv) ? hv : current.HumanReviewThreshold,
+            Retries = body.TryGetProperty("retries", out var r) && r.TryGetInt32(out var rv) ? rv : current.Retries,
+            GradingPromptTemplate = body.TryGetProperty("gradingPromptTemplate", out var gpt)
+                ? (gpt.ValueKind == JsonValueKind.String ? gpt.GetString() : null)
+                : current.GradingPromptTemplate,
+        };
+
+        // API 密钥：显式传 apiKey 字段时才变更（null=不变，""=清除）
+        if (body.TryGetProperty("apiKey", out var ak))
+        {
+            s.ApiKey = ak.ValueKind == JsonValueKind.String ? ak.GetString() ?? "" : "";
+        }
+
+        if (s.Temperature is < 0 or > 2) return BadRequest(new { error = "温度须在 0-2 之间" });
+        if (s.MaxTokens is < 128 or > 32768) return BadRequest(new { error = "maxTokens 须在 128-32768 之间" });
+        if (s.HumanReviewThreshold is < 0 or > 1) return BadRequest(new { error = "低置信度阈值须在 0-1 之间" });
+        await _settings.SaveAsync(s, ct);
+
+        var saved = await _settings.LoadAsync(ct);
+        return Ok(new
+        {
+            saved.Model, saved.VisionModel, saved.Temperature, saved.MaxTokens,
+            saved.AllowImageToCloud, saved.HumanReviewThreshold, saved.Retries,
+            saved.GradingPromptTemplate,
+            hasApiKey = !string.IsNullOrEmpty(saved.ApiKey),
+            apiKeyMasked = MaskKey(saved.ApiKey),
+        });
+    }
+
+    private static string MaskKey(string key) => key.Length <= 8
+        ? new string('•', key.Length)
+        : $"{key[..4]}{new string('•', Math.Max(4, key.Length - 8))}{key[^4..]}";
 
     /// <summary>AI 调用日志（Token 消耗与失败原因，最近优先）。</summary>
     [HttpGet("logs")]

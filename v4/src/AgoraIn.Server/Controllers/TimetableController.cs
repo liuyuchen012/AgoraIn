@@ -15,7 +15,13 @@ namespace AgoraIn.Server.Controllers;
 public class TimetableController : ControllerBase
 {
     private readonly ServerDbContext _db;
-    public TimetableController(ServerDbContext db) => _db = db;
+    private readonly Services.ClassIslandProfileService _profile;
+
+    public TimetableController(ServerDbContext db, Services.ClassIslandProfileService profile)
+    {
+        _db = db;
+        _profile = profile;
+    }
 
     /// <summary>完整课表（科目 + 时间布局 + 班级课表），供桌面端/小程序拉取。</summary>
     [HttpGet]
@@ -160,8 +166,7 @@ public class TimetableController : ControllerBase
     /// <summary>当前生效课表（供桌面端课表驱动行为使用）。</summary>
     [HttpGet("active")]
     public async Task<IActionResult> Active([FromQuery] string? classId)
-    {
-        var plan = await _db.ClassPlans
+    {        var plan = await _db.ClassPlans
             .FirstOrDefaultAsync(p => p.IsActive && (classId == null || p.ClassId == classId));
         if (plan == null) return Ok(new { hasPlan = false });
 
@@ -190,6 +195,59 @@ public class TimetableController : ControllerBase
                 subjectName = subjects.FirstOrDefault(s => s.Id == e.SubjectId)?.Name ?? "",
             }),
         });
+    }
+
+    // ── ClassIsland 档案导入 / 导出 / 推送 ──
+
+    /// <summary>
+    /// 导入 ClassIsland 档案（.json / .yml / .yaml 文件或 JSON/YAML 文本），写入当前区域。
+    /// </summary>
+    [HttpPost("import-cses")]
+    public async Task<IActionResult> ImportCses([FromForm] IFormFile? file, [FromForm] string? classId, [FromForm] string? text, CancellationToken ct)
+    {
+        string content;
+        if (file is { Length: > 0 })
+        {
+            using var reader = new StreamReader(file.OpenReadStream());
+            content = await reader.ReadToEndAsync(ct);
+        }
+        else if (!string.IsNullOrWhiteSpace(text))
+        {
+            content = text;
+        }
+        else
+        {
+            return BadRequest(new { error = "请上传档案文件（.json/.yml）或直接粘贴档案文本" });
+        }
+
+        try
+        {
+            var (subjects, slots, layoutName) = await _profile.ImportAsync(content, classId, ct);
+            return Ok(new { importedSubjects = subjects, importedSlots = slots, layoutName });
+        }
+        catch (InvalidDataException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>导出当前课表为 ClassIsland 档案 JSON（ClassIsland 可直接导入）。</summary>
+    [HttpGet("export-cses")]
+    public async Task<IActionResult> ExportCses([FromQuery] string? classId, CancellationToken ct)
+    {
+        var json = await _profile.ExportAsync(classId, ct);
+        return Content(json, "application/json; charset=utf-8");
+    }
+
+    /// <summary>
+    /// 推送课表给 ClassIsland 插件：导出档案写入推送存储并递增版本号，
+    /// 插件轮询 <c>POST api/profile_pull</c>（连接密码鉴权）拉取后覆盖 ClassIsland 本地档案。
+    /// </summary>
+    [HttpPost("push")]
+    public async Task<IActionResult> Push([FromForm] string? classId, CancellationToken ct)
+    {
+        var version = await _profile.PushAsync(classId, ct);
+        return Ok(new { pushed = true, version });
     }
 }
 

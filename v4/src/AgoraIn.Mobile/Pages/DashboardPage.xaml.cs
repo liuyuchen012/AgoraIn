@@ -13,7 +13,17 @@ public partial class DashboardPage : ContentPage
         await LoadAsync();
     }
 
-    private async void OnRefreshClicked(object? sender, EventArgs e) => await LoadAsync();
+    private async void OnScanSheetClicked(object? sender, EventArgs e)
+    {
+        await Shell.Current.GoToAsync("scanner");
+    }
+
+    private async void OnGradingClicked(object? sender, EventArgs e)
+    {
+        await Shell.Current.GoToAsync("grading");
+    }
+
+private async void OnRefreshClicked(object? sender, EventArgs e) => await LoadAsync();
 
     private async Task LoadAsync()
     {

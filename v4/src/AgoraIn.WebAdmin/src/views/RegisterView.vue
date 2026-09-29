@@ -4,7 +4,7 @@
       <div class="logo">
         <div class="logo-circle">A</div>
         <h1>注册 AgoraIn 账户</h1>
-        <p class="subtitle">机构注册创建独立区域 · 家长注册加入孩子的区域</p>
+        <p class="subtitle">机构注册创建独立区域 · 家长凭老师颁发的邀请码注册并绑定孩子</p>
       </div>
 
       <el-radio-group v-model="mode" class="mode-switch">
@@ -32,8 +32,8 @@
         </el-form-item>
 
         <template v-if="mode === 'join'">
-          <el-form-item label="区域代号" required>
-            <el-input v-model="form.regionId" placeholder="向机构索取，登录格式：用户名@区域代号" />
+          <el-form-item label="绑定邀请码" required>
+            <el-input v-model="form.inviteCode" placeholder="向老师索取 6 位邀请码，注册即自动绑定孩子" />
           </el-form-item>
         </template>
         <template v-else>
@@ -74,7 +74,7 @@ const router = useRouter()
 const mode = ref<'join' | 'region'>('join')
 const form = reactive({
   email: '', code: '', username: '', password: '',
-  regionId: '', regionName: '', agreeTerms: false,
+  regionId: '', regionName: '', inviteCode: '', agreeTerms: false,
 })
 const loading = ref(false)
 const error = ref('')
@@ -102,18 +102,19 @@ async function onSubmit() {
     error.value = '请填写完整信息'; return
   }
   if (!form.agreeTerms) { error.value = '请先同意服务条款与隐私政策'; return }
-  if (mode.value === 'join' && !form.regionId) { error.value = '请填写区域代号'; return }
+  if (mode.value === 'join' && !form.inviteCode) { error.value = '请填写绑定邀请码'; return }
   if (mode.value === 'region' && !form.regionName) { error.value = '请填写区域名称'; return }
 
   loading.value = true
   try {
     const res = await registerApi.register({
-      email: form.email, code: form.code,
       username: form.username, password: form.password,
       agreeTerms: form.agreeTerms,
       mode: mode.value,
       regionId: form.regionId || undefined,
       regionName: form.regionName || undefined,
+      inviteCode: form.inviteCode || undefined,
+      ...(mode.value === 'region' ? { email: form.email, code: form.code } : {}),
     })
     ElMessage.success(res.message || '注册成功')
     router.push('/login')
