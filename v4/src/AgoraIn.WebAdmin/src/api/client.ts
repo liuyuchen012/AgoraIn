@@ -333,7 +333,8 @@ export const licenseApi = {
 export const smtpApi = {
   get: () => client.get<SmtpConfig>('/smtp'),
   save: (data: SmtpConfig) =>
-    client.post<{ message: string; configured: boolean }>('/smtp', data),
+    // 服务端 SmtpController.Save 为 [HttpPut]，用 POST 会 405
+    client.put<{ message: string; configured: boolean }>('/smtp', data),
   test: (to: string) =>
     client.post<{ message: string }>('/smtp/test', { to }),
 }
