@@ -10,8 +10,30 @@
 | --- | --- | --- | --- |
 | GET | `/api/v4/setup/status` | 是否需首次初始化 | 匿名 |
 | POST | `/api/v4/auth/setup` | 创建首个管理员 `{username,password}` | 匿名 |
-| POST | `/api/v4/auth/login` | 登录 → `{token,role,username}` | 匿名 |
+| POST | `/api/v4/auth/login` | 登录 `{username,password}`；`username` 格式 `用户名@区域Id`（主区域为 `用户名@manager`，不带 `@` 按主区域处理）；返回 `region`/`isManager` | 匿名 |
 | POST | `/api/v4/auth/change-password` | 修改密码 `{oldPassword,newPassword}` | JWT |
+| GET | `/api/v4/auth/me` | 当前用户资料与权限（含 `region`/`loginName`） | JWT |
+
+## 账户 `account`（自助注册/重置密码）
+
+| 方法 | 路径 | 说明 | 鉴权 |
+| --- | --- | --- | --- |
+| POST | `/api/v4/account/send-code` | 发送邮箱验证码 `{email,purpose}` | 匿名 |
+| POST | `/api/v4/account/register` | 注册；`mode=region`（默认）创建新区域并成为主账号（区域名称全局唯一，代号全局唯一）；`mode=join` 加入已有区域（需 `regionId`） | 匿名 |
+| POST | `/api/v4/account/reset-password` | 重置密码 `{email,code,newPassword}` | 匿名 |
+
+## 区域 `regions`（多租户管理）
+
+| 方法 | 路径 | 说明 | 鉴权 |
+| --- | --- | --- | --- |
+| GET | `/api/v4/regions` | 区域列表（仅主区域） | JWT admin/owner |
+| POST | `/api/v4/regions` | 创建子区域 `{name,ownerUsername,ownerPassword,regionId?}`（区域名称/代号全局唯一） | JWT admin/owner |
+| POST | `/api/v4/regions/{regionId}/issue-code` | 颁发激活码 `{months,maxDevices}` | JWT admin/owner |
+| POST | `/api/v4/regions/activate` | 子区域激活 `{activationCode}`（由主区域颁发，HMAC 签名） | JWT region owner |
+| GET | `/api/v4/regions/me` | 当前区域状态（名称/激活/到期/设备上限） | JWT |
+| DELETE | `/api/v4/regions/{regionId}` | 删除子区域（仅主区域） | JWT admin/owner |
+
+> **多区域数据隔离**：33 张教学数据表通过影子属性 `RegionId` 按请求区域过滤（全局查询过滤器），SaveChanges 自动回填新增实体的区域；`User` 表手动过滤（用户名在区域内唯一，登录格式 `用户名@区域Id`）；不参与隔离的全局表：`User`/`Device`/`Region`/`AiCallLog`/`AppSetting` 等。
 
 ## 班级 / 学生
 
@@ -174,7 +196,8 @@
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/v4/sync/pull?since=&take=` | 变更集拉取（班级/学生/任务/课时账户全量 + 记录类按水位增量），返回 `serverTime` 作下次水位；推送复用各资源幂等 POST |
+| GET | `/api/v4/sync/pull?since=&take=` | 变更集拉取（班级/学生/任务/课时账户全量 + 记录类按水位增量），返回 `serverTime` 作下次水位 |
+| POST | `/api/v4/sync/push` | 冲突裁定推送（可变实体 `{classHourAccounts?,students?}`）；服务器时间戳裁定——客户端较旧拒绝并返回 `conflicts` 数组 |
 
 ## AI 设置 `settings/ai`（需 system.settings 权限）
 
