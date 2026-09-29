@@ -8,6 +8,7 @@ namespace AgoraIn.Server.Controllers;
 
 /// <summary>
 /// 答题卡渲染（匿名访问，用于 iframe 预览和打印）。
+/// iframe 不携带 JWT，区域用户须在 URL 上带 <c>?region=区域Id</c> 指定区域（未知区域回落 manager）。
 /// </summary>
 [ApiController]
 [Route("api/v4/sheet")]
@@ -16,17 +17,32 @@ public class AnswerSheetController : ControllerBase
     private readonly ServerDbContext _db;
     public AnswerSheetController(ServerDbContext db) => _db = db;
 
-    [HttpGet("{paperId}")]
-    public async Task<IActionResult> RenderSheet(string paperId)
+    /// <summary>匿名渲染的公共入口：按 query 参数切换区域上下文。</summary>
+    private async Task<bool> ApplyRegionAsync(string? region)
     {
+        if (string.IsNullOrWhiteSpace(region) || region == AgoraIn.Server.Security.RegionContext.ManagerRegion)
+        {
+            AgoraIn.Server.Security.RegionContext.Set(AgoraIn.Server.Security.RegionContext.ManagerRegion);
+            return true;
+        }
+        var exists = await _db.Regions.AnyAsync(r => r.RegionId == region);
+        AgoraIn.Server.Security.RegionContext.Set(exists ? region : null);
+        return exists;
+    }
+
+    [HttpGet("{paperId}")]
+    public async Task<IActionResult> RenderSheet(string paperId, [FromQuery] string? region)
+    {
+        await ApplyRegionAsync(region);
         var (paper, questions, options) = await LoadPaperAsync(paperId);
         if (paper == null) return NotFound(new { error = "试卷不存在" });
         return Content(AnswerSheetRenderer.Render(paper, questions, options), "text/html; charset=utf-8");
     }
 
     [HttpGet("{paperId}/student/{studentId}")]
-    public async Task<IActionResult> RenderSheetForStudent(string paperId, string studentId)
+    public async Task<IActionResult> RenderSheetForStudent(string paperId, string studentId, [FromQuery] string? region)
     {
+        await ApplyRegionAsync(region);
         var (paper, questions, options) = await LoadPaperAsync(paperId);
         if (paper == null) return NotFound(new { error = "试卷不存在" });
         var student = await _db.Students.FindAsync(studentId);
@@ -36,8 +52,9 @@ public class AnswerSheetController : ControllerBase
     }
 
     [HttpGet("{paperId}/batch")]
-    public async Task<IActionResult> RenderBatch(string paperId, [FromQuery] string classId)
+    public async Task<IActionResult> RenderBatch(string paperId, [FromQuery] string classId, [FromQuery] string? region)
     {
+        await ApplyRegionAsync(region);
         var (paper, questions, options) = await LoadPaperAsync(paperId);
         if (paper == null) return NotFound(new { error = "试卷不存在" });
         var students = await _db.Students.Where(s => s.ClassId == classId).OrderBy(s => s.StudentNo).ToListAsync();

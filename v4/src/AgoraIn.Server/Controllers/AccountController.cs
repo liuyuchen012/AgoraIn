@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 using AgoraIn.Core.Security;
+using AgoraIn.Server.Models;
+using AgoraIn.Server.Security;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -113,6 +115,7 @@ public class AccountController : ControllerBase
     {
         var email = req.Email?.Trim().ToLowerInvariant() ?? "";
         var username = req.Username?.Trim() ?? "";
+        var mode = string.Equals(req.Mode, "join", StringComparison.OrdinalIgnoreCase) ? "join" : "region";
 
         if (!IsValidEmail(email))
             return BadRequest(new { error = "请输入正确的邮箱地址。" });
@@ -120,8 +123,9 @@ public class AccountController : ControllerBase
         if (username.Length < 3 || username.Length > 32)
             return BadRequest(new { error = "用户名长度需为 3–32 个字符。" });
 
+        // 用户名不得包含 @（@ 是登录名「用户名@区域」的区域分隔符）
         if (!System.Text.RegularExpressions.Regex.IsMatch(username, @"^[a-zA-Z0-9_\-\.]+$"))
-            return BadRequest(new { error = "用户名只能包含字母、数字、下划线、短横线与点。" });
+            return BadRequest(new { error = "用户名只能包含字母、数字、下划线、短横线与点（不能包含 @）。" });
 
         if (string.IsNullOrEmpty(req.Password) || req.Password.Length < 6)
             return BadRequest(new { error = "密码至少 6 个字符。" });
@@ -129,9 +133,7 @@ public class AccountController : ControllerBase
         if (!req.AgreeTerms)
             return BadRequest(new { error = "请先阅读并同意服务条款与隐私政策。" });
 
-        if (await _db.Users.AnyAsync(u => u.Username == username, ct))
-            return BadRequest(new { error = "该用户名已被占用。" });
-
+        // 邮箱全局唯一（便于找回密码）
         if (await _db.Users.AnyAsync(u => u.Email == email && u.IsActive, ct))
             return BadRequest(new { error = "该邮箱已被注册。" });
 
@@ -139,28 +141,103 @@ public class AccountController : ControllerBase
         var codeError = await ConsumeCodeAsync(email, "register", req.Code ?? "", ct);
         if (codeError != null) return BadRequest(new { error = codeError });
 
-        // 自助注册创建「机构管理员」（可再创建教师/家长/学生子账户）
-        var user = new User
+        User user;
+        string regionId;
+        if (mode == "join")
+        {
+            // ── 加入已有区域（家长/学生自助注册，App/小程序通用）──
+            regionId = req.RegionId?.Trim().ToLowerInvariant() ?? "";
+            var region = await _db.Regions.FirstOrDefaultAsync(r => r.RegionId == regionId, ct);
+            if (region == null)
+                return BadRequest(new { error = "区域代号不存在，请向机构索取正确的区域代号。" });
+            if (!region.IsActive)
+                return BadRequest(new { error = "该区域尚未激活或已到期，请稍后再试。" });
+
+            if (await _db.Users.AnyAsync(u => u.Username == username && u.RegionId == regionId, ct))
+                return BadRequest(new { error = "该用户名在当前区域已被占用。" });
+
+            // 自助注册仅开放家长角色（教师/学生子账户由区域管理员创建）
+            user = new User
+            {
+                Username = username,
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password),
+                Role = AppRoles.Parent,
+                DisplayName = string.IsNullOrWhiteSpace(req.DisplayName) ? username : req.DisplayName!.Trim(),
+                Email = email,
+                RegionId = regionId,
+                IsActive = true,
+            };
+            _db.Users.Add(user);
+            await _db.SaveChangesAsync(ct);
+
+            _logger.LogInformation("家长自助注册成功：{Username}@{Region}（{Email}）", username, regionId, email);
+            return Ok(new
+            {
+                message = "注册成功，请用「用户名@区域代号」登录。",
+                username,
+                regionId,
+                loginName = $"{username}@{regionId}",
+                role = AppRoles.Parent,
+            });
+        }
+
+        // ── 创建新区域（v3.2 语义）：注册即创建区域并成为该区域主账号（owner），区域需激活后可用 ──
+        var regionName = req.RegionName?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(regionName))
+            return BadRequest(new { error = "请填写区域名称（如机构/学校名称）。" });
+        if (await _db.Regions.AnyAsync(r => r.Name == regionName, ct))
+            return BadRequest(new { error = "区域名称已存在（区域名称不可重复）。" });
+
+        var newRegionId = string.IsNullOrWhiteSpace(req.RegionId) ? GenerateRegionId() : req.RegionId!.Trim().ToLowerInvariant();
+        if (!System.Text.RegularExpressions.Regex.IsMatch(newRegionId, @"^[a-z0-9_-]{3,32}$"))
+            return BadRequest(new { error = "区域代号仅支持 3~32 位小写字母/数字/下划线/连字符。" });
+        if (await _db.Regions.AnyAsync(r => r.RegionId == newRegionId, ct))
+            return BadRequest(new { error = "该区域代号已被使用。" });
+
+        if (await _db.Users.AnyAsync(u => u.Username == username && (u.RegionId == newRegionId || u.RegionId == null), ct))
+            return BadRequest(new { error = "该用户名已被占用。" });
+
+        user = new User
         {
             Username = username,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password),
             Role = AppRoles.Owner,
             DisplayName = string.IsNullOrWhiteSpace(req.DisplayName) ? username : req.DisplayName!.Trim(),
             Email = email,
+            RegionId = newRegionId,
             IsActive = true,
         };
         _db.Users.Add(user);
         await _db.SaveChangesAsync(ct);
 
-        _logger.LogInformation("新用户注册成功：{Username}（{Email}）", username, email);
+        var created = new Region
+        {
+            RegionId = newRegionId,
+            Name = regionName,
+            DevicePassword = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(8)).ToLowerInvariant(),
+            OwnerUserId = user.Id,
+        };
+        _db.Regions.Add(created);
+        await _db.SaveChangesAsync(ct);
 
+        _logger.LogInformation("新区域注册成功：{Username}@{Region}（{RegionName}，{Email}）", username, newRegionId, regionName, email);
         return Ok(new
         {
-            message = "注册成功，请登录。",
+            message = "注册成功。区域需使用主区域颁发的激活码激活后，其他成员才能登录使用。",
             username,
+            regionId = newRegionId,
+            regionName,
+            loginName = $"{username}@{newRegionId}",
             role = AppRoles.Owner,
-            roleName = AppRoles.DisplayName(AppRoles.Owner),
+            devicePassword = created.DevicePassword,
         });
+    }
+
+    /// <summary>生成不重复的区域代号（8 位小写字母数字，与 v3.2 GenerateRegionId 同规则）。</summary>
+    private static string GenerateRegionId()
+    {
+        const string chars = "abcdefghjkmnpqrstuvwxyz23456789";
+        return new string(Enumerable.Range(0, 8).Select(_ => chars[Random.Shared.Next(chars.Length)]).ToArray());
     }
 
     // ══════════════ 重置密码 ══════════════
@@ -244,6 +321,8 @@ public record SendCodeRequest(string? Email, string? Purpose);
 
 public record RegisterRequest(
     string? Email, string? Code, string? Username, string? Password,
-    string? DisplayName, bool AgreeTerms);
+    string? DisplayName, bool AgreeTerms,
+    // region = 创建新区域（默认，v3.2 语义）；join = 加入已有区域（家长/学生自助）
+    string? Mode, string? RegionName, string? RegionId);
 
 public record ResetPasswordRequest(string? Email, string? Code, string? NewPassword);

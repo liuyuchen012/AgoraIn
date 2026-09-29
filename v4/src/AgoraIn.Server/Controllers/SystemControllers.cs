@@ -103,4 +103,71 @@ public class SyncController : ControllerBase
             pointRecords = await pointQ.OrderBy(r => r.CreatedAt).Take(take).ToListAsync(ct),
         });
     }
+
+    /// <summary>
+    /// 冲突裁定推送（可变实体）。冲突策略：服务器时间戳裁定——
+    /// 客户端 UpdatedAt 较新才应用，否则拒绝并返回服务端当前状态（conflicts），由教师端最终确认。
+    /// 追加型记录（打卡/课时/积分流水）不走此端点，直接用各资源幂等 POST。
+    /// </summary>
+    [HttpPost("push")]
+    public async Task<IActionResult> Push([FromBody] SyncPushRequest req, CancellationToken ct)
+    {
+        var applied = 0;
+        var conflicts = new List<object>();
+
+        foreach (var account in req.ClassHourAccounts)
+        {
+            var server = await _db.ClassHourAccounts.FirstOrDefaultAsync(a => a.StudentId == account.StudentId, ct);
+            if (server == null)
+            {
+                _db.ClassHourAccounts.Add(account);
+                applied++;
+                continue;
+            }
+
+            // 服务器时间戳裁定：客户端更旧 → 拒绝并回报服务端状态
+            if (server.UpdatedAt > account.UpdatedAt)
+            {
+                conflicts.Add(new
+                {
+                    entity = "classHourAccount",
+                    studentId = server.StudentId,
+                    client = new { account.TotalHours, account.UsedHours, account.UpdatedAt },
+                    server = new { server.TotalHours, server.UsedHours, server.UpdatedAt },
+                });
+                continue;
+            }
+
+            server.TotalHours = account.TotalHours;
+            server.UsedHours = account.UsedHours;
+            server.Remark = account.Remark;
+            server.UpdatedAt = DateTime.Now;
+            applied++;
+        }
+
+        foreach (var student in req.Students)
+        {
+            var server = await _db.Students.FindAsync([student.Id], ct);
+            if (server == null)
+            {
+                _db.Students.Add(student);
+                applied++;
+                continue;
+            }
+
+            server.Name = student.Name;
+            server.StudentNo = student.StudentNo;
+            server.Gender = student.Gender;
+            server.Status = student.Status;
+            server.Remark = student.Remark;
+            applied++;
+        }
+
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { applied, conflictCount = conflicts.Count, conflicts });
+    }
 }
+
+public record SyncPushRequest(
+    List<AgoraIn.Core.Entities.ClassHourAccount>? ClassHourAccounts,
+    List<AgoraIn.Core.Entities.Student>? Students);

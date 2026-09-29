@@ -98,8 +98,10 @@ public class UsersController : ControllerBase
                 new { error = "只有系统管理员可以创建管理员类账户；您只能创建教师、学生或家长账户。" });
         }
 
-        if (await _db.Users.AnyAsync(u => u.Username == username, ct))
-            return Conflict(new { error = "该用户名已存在。" });
+        // 多区域：用户名在区域内唯一；新账户归属创建者所在区域
+        var myRegion = me.RegionIdOrManager;
+        if (await _db.Users.AnyAsync(u => u.Username == username && u.RegionId == myRegion, ct))
+            return Conflict(new { error = "该用户名在当前区域已存在。" });
 
         var user = new User
         {
@@ -110,6 +112,8 @@ public class UsersController : ControllerBase
             Email = string.IsNullOrWhiteSpace(req.Email) ? null : req.Email!.Trim().ToLowerInvariant(),
             // 系统管理员创建的账户不归属任何人；机构管理员创建的挂在自己名下
             OwnerUserId = myRole == AppRoles.Admin ? null : me.Id,
+            // User 不参与影子属性隔离，必须显式落区域
+            RegionId = myRegion,
             IsActive = true,
         };
 
@@ -221,7 +225,10 @@ public class UsersController : ControllerBase
         var username = User.FindFirst(ClaimTypes.Name)?.Value;
         if (string.IsNullOrEmpty(username)) return (null, AppRoles.Teacher);
 
-        var me = await _db.Users.FirstOrDefaultAsync(u => u.Username == username, ct);
+        // 多区域：按「用户名 + 区域」定位当前用户
+        var regionId = RegionContext.FromUser(User) ?? RegionContext.ManagerRegion;
+        var me = await _db.Users.FirstOrDefaultAsync(
+            u => u.Username == username && (u.RegionId == regionId || (u.RegionId == null && regionId == RegionContext.ManagerRegion)), ct);
         return (me, AppRoles.Normalize(me?.Role));
     }
 

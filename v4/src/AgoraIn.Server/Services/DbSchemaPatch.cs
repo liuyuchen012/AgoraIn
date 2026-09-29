@@ -102,5 +102,67 @@ public static class DbSchemaPatch
         {
             await db.Database.ExecuteSqlRawAsync(sql, ct);
         }
+
+        await ApplyRegionColumnsAsync(db, ct);
+    }
+
+    /// <summary>
+    /// 多区域升级补丁：为区域隔离表补 RegionId 列并回填 manager（历史数据属于服务器运营方主区域），
+    /// 建 Regions 表，Users 加 RegionId 并把「用户名全局唯一」改为「区域内唯一」。
+    /// </summary>
+    private static async Task ApplyRegionColumnsAsync(ServerDbContext db, CancellationToken ct)
+    {
+        string[] regionDdl =
+        [
+            """
+            CREATE TABLE IF NOT EXISTS "Regions" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_Regions" PRIMARY KEY AUTOINCREMENT,
+                "RegionId" TEXT NOT NULL,
+                "Name" TEXT NOT NULL,
+                "DevicePassword" TEXT NULL,
+                "OwnerUserId" INTEGER NOT NULL,
+                "Activated" INTEGER NOT NULL,
+                "ActivationCode" TEXT NULL,
+                "ExpireAt" TEXT NULL,
+                "MaxDevices" INTEGER NOT NULL,
+                "ActivatedAt" TEXT NULL,
+                "CreatedAt" TEXT NOT NULL)
+            """,
+            """CREATE UNIQUE INDEX IF NOT EXISTS "IX_Regions_RegionId" ON "Regions" ("RegionId")""",
+            """CREATE UNIQUE INDEX IF NOT EXISTS "IX_Regions_Name" ON "Regions" ("Name")""",
+        ];
+        foreach (var sql in regionDdl)
+        {
+            await db.Database.ExecuteSqlRawAsync(sql, ct);
+        }
+
+        // 区域隔离表：补列 → 回填 manager → 建索引
+        foreach (var tableName in db.RegionScopedTableNames)
+        {
+            var hasColumn = await db.Database
+                .SqlQuery<int>($"SELECT COUNT(*) AS Value FROM pragma_table_info({tableName}) WHERE name = 'RegionId'")
+                .SingleAsync(ct);
+            if (hasColumn == 0)
+            {
+                await db.Database.ExecuteSqlRawAsync($"ALTER TABLE \"{tableName}\" ADD COLUMN \"RegionId\" TEXT NULL", ct);
+            }
+            await db.Database.ExecuteSqlRawAsync(
+                $"UPDATE \"{tableName}\" SET \"RegionId\" = 'manager' WHERE \"RegionId\" IS NULL", ct);
+            await db.Database.ExecuteSqlRawAsync(
+                $"CREATE INDEX IF NOT EXISTS \"IX_{tableName}_RegionId\" ON \"{tableName}\" (\"RegionId\")", ct);
+        }
+
+        // Users：补 RegionId 列 + 回填 + 唯一约束从全局改到区域内
+        var usersHasRegion = await db.Database
+            .SqlQuery<int>($"SELECT COUNT(*) AS Value FROM pragma_table_info('Users') WHERE name = 'RegionId'")
+            .SingleAsync(ct);
+        if (usersHasRegion == 0)
+        {
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"Users\" ADD COLUMN \"RegionId\" TEXT NULL", ct);
+        }
+        await db.Database.ExecuteSqlRawAsync("UPDATE \"Users\" SET \"RegionId\" = 'manager' WHERE \"RegionId\" IS NULL", ct);
+        await db.Database.ExecuteSqlRawAsync("DROP INDEX IF EXISTS \"IX_Users_Username\"", ct);
+        await db.Database.ExecuteSqlRawAsync(
+            "CREATE UNIQUE INDEX IF NOT EXISTS \"IX_Users_Username_RegionId\" ON \"Users\" (\"Username\", \"RegionId\")", ct);
     }
 }

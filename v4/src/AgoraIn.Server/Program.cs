@@ -65,6 +65,8 @@ builder.Services.AddHttpClient<DeepSeekGradingService>();
 
 // ── 离线授权 ──
 builder.Services.AddScoped<LicenseService>();
+// ── 多区域：区域激活码签发/校验 ──
+builder.Services.AddScoped<RegionCodeService>();
 
 // ── SMTP 邮件 ──
 builder.Services.AddSingleton<EmailSender>();
@@ -132,6 +134,14 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors();
 app.UseAuthentication();
+// 多区域：认证后、授权前，把 JWT 的 region claim 写入 AsyncLocal 区域上下文，
+// 供 ServerDbContext 的全局查询过滤器与 SaveChanges 自动落区域使用（匿名请求回落 manager）
+app.Use(async (context, next) =>
+{
+    AgoraIn.Server.Security.RegionContext.Set(
+        context.User.FindFirst("region")?.Value);
+    await next();
+});
 app.UseAuthorization();
 app.MapControllers();
 app.MapHub<LiveHub>("/hub/live");

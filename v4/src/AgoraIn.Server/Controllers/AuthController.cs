@@ -27,33 +27,62 @@ public class AuthController : ControllerBase
         _config = config;
     }
 
-    /// <summary>登录，返回 JWT Token 与该角色的权限点（前端据此控制按钮显隐）。</summary>
+    /// <summary>
+    /// 登录，返回 JWT Token 与该角色的权限点（前端据此控制按钮显隐）。
+    /// 登录名格式：<c>用户名@区域Id</c>（子区域/家长）或 <c>用户名@manager</c>（主区域）；
+    /// 不带 @ 的用户名按主区域处理（兼容旧客户端）。
+    /// </summary>
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest req, CancellationToken ct)
     {
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.Username == req.Username, ct);
+        var (username, regionId) = ParseLoginName(req.Username);
+        if (username.Length == 0) return Unauthorized(new { error = "用户名或密码错误" });
+
+        var user = await _db.Users.FirstOrDefaultAsync(
+            u => u.Username == username && (u.RegionId == regionId || (u.RegionId == null && regionId == RegionContext.ManagerRegion)), ct);
         if (user == null || !VerifyPassword(user, req.Password))
             return Unauthorized(new { error = "用户名或密码错误" });
 
         if (!user.IsActive)
             return StatusCode(StatusCodes.Status403Forbidden, new { error = "该账户已被禁用，请联系管理员" });
 
+        // 子区域授权检查：未激活/已过期的区域只允许其主账号登录（用于进入激活页面）
+        var userRegion = user.RegionIdOrManager;
+        if (userRegion != RegionContext.ManagerRegion)
+        {
+            var region = await _db.Regions.FirstOrDefaultAsync(r => r.RegionId == userRegion, ct);
+            var role = AppRoles.Normalize(user.Role);
+            var isRegionOwner = role is AppRoles.Owner or AppRoles.Admin;
+            if (region == null)
+                return StatusCode(StatusCodes.Status403Forbidden, new { error = "区域不存在，请联系主区域管理员" });
+            if (!region.IsActive && !isRegionOwner)
+                return StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    error = region.Activated
+                        ? $"区域授权已于 {region.ExpireAt:yyyy-MM-dd} 到期，请联系区域管理员续期"
+                        : "区域尚未激活，请由区域管理员输入主区域颁发的激活码激活",
+                });
+        }
+
         user.LastLoginAt = DateTime.Now;
         await _db.SaveChangesAsync(ct);
 
-        var role = AppRoles.Normalize(user.Role);
-        var token = GenerateToken(user.Username, role);
+        var normalizedRole = AppRoles.Normalize(user.Role);
+        var token = GenerateToken(user.Username, normalizedRole, userRegion);
 
         return Ok(new
         {
             token,
             username = user.Username,
-            role,
-            roleName = AppRoles.DisplayName(role),
+            loginName = $"{user.Username}@{userRegion}",
+            region = userRegion,
+            isManager = userRegion == RegionContext.ManagerRegion,
+            role = normalizedRole,
+            roleName = AppRoles.DisplayName(normalizedRole),
             displayName = user.DisplayName,
             email = user.Email,
             isSubAccount = user.OwnerUserId != null,
-            permissions = RolePermissions.For(role),
+            permissions = RolePermissions.For(normalizedRole),
         });
     }
 
@@ -76,6 +105,7 @@ public class AuthController : ControllerBase
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password),
             Role = AppRoles.Admin,
             DisplayName = "系统管理员",
+            RegionId = RegionContext.ManagerRegion,
             IsActive = true,
         };
         _db.Users.Add(user);
@@ -90,7 +120,9 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest req, CancellationToken ct)
     {
         var username = User.FindFirst(ClaimTypes.Name)?.Value;
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.Username == username, ct);
+        var regionId = RegionContext.FromUser(User) ?? RegionContext.ManagerRegion;
+        var user = await _db.Users.FirstOrDefaultAsync(
+            u => u.Username == username && (u.RegionId == regionId || (u.RegionId == null && regionId == RegionContext.ManagerRegion)), ct);
         if (user == null) return NotFound();
 
         if (!VerifyPassword(user, req.OldPassword))
@@ -110,13 +142,18 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> Me(CancellationToken ct)
     {
         var username = User.FindFirst(ClaimTypes.Name)?.Value;
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.Username == username, ct);
+        var regionId = RegionContext.FromUser(User) ?? RegionContext.ManagerRegion;
+        var user = await _db.Users.FirstOrDefaultAsync(
+            u => u.Username == username && (u.RegionId == regionId || (u.RegionId == null && regionId == RegionContext.ManagerRegion)), ct);
         if (user == null) return NotFound();
 
         var role = AppRoles.Normalize(user.Role);
         return Ok(new
         {
             username = user.Username,
+            loginName = $"{user.Username}@{user.RegionIdOrManager}",
+            region = user.RegionIdOrManager,
+            isManager = user.RegionIdOrManager == RegionContext.ManagerRegion,
             role,
             roleName = AppRoles.DisplayName(role),
             displayName = user.DisplayName,
@@ -124,6 +161,20 @@ public class AuthController : ControllerBase
             isSubAccount = user.OwnerUserId != null,
             permissions = RolePermissions.For(role),
         });
+    }
+
+    /// <summary>
+    /// 解析登录名：<c>用户名@区域Id</c> → (用户名, 区域)；无 @ 按主区域。
+    /// 用户名本身不允许包含 @（注册端点校验），取最后一个 @ 分割避免歧义。
+    /// </summary>
+    internal static (string Username, string Region) ParseLoginName(string? loginName)
+    {
+        if (string.IsNullOrWhiteSpace(loginName)) return ("", RegionContext.ManagerRegion);
+        var trimmed = loginName.Trim();
+        var at = trimmed.LastIndexOf('@');
+        if (at <= 0 || at == trimmed.Length - 1) return (trimmed, RegionContext.ManagerRegion);
+        var region = trimmed[(at + 1)..].ToLowerInvariant();
+        return (trimmed[..at], region.Length == 0 ? RegionContext.ManagerRegion : region);
     }
 
     // ── 密码校验与哈希升级 ──
@@ -182,7 +233,7 @@ public class AuthController : ControllerBase
             Encoding.ASCII.GetBytes(stored.ToLowerInvariant()));
     }
 
-    private string GenerateToken(string username, string role)
+    private string GenerateToken(string username, string role, string region)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(
             _config["Jwt:Key"] ?? "AgoraIn-v4-default-key-change-in-production!"));
@@ -202,6 +253,8 @@ public class AuthController : ControllerBase
                 // 缺该 claim 时定向通知永远匹配不到连接（本系统以用户名作为用户标识）
                 new Claim(ClaimTypes.NameIdentifier, username),
                 new Claim(ClaimTypes.Role, role),
+                // 多区域：数据隔离过滤器按该 claim 裁定当前区域
+                new Claim("region", region),
             ]),
             Expires = DateTime.Now.AddHours(24),
             SigningCredentials = creds,

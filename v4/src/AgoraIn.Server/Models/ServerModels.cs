@@ -5,14 +5,74 @@ namespace AgoraIn.Server;
 /// <summary>
 /// 服务端数据库上下文（SQLite）。
 /// 与桌面端 Core 实体共享，服务端额外维护 User、Device 实体。
+///
+/// **多区域数据隔离**：教学数据实体通过影子属性 "RegionId"（不污染 Core 实体、不影响桌面端本地库）
+/// 按区域隔离——全局查询过滤器按 <see cref="CurrentRegion"/>（来自 JWT region claim）过滤读取，
+/// SaveChanges 对新增实体自动回填当前区域。历史数据由 DbSchemaPatch 回填为 manager。
 /// </summary>
 public sealed class ServerDbContext : DbContext
 {
     public ServerDbContext(DbContextOptions<ServerDbContext> options) : base(options) { }
 
+    /// <summary>
+    /// 当前请求的区域标识（实例属性：EF 查询过滤器按执行时值参数化，避免静态属性被查询计划缓存固化）。
+    /// </summary>
+    public string CurrentRegion => AgoraIn.Server.Security.RegionContext.Current;
+
+    /// <summary>
+    /// 需要按区域隔离的实体类型（影子属性 RegionId）。
+    /// 仅含服务端已映射的实体；不含 User（手动过滤）、Device、Region、AiCallLog、CallEntity、
+    /// License、SmtpSettings、EmailCode、AppSetting（全局数据）。
+    /// </summary>
+    private static readonly Type[] RegionScopedEntities =
+    [
+        typeof(AgoraIn.Core.Entities.ClassInfo),
+        typeof(AgoraIn.Core.Entities.Student),
+        typeof(AgoraIn.Core.Entities.CheckInTask),
+        typeof(AgoraIn.Core.Entities.TaskRosterEntry),
+        typeof(AgoraIn.Core.Entities.CheckInRecord),
+        typeof(AgoraIn.Core.Entities.ClassHourAccount),
+        typeof(AgoraIn.Core.Entities.ClassHourRecord),
+        typeof(AgoraIn.Core.Entities.PointRule),
+        typeof(AgoraIn.Core.Entities.PointRecord),
+        typeof(AgoraIn.Core.Entities.DutyPost),
+        typeof(AgoraIn.Core.Entities.DutyRecord),
+        typeof(AgoraIn.Core.Entities.RollCallSession),
+        typeof(AgoraIn.Core.Entities.RollCallRecord),
+        typeof(AgoraIn.Core.Entities.SeatChart),
+        typeof(AgoraIn.Core.Entities.Seat),
+        typeof(AgoraIn.Core.Entities.SignInCode),
+        typeof(AgoraIn.Core.Entities.Notice),
+        typeof(AgoraIn.Core.Entities.NoticeReadReceipt),
+        typeof(AgoraIn.Core.Entities.Resource),
+        typeof(AgoraIn.Core.Entities.Message),
+        typeof(AgoraIn.Core.Entities.ParentBinding),
+        typeof(AgoraIn.Core.Entities.ExamPaper),
+        typeof(AgoraIn.Core.Entities.Question),
+        typeof(AgoraIn.Core.Entities.AnswerSheetSubmission),
+        typeof(AgoraIn.Core.Entities.QuestionResult),
+        typeof(AgoraIn.Core.Entities.Subject),
+        typeof(AgoraIn.Core.Entities.TimeLayout),
+        typeof(AgoraIn.Core.Entities.TimeLayoutEntry),
+        typeof(AgoraIn.Core.Entities.ClassPlan),
+        typeof(AgoraIn.Core.Entities.ClassPlanEntry),
+    ];
+
+    /// <summary>指定实体是否按区域隔离。</summary>
+    public static bool IsRegionScoped(Type entityType)
+        => Array.IndexOf(RegionScopedEntities, entityType) >= 0;
+
+    /// <summary>隔离实体的表名（供 DbSchemaPatch 生成补列 SQL；须在模型定稿后访问）。</summary>
+    public IReadOnlyList<string> RegionScopedTableNames => RegionScopedEntities
+        .Select(t => Model.FindEntityType(t)?.GetTableName())
+        .Where(n => n != null)
+        .Select(n => n!)
+        .ToList();
+
     // ── 用户与设备 ──
     public DbSet<User> Users => Set<User>();
     public DbSet<Device> Devices => Set<Device>();
+    public DbSet<Region> Regions => Set<Region>();
 
     // ── 答题卡与 AI 阅卷（复用 Core 实体） ──
     public DbSet<AgoraIn.Core.Entities.ExamPaper> ExamPapers => Set<AgoraIn.Core.Entities.ExamPaper>();
@@ -72,8 +132,11 @@ public sealed class ServerDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<User>().HasIndex(u => u.Username).IsUnique();
+        // 多区域：用户名在区域内唯一（登录格式 用户名@区域Id，用户名不得含 @）；区域代号与名称均全局唯一
         modelBuilder.Entity<Device>().HasIndex(d => d.DeviceUuid).IsUnique();
+        modelBuilder.Entity<User>().HasIndex(u => new { u.Username, u.RegionId }).IsUnique();
+        modelBuilder.Entity<Region>().HasIndex(r => r.RegionId).IsUnique();
+        modelBuilder.Entity<Region>().HasIndex(r => r.Name).IsUnique();
 
         // 邮箱验证码：按邮箱+用途+时间查询，并支持过期清理
         modelBuilder.Entity<EmailCodeEntity>().HasIndex(c => new { c.Email, c.Purpose, c.CreatedAt });
@@ -93,6 +156,42 @@ public sealed class ServerDbContext : DbContext
         modelBuilder.Entity<AgoraIn.Core.Entities.SignInCode>().HasIndex(c => c.Code);
         modelBuilder.Entity<AgoraIn.Core.Entities.TaskRosterEntry>().HasIndex(r => r.TaskId);
         modelBuilder.Entity<AiCallLogEntity>().HasIndex(l => l.CreatedAt);
+
+        // ── 多区域隔离：影子属性 RegionId + 全局查询过滤器（读取按区域过滤） ──
+        // 过滤器表达式手工构建（等价于内联写法 e => EF.Property<string>(e,"RegionId") == CurrentRegion），
+        // CurrentRegion 以 this 常量为根的成员访问——EF 按上下文实例逐查询求值，不会被查询计划缓存固化
+        foreach (var entityType in RegionScopedEntities)
+        {
+            var builder = modelBuilder.Entity(entityType);
+            builder.Property<string>("RegionId").HasMaxLength(64);
+            builder.HasIndex("RegionId");
+
+            var p = System.Linq.Expressions.Expression.Parameter(entityType, "e");
+            var regionProp = System.Linq.Expressions.Expression.Call(
+                typeof(EF), nameof(EF.Property), [typeof(string)], p,
+                System.Linq.Expressions.Expression.Constant("RegionId"));
+            var currentRegion = System.Linq.Expressions.Expression.Property(
+                System.Linq.Expressions.Expression.Constant(this), nameof(CurrentRegion));
+            builder.HasQueryFilter(System.Linq.Expressions.Expression.Lambda(
+                System.Linq.Expressions.Expression.Equal(regionProp, currentRegion), p));
+        }
+    }
+
+    /// <summary>
+    /// 新增区域隔离实体时自动回填当前区域（写入隔离的一半；另一半是全局查询过滤器）。
+    /// </summary>
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        foreach (var entry in ChangeTracker.Entries())
+        {
+            if (entry.State != EntityState.Added || !IsRegionScoped(entry.Entity.GetType())) continue;
+            var region = entry.Property("RegionId").CurrentValue as string;
+            if (string.IsNullOrEmpty(region))
+            {
+                entry.Property("RegionId").CurrentValue = AgoraIn.Server.Security.RegionContext.Current;
+            }
+        }
+        return await base.SaveChangesAsync(cancellationToken);
     }
 }
 
@@ -124,6 +223,17 @@ public sealed class User
     /// 主账户只能管理自己的子账户，实现分级权限。
     /// </summary>
     public int? OwnerUserId { get; set; }
+
+    /// <summary>
+    /// 所属区域："manager" = 主区域（房主，系统管理员与服务器运营方）；
+    /// 区域代号 = 子区域（租户）；null = 旧数据（视为 manager，由 <see cref="RegionIdOrManager"/> 归一）。
+    /// </summary>
+    public string? RegionId { get; set; }
+
+    /// <summary>归一后的区域标识（null 视为 manager，兼容旧数据）。</summary>
+    public string RegionIdOrManager => string.IsNullOrEmpty(RegionId)
+        ? AgoraIn.Server.Security.RegionContext.ManagerRegion
+        : RegionId;
 
     /// <summary>是否启用（禁用后无法登录，历史数据保留）。</summary>
     public bool IsActive { get; set; } = true;
@@ -166,6 +276,49 @@ public sealed class EmailCodeEntity
     /// <summary>是否仍可用（未用、未过期、尝试次数未超限）。</summary>
     public bool IsUsable(DateTime now, int maxAttempts = 5)
         => !Used && ExpireAt > now && Attempts < maxAttempts;
+}
+
+/// <summary>
+/// 区域（租户）：每个注册用户（v3.2 语义）自动创建一个区域并成为其主账号（房主/租户）；
+/// 系统管理员（主区域 manager）为服务器整体（离线激活），子区域由主区域颁发激活码激活。
+/// 区域之间数据不互通（见 <see cref="ServerDbContext"/> 的 RegionId 全局查询过滤器）。
+/// 登录格式：<c>用户名@区域Id</c>；主区域使用 <c>用户名@manager</c>。
+/// </summary>
+public sealed class Region
+{
+    public int Id { get; set; }
+
+    /// <summary>区域代号（登录用，全局唯一，3-32 位字母/数字/下划线/连字符）。</summary>
+    public string RegionId { get; set; } = "";
+
+    /// <summary>区域名称（如"某某培训学校"，全局唯一不可重复）。</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>设备协议密码（设备端接入本区域用，可空）。</summary>
+    public string? DevicePassword { get; set; }
+
+    /// <summary>区域主账号用户 Id。</summary>
+    public int OwnerUserId { get; set; }
+
+    /// <summary>是否已激活（激活码由主区域颁发）。</summary>
+    public bool Activated { get; set; }
+
+    /// <summary>最近一次使用的激活码（脱敏留档）。</summary>
+    public string? ActivationCode { get; set; }
+
+    /// <summary>到期时间（激活时间 + 时长；null = 未激活）。</summary>
+    public DateTime? ExpireAt { get; set; }
+
+    /// <summary>设备数上限。</summary>
+    public int MaxDevices { get; set; }
+
+    /// <summary>激活时间。</summary>
+    public DateTime? ActivatedAt { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
+
+    /// <summary>区域是否可用（已激活且未到期）。</summary>
+    public bool IsActive => Activated && (ExpireAt == null || ExpireAt > DateTime.Now);
 }
 
 /// <summary>

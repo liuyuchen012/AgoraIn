@@ -247,16 +247,22 @@ public class CheckInController : ControllerBase
     /// <summary>
     /// 学生扫码签到（匿名：凭短码即可，签到码本身即凭据；设置了密码时须携带）。
     /// 幂等：同一学生同一任务重复提交不重复记录。
+    /// 匿名请求区域上下文为主区域，须按签到码显式切换到其所属区域（隔离边界）。
     /// </summary>
     [HttpPost("scan")]
     [AllowAnonymous]
     public async Task<IActionResult> Scan([FromBody] ScanSignInRequest req)
     {
         var code = (await _db.SignInCodes
+                .IgnoreQueryFilters()
                 .Where(c => c.Code == req.Code && c.Active)
                 .ToListAsync())
             .FirstOrDefault(c => c.IsUsable(DateTime.Now));
         if (code == null) return BadRequest(new { error = "签到码无效或已过期" });
+
+        // 切换到签到码所属区域（后续学生查询/打卡写入都落在该区域；RegionId 为影子属性）
+        AgoraIn.Server.Security.RegionContext.Set(
+            Microsoft.EntityFrameworkCore.EF.Property<string>(code!, "RegionId"));
 
         if (!string.IsNullOrEmpty(code.Password) &&
             !string.Equals(code.Password, req.Password?.Trim(), StringComparison.Ordinal))
