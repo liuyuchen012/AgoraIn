@@ -200,8 +200,8 @@
         </el-form-item>
       </el-form>
       <p style="color:#909399;font-size:12px">
-        支持 docx / pdf / txt。AI 解析后逐题生成（题型/选项/答案/分值/评分要点/知识点），
-        主观题自动生成评分要点供 AI 阅卷使用。
+        支持 docx / pdf / txt。PDF（含数学公式的试卷）会自动把每页渲染成图片交给 AI 视觉识别，
+        公式不会乱码；docx/txt 走文本解析。解析后逐题生成（题型/选项/答案/分值/评分要点/知识点）。
       </p>
       <template #footer>
         <el-button @click="importVisible = false">取消</el-button>
@@ -588,16 +588,61 @@ function showImportFile() {
   importVisible.value = true
 }
 
+/** pdf.js 把 PDF 每页渲染成 JPEG（数学公式文字层乱码，视觉识别读渲染像素） */
+async function renderPdfToImages(file: File, maxPages = 12): Promise<Blob[]> {
+  const pdfjs = await import('pdfjs-dist')
+  // Vite 下用打包的 worker
+  const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default
+  pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
+
+  const buf = await file.arrayBuffer()
+  const pdf = await pdfjs.getDocument({ data: buf }).promise
+  const blobs: Blob[] = []
+  const pages = Math.min(pdf.numPages, maxPages)
+  for (let i = 1; i <= pages; i++) {
+    const page = await pdf.getPage(i)
+    const viewport = page.getViewport({ scale: 2 })
+    const canvas = document.createElement('canvas')
+    canvas.width = viewport.width
+    canvas.height = viewport.height
+    const ctx = canvas.getContext('2d')!
+    await page.render({ canvasContext: ctx, viewport }).promise
+    const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.85))
+    if (blob) blobs.push(blob)
+    canvas.width = 0
+  }
+  return blobs
+}
+
 async function doImportFile() {
   if (!editingPaper.value?.id) { ElMessage.warning('请先保存试卷再导入题目'); return }
-  if (!importQFile.value) return
+  const qf = importQFile.value
+  if (!qf) return
   importing.value = true
   try {
-    const r = await examApi.importFile(editingPaper.value.id, importQFile.value, importAFile.value || undefined)
-    ElMessage.success(`AI 已识别并导入 ${r.imported} 题`)
+    const isPdf = qf.name.toLowerCase().endsWith('.pdf')
+    if (isPdf) {
+      ElMessage.info('正在把 PDF 渲染为页面图片…')
+      const qImgs = await renderPdfToImages(qf)
+      if (!qImgs.length) { ElMessage.error('PDF 渲染失败'); return }
+      let aImgs: Blob[] = []
+      if (importAFile.value && importAFile.value.name.toLowerCase().endsWith('.pdf')) {
+        aImgs = await renderPdfToImages(importAFile.value)
+      }
+      const r = await examApi.importImages(editingPaper.value.id, qImgs, aImgs)
+      ElMessage.success(`AI 视觉识别并导入 ${r.imported} 题`)
+    } else {
+      const r = await examApi.importFile(editingPaper.value.id, qf, importAFile.value || undefined)
+      ElMessage.success(`AI 已识别并导入 ${r.imported} 题`)
+    }
     importVisible.value = false
     await loadQuestions(editingPaper.value.id)
-  } catch {} finally { importing.value = false }
+  } catch (e: any) {
+    const detail = e?.response?.data?.error
+    if (detail) ElMessage.error(detail)
+  } finally {
+    importing.value = false
+  }
 }
 
 async function aiGenerateAnswers() {

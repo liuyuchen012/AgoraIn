@@ -210,13 +210,21 @@ export const examApi = {
   /** 题库复用：从模板试卷复制题目 */
   reuse: (paperId: string, templatePaperId: string) =>
     client.post<{ copied: number }>(`/exams/papers/${paperId}/reuse/${templatePaperId}`, {}),
-  /** 上传试卷文件（docx/pdf/txt，可带答案文件）AI 识别出题 */
+  /** 上传试卷文件（docx/txt，可带答案文件）AI 识别出题（文本路径） */
   importFile: (paperId: string, questionFile: File, answerFile?: File) => {
     const fd = new FormData()
     fd.append('questionFile', questionFile)
     if (answerFile) fd.append('answerFile', answerFile)
     return client.post<{ imported: number; questions: unknown[] }>(`/exams/papers/${paperId}/import-file`, fd,
-      { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 })
+      { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 180000 })
+  },
+  /** 上传试卷页面图片（前端把 PDF 渲染成图）AI 视觉识别出题；答案页图片可选 */
+  importImages: (paperId: string, questionImages: Blob[], answerImages?: Blob[]) => {
+    const fd = new FormData()
+    questionImages.forEach((b, i) => fd.append('questionImages', b, `q${i}.jpg`))
+    ;(answerImages || []).forEach((b, i) => fd.append('answerImages', b, `a${i}.jpg`))
+    return client.post<{ imported: number; questions: unknown[] }>(`/exams/papers/${paperId}/import-file`, fd,
+      { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 })
   },
   /** AI 生成缺失的标准答案与评分要点 */
   aiGenerateAnswers: (paperId: string) =>

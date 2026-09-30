@@ -127,33 +127,72 @@ public class ExamsController : ControllerBase
     }
 
     /// <summary>
-    /// 上传试卷文件（docx/pdf/txt）AI 自动识别题目并生成答题卡题目。
-    /// 支持两种上传方式（便于教师）：
-    ///  · 单文件：题目与答案在同一个文件（questionFile）
-    ///  · 双文件：题目文件（questionFile）+ 答案文件（answerFile，可选）
+    /// 上传试卷 AI 自动识别题目并生成答题卡题目。三种输入（便于教师）：
+    ///  · questionImages：试卷页面图片（前端 pdf.js 把 PDF 渲染成页图后上传；数学公式文字层乱码的问题由此绕过）
+    ///  · questionFile：docx/txt 文本文件（PDF 文本层不可靠，不建议）
+    ///  · 答案：answerImages（答案页图片）或 answerFile（文本），可选——答案与题目同文件时不用传
     /// </summary>
     [HttpPost("papers/{paperId}/import-file")]
-    [RequestSizeLimit(30 * 1024 * 1024)]
+    [RequestSizeLimit(60 * 1024 * 1024)]
     public async Task<IActionResult> ImportFile(
         string paperId,
+        [FromForm] List<IFormFile>? questionImages,
+        [FromForm] List<IFormFile>? answerImages,
         [FromForm] IFormFile? questionFile,
         [FromForm] IFormFile? answerFile,
         CancellationToken ct)
     {
-        if (questionFile == null || questionFile.Length == 0)
-            return BadRequest(new { error = "请上传试卷文件（docx / pdf / txt）" });
+        var qImgs = (questionImages ?? []).Where(f => f.Length > 0).ToList();
+        var aImgs = (answerImages ?? []).Where(f => f.Length > 0).ToList();
+        if (qImgs.Count == 0 && (questionFile == null || questionFile.Length == 0))
+            return BadRequest(new { error = "请上传试卷文件或试卷页面图片" });
+        if (qImgs.Count > 12 || aImgs.Count > 12)
+            return BadRequest(new { error = "页面图片最多 12 张，请拆分后分次导入" });
 
-        var questionText = await ExtractTextAsync(questionFile, ct);
-        if (string.IsNullOrWhiteSpace(questionText))
-            return BadRequest(new { error = "无法从文件中提取文本（请确认文件未加密且含可提取的文字层）" });
+        List<ExtractedQuestion>? extracted;
+        if (qImgs.Count > 0)
+        {
+            // ── 视觉出题路径 ──
+            var qBytes = new List<byte[]>();
+            foreach (var f in qImgs)
+            {
+                using var ms = new MemoryStream();
+                await f.CopyToAsync(ms, ct);
+                qBytes.Add(ms.ToArray());
+            }
 
-        var answerText = answerFile is { Length: > 0 } ? await ExtractTextAsync(answerFile, ct) : null;
+            extracted = await _ai.ExtractQuestionsFromImagesAsync(qBytes, null, ct);
+            if (extracted == null)
+                return BadRequest(new { error = "AI 识别失败，请检查「AI 批改设置」的 API 密钥/地址，且识别模型需支持图像输入（如 GLM-4V / Qwen-VL）" });
 
-        var extracted = await _ai.ExtractQuestionsAsync(questionText, answerText, ct);
-        if (extracted == null)
-            return BadRequest(new { error = "AI 解析失败，请检查 AI 服务配置（需在「AI 批改设置」填写 API 密钥）" });
+            // 答案图片回填
+            if (aImgs.Count > 0)
+            {
+                var aBytes = new List<byte[]>();
+                foreach (var f in aImgs)
+                {
+                    using var ms = new MemoryStream();
+                    await f.CopyToAsync(ms, ct);
+                    aBytes.Add(ms.ToArray());
+                }
+                extracted = await _ai.FillAnswersFromImagesAsync(extracted, aBytes, ct) ?? extracted;
+            }
+        }
+        else
+        {
+            // ── 文本出题路径（docx/txt）──
+            var questionText = await ExtractTextAsync(questionFile!, ct);
+            if (string.IsNullOrWhiteSpace(questionText))
+                return BadRequest(new { error = "无法从文件中提取文本。若为 PDF（尤其是含公式的数学卷），请使用页面图片方式：前端会自动把 PDF 渲染为图片上传" });
+
+            var answerText = answerFile is { Length: > 0 } ? await ExtractTextAsync(answerFile, ct) : null;
+            extracted = await _ai.ExtractQuestionsAsync(questionText, answerText, ct);
+            if (extracted == null)
+                return BadRequest(new { error = "AI 解析失败，请检查 AI 服务配置（需在「AI 批改设置」填写 API 密钥）" });
+        }
+
         if (extracted.Count == 0)
-            return BadRequest(new { error = "AI 未能从文件中识别出题目，请检查文件内容" });
+            return BadRequest(new { error = "AI 未能识别出题目，请检查文件内容或更换识别模型" });
 
         var startIndex = await _db.Questions
             .Where(q => q.PaperId == paperId)
