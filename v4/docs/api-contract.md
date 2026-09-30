@@ -158,7 +158,7 @@
 | GET/POST | `/api/v4/exams/papers/{paperId}/questions` | 题目列表 / 添加 |
 | PUT | `/api/v4/exams/papers/{paperId}/questions/{qid}` | 更新题目 |
 | POST | `/api/v4/exams/papers/{paperId}/reuse/{templatePaperId}` | 从题库模板复制题目 |
-| POST | `/api/v4/exams/papers/{paperId}/import-file` | 上传试卷文件（docx/pdf/txt；`questionFile` + 可选 `answerFile`，支持题目答案同文件或分两个文件）AI 识别出题并生成答题卡题目 | JWT |
+| POST | `/api/v4/exams/papers/{paperId}/import-file` | AI 出题，两种方式：① 页面图片 `questionImages[]`（前端 pdf.js 把 PDF 渲染成图，公式不乱码）+ 可选 `answerImages[]`（答案页回填答案与评分细则）；② 文本文件 `questionFile` + 可选 `answerFile`（docx/txt） | JWT |
 | POST | `/api/v4/exams/papers/{paperId}/ai-generate-answers` | AI 生成缺失的标准答案与评分要点（评分要点即 AI 阅卷提示词素材） | JWT |
 | GET | `/api/v4/sheet/{paperId}` | **空白通用答题卡**（A4 HTML，浏览器打印，匿名） |
 | GET | `/api/v4/sheet/{paperId}/student/{studentId}` | **学生专属卡**（含学号条码区，匿名） |
