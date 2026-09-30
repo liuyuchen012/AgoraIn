@@ -216,7 +216,7 @@ export const examApi = {
     fd.append('questionFile', questionFile)
     if (answerFile) fd.append('answerFile', answerFile)
     return client.post<{ imported: number; questions: unknown[] }>(`/exams/papers/${paperId}/import-file`, fd,
-      { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 180000 })
+      { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600000 })
   },
   /** 上传试卷页面图片（前端把 PDF 渲染成图）AI 视觉识别出题；答案页图片可选 */
   importImages: (paperId: string, questionImages: Blob[], answerImages?: Blob[], onProgress?: (pct: number) => void) => {
@@ -226,7 +226,7 @@ export const examApi = {
     return client.post<{ imported: number; questions: unknown[] }>(`/exams/papers/${paperId}/import-file`, fd,
       {
         headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 300000,
+        timeout: 600000,
         onUploadProgress: e => { if (onProgress && e.total) onProgress(Math.round(e.loaded * 100 / e.total)) },
       })
   },
