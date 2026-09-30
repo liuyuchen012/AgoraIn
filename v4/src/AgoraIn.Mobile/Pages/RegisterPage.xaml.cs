@@ -118,6 +118,12 @@ public partial class RegisterPage : ContentPage
         }
     }
 
+    private void OnTermsClicked(object? sender, EventArgs e)
+        => Launcher.Default.OpenAsync(new Uri("https://agorain.615mc.cn/terms.html"));
+
+    private void OnPrivacyClicked(object? sender, EventArgs e)
+        => Launcher.Default.OpenAsync(new Uri("https://agorain.615mc.cn/privacy.html"));
+
     private async void OnBackToLoginClicked(object? sender, EventArgs e)
     {
         await Shell.Current.GoToAsync("..");

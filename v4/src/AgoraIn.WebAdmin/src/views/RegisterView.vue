@@ -46,7 +46,9 @@
         </template>
 
         <el-form-item label="">
-          <el-checkbox v-model="form.agreeTerms">我已阅读并同意服务条款与隐私政策</el-checkbox>
+          <el-checkbox v-model="form.agreeTerms">
+            我已阅读并同意<a href="/terms.html" target="_blank" @click.stop>《服务条款》</a>与<a href="/privacy.html" target="_blank" @click.stop>《隐私政策》</a>
+          </el-checkbox>
         </el-form-item>
 
         <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon style="margin-bottom:12px" />

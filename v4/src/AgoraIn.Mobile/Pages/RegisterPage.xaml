@@ -37,8 +37,21 @@
             <!-- 机构模式：区域名称 -->
             <Entry x:Name="RegionNameEntry" Placeholder="区域名称（机构/学校名称，不可重复）" IsVisible="False" />
 
-            <CheckBox x:Name="AgreeCheck" HorizontalOptions="Start" IsChecked="False" />
-            <Label Text="我已阅读并同意服务条款与隐私政策" FontSize="13" TextColor="#666666" />
+            <HorizontalStackLayout Spacing="4" VerticalOptions="Center">
+                <CheckBox x:Name="AgreeCheck" IsChecked="False" />
+                <Label Text="我已阅读并同意" FontSize="13" TextColor="#666666" VerticalOptions="Center" />
+                <Label Text="《服务条款》" FontSize="13" TextColor="#4285f4" VerticalOptions="Center">
+                    <Label.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnTermsClicked" />
+                    </Label.GestureRecognizers>
+                </Label>
+                <Label Text="与" FontSize="13" TextColor="#666666" VerticalOptions="Center" />
+                <Label Text="《隐私政策》" FontSize="13" TextColor="#4285f4" VerticalOptions="Center">
+                    <Label.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnPrivacyClicked" />
+                    </Label.GestureRecognizers>
+                </Label>
+            </HorizontalStackLayout>
 
             <Button x:Name="SubmitButton" Text="注册" BackgroundColor="#34a853" TextColor="White"
                     CornerRadius="10" HeightRequest="50" Clicked="OnSubmitClicked" />
