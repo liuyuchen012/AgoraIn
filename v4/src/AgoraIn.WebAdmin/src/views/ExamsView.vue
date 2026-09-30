@@ -607,6 +607,7 @@ async function renderPdfToImages(file: File, maxPages = 12): Promise<Blob[]> {
   }
   const blobs: Blob[] = []
   const pages = Math.min(pdf.numPages, maxPages)
+  let blankPages = 0
   for (let i = 1; i <= pages; i++) {
     const page = await pdf.getPage(i)
     const viewport = page.getViewport({ scale: 2 })
@@ -615,12 +616,33 @@ async function renderPdfToImages(file: File, maxPages = 12): Promise<Blob[]> {
     canvas.height = viewport.height
     const ctx = canvas.getContext('2d')!
     await page.render({ canvasContext: ctx, viewport }).promise
+    // 空白页检测：字符表缺失时中文页会渲染成全白，AI 只能返回 0 题
+    if (isMostlyBlank(canvas)) blankPages++
     const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.85))
     if (blob) blobs.push(blob)
     canvas.width = 0
   }
   if (!blobs.length) throw new Error('PDF 渲染结果为空，请确认文件未损坏')
+  if (blankPages === pages) {
+    throw new Error(`全部 ${pages} 页渲染为空白（中文字符表未加载）。请按 Ctrl+F5 强制刷新页面后重试`)
+  }
+  if (blankPages > 0) {
+    ElMessage.warning(`${blankPages}/${pages} 页渲染疑似空白，请检查 PDF 是否为扫描件`)
+  }
   return blobs
+}
+
+/** 采样画布判断是否近乎全白（<1% 非白像素视为空白页） */
+function isMostlyBlank(canvas: HTMLCanvasElement): boolean {
+  const ctx = canvas.getContext('2d')!
+  const w = canvas.width, h = canvas.height
+  const sw = Math.min(64, w), sh = Math.min(64, h)
+  const data = ctx.getImageData(0, 0, w, h, { width: sw, height: sh } as any).data
+  let nonWhite = 0
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i] < 240 || data[i + 1] < 240 || data[i + 2] < 240) nonWhite++
+  }
+  return nonWhite < data.length / 400
 }
 
 async function doImportFile() {

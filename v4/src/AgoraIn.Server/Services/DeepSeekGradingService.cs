@@ -144,6 +144,7 @@ public sealed class DeepSeekGradingService
 [{{""index"":1,""type"":""single"",""content"":""题干"",""options"":[{{""key"":""A"",""text"":""""}}],""standardAnswer"":""A"",""score"":2,""rubric"":null,""knowledgeTags"":[""知识点""]}}]";
 
         var result = await CallAsync(prompt, settings.Model, settings, null, "extract", ct, 16384);
+        SaveRawResponse("extract", result);
         var parsed = ParseQuestions(result);
         if (parsed == null && result != null)
             await WriteLogAsync("extract", settings.Model, default, 0, false,
@@ -301,6 +302,28 @@ public sealed class DeepSeekGradingService
             if (openActual == '[') json += closeActual;
         }
         return json;
+    }
+
+    /// <summary>出题场景的原始 AI 响应落盘到 data/ai-raw/（保留最近 20 份），便于排查"0 题"类问题。</summary>
+    private void SaveRawResponse(string endpoint, string? content)
+    {
+        if (string.IsNullOrEmpty(content)) return;
+        try
+        {
+            var dir = Path.Combine(AppContext.BaseDirectory, "data", "ai-raw");
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, $"{endpoint}-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.txt");
+            File.WriteAllText(path, content);
+            var files = Directory.GetFiles(dir, $"{endpoint}-*.txt")
+                .OrderByDescending(f => f)
+                .Skip(20)
+                .ToList();
+            foreach (var old in files)
+            {
+                try { File.Delete(old); } catch { }
+            }
+        }
+        catch { }
     }
 
     /// <summary>解析 AI 返回的题目清单：裸数组或 {questions|data|items|result:[…]} 包装均可。</summary>

@@ -192,7 +192,7 @@ public class ExamsController : ControllerBase
         }
 
         if (extracted.Count == 0)
-            return BadRequest(new { error = "AI 未能识别出题目，请检查文件内容或更换识别模型" });
+            return BadRequest(new { error = "AI 识别到试卷但未解析出题目。常见原因：①页面图片为空白（PDF 渲染失败，请按 Ctrl+F5 强制刷新浏览器后重试）②识别模型不支持图像输入 ③试卷为扫描件图片（非文字版）。原始 AI 响应已存服务器 data/ai-raw/ 供排查" });
 
         var startIndex = await _db.Questions
             .Where(q => q.PaperId == paperId)
