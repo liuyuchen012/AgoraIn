@@ -591,12 +591,20 @@ function showImportFile() {
 /** pdf.js 把 PDF 每页渲染成 JPEG（数学公式文字层乱码，视觉识别读渲染像素） */
 async function renderPdfToImages(file: File, maxPages = 12): Promise<Blob[]> {
   const pdfjs = await import('pdfjs-dist')
-  // Vite 下用打包的 worker
+  // Vite 下用打包的 worker；中文 Word/PDF 渲染必须带 cMaps 与标准字体，否则整页空白
   const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default
   pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
-  const buf = await file.arrayBuffer()
-  const pdf = await pdfjs.getDocument({ data: buf }).promise
+  const buf = new Uint8Array(await file.arrayBuffer())
+  const pdf = await pdfjs.getDocument({
+    data: buf,
+    cMapUrl: '/assets/cmaps/',
+    cMapPacked: true,
+    standardFontDataUrl: '/assets/standard_fonts/',
+  }).promise
+  if (pdf.numPages > maxPages) {
+    ElMessage.warning(`试卷共 ${pdf.numPages} 页，仅导入前 ${maxPages} 页`)
+  }
   const blobs: Blob[] = []
   const pages = Math.min(pdf.numPages, maxPages)
   for (let i = 1; i <= pages; i++) {
@@ -611,6 +619,7 @@ async function renderPdfToImages(file: File, maxPages = 12): Promise<Blob[]> {
     if (blob) blobs.push(blob)
     canvas.width = 0
   }
+  if (!blobs.length) throw new Error('PDF 渲染结果为空，请确认文件未损坏')
   return blobs
 }
 
@@ -624,11 +633,11 @@ async function doImportFile() {
     if (isPdf) {
       ElMessage.info('正在把 PDF 渲染为页面图片…')
       const qImgs = await renderPdfToImages(qf)
-      if (!qImgs.length) { ElMessage.error('PDF 渲染失败'); return }
       let aImgs: Blob[] = []
       if (importAFile.value && importAFile.value.name.toLowerCase().endsWith('.pdf')) {
         aImgs = await renderPdfToImages(importAFile.value)
       }
+      ElMessage.info(`已渲染 ${qImgs.length} 页，AI 识别中（约 1-2 分钟）…`)
       const r = await examApi.importImages(editingPaper.value.id, qImgs, aImgs)
       ElMessage.success(`AI 视觉识别并导入 ${r.imported} 题`)
     } else {
@@ -638,8 +647,9 @@ async function doImportFile() {
     importVisible.value = false
     await loadQuestions(editingPaper.value.id)
   } catch (e: any) {
-    const detail = e?.response?.data?.error
-    if (detail) ElMessage.error(detail)
+    // 错误必须可见：HTTP 业务错误取 error 字段，其余（渲染失败/网络/413 等）取 message
+    const detail = e?.response?.data?.error || e?.message || '导入失败，请重试'
+    ElMessage.error(String(detail).slice(0, 200))
   } finally {
     importing.value = false
   }

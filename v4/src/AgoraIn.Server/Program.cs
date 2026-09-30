@@ -150,7 +150,9 @@ app.MapHub<LiveHub>("/hub/live");
 
 // ── 静态文件（Web 管理面板） ──
 app.UseDefaultFiles();
-app.UseStaticFiles();
+// pdf.js 的 cMaps（.bcmap）是非标准扩展名，默认会被静态中间件 404，
+// 而中文 Word/PDF 渲染必需 cMaps——放开未知类型按二进制流返回
+app.UseStaticFiles(new StaticFileOptions { ServeUnknownFileTypes = true, DefaultContentType = "application/octet-stream" });
 
 // SPA 回退：Web 管理面板使用 history 路由（/login、/dashboard 等），
 // 直接访问或刷新这些路径时服务端并无对应文件，必须回退到 index.html 交给前端路由，
