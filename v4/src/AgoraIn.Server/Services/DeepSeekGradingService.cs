@@ -132,6 +132,7 @@ public sealed class DeepSeekGradingService
 ---
 
 要求：
+0. **直接输出 JSON 数组，不要输出思考过程、解释或 markdown 代码块**
 1. 逐题解析，不要遗漏；题目文本乱码时按上下文修复
 2. type 取值：single（单选）/ multiple（多选）/ judge（判断）/ blank（填空）/ short（简答）/ essay（作文）
 3. 选择题给出 options（[{{
@@ -142,7 +143,7 @@ public sealed class DeepSeekGradingService
 7. 返回 JSON 数组，只返回 JSON：
 [{{""index"":1,""type"":""single"",""content"":""题干"",""options"":[{{""key"":""A"",""text"":""""}}],""standardAnswer"":""A"",""score"":2,""rubric"":null,""knowledgeTags"":[""知识点""]}}]";
 
-        var result = await CallAsync(prompt, settings.Model, settings, null, "extract", ct, 8192);
+        var result = await CallAsync(prompt, settings.Model, settings, null, "extract", ct, 16384);
         var parsed = ParseQuestions(result);
         if (parsed == null && result != null)
             await WriteLogAsync("extract", settings.Model, default, 0, false,
@@ -176,11 +177,11 @@ public sealed class DeepSeekGradingService
 5. 分值 score 取卷面标注；未标注按题型估默认（选择/判断 2 分，填空 3 分，简答 8 分，作文 40 分）
 6. 主观题（short/essay）必须提炼评分要点 rubric（分步给分点，格式 ""要点1(2分)；要点2(3分)""，总分等于该题满分）
 7. knowledgeTags 给 1-3 个知识点标签
-8. 只返回 JSON 数组：
+8. **直接输出 JSON 数组，不要输出思考过程、解释或 markdown 代码块**：
 [{{""index"":1,""type"":""single"",""content"":""题干"",""options"":[{{""key"":""A"",""text"":""""}}],""standardAnswer"":""A"",""score"":2,""rubric"":null,""knowledgeTags"":[""知识点""]}}]";
 
         var model = string.IsNullOrEmpty(settings.VisionModel) ? settings.Model : settings.VisionModel;
-        var result = await CallAsync(prompt, model, settings, pageImages, "extract_images", ct, 8192);
+        var result = await CallAsync(prompt, model, settings, pageImages, "extract_images", ct, 16384);
         var parsed = ParseQuestions(result);
         if (parsed == null && result != null)
             await WriteLogAsync("extract_images", model, default, 0, false,
@@ -214,7 +215,7 @@ public sealed class DeepSeekGradingService
 4. 只返回完整的题目清单 JSON 数组（字段与输入一致）";
 
         var model = string.IsNullOrEmpty(settings.VisionModel) ? settings.Model : settings.VisionModel;
-        var result = await CallAsync(prompt, model, settings, answerImages, "fill_answers", ct, 8192);
+        var result = await CallAsync(prompt, model, settings, answerImages, "fill_answers", ct, 16384);
         var filled = ParseQuestions(result);
         if (filled == null || filled.Count == 0) return null;
         // 按题号回填到原清单，保留原 content/options
@@ -384,7 +385,14 @@ public sealed class DeepSeekGradingService
                 response.EnsureSuccessStatusCode();
 
                 var json = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
-                var content = json.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
+                var message = json.GetProperty("choices")[0].GetProperty("message");
+                var content = message.TryGetProperty("content", out var c) ? c.GetString() : null;
+                // 推理型模型（content 为空、思考在 reasoning_content）时回落
+                if (string.IsNullOrWhiteSpace(content) &&
+                    message.TryGetProperty("reasoning_content", out var rc))
+                {
+                    content = rc.GetString();
+                }
 
                 var usage = json.TryGetProperty("usage", out var u) ? u : default;
                 await WriteLogAsync(endpoint, model, usage, Environment.TickCount64 - started,

@@ -61,7 +61,8 @@ builder.Services.AddSignalR();
 
 // ── DeepSeek AI ──
 builder.Services.AddScoped<AiSettingsService>();
-builder.Services.AddHttpClient<DeepSeekGradingService>();
+// 推理型模型（如 mimo/DeepSeek-R1）思考耗时长，默认 100s 会超时
+builder.Services.AddHttpClient<DeepSeekGradingService>(c => c.Timeout = TimeSpan.FromSeconds(300));
 
 // ── 离线授权 ──
 builder.Services.AddScoped<LicenseService>();
@@ -152,7 +153,19 @@ app.MapHub<LiveHub>("/hub/live");
 app.UseDefaultFiles();
 // pdf.js 的 cMaps（.bcmap）是非标准扩展名，默认会被静态中间件 404，
 // 而中文 Word/PDF 渲染必需 cMaps——放开未知类型按二进制流返回
-app.UseStaticFiles(new StaticFileOptions { ServeUnknownFileTypes = true, DefaultContentType = "application/octet-stream" });
+app.UseStaticFiles(new StaticFileOptions
+{
+    ServeUnknownFileTypes = true,
+    DefaultContentType = "application/octet-stream",
+    // index.html 禁缓存：否则浏览器拿旧入口引用旧 hash 资源，静默跑旧前端（改了但"问题依旧"的假象）
+    OnPrepareResponse = ctx =>
+    {
+        if (ctx.File.Name.Equals("index.html", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Context.Response.Headers.CacheControl = "no-cache";
+        }
+    },
+});
 
 // SPA 回退：Web 管理面板使用 history 路由（/login、/dashboard 等），
 // 直接访问或刷新这些路径时服务端并无对应文件，必须回退到 index.html 交给前端路由，
