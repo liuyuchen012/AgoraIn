@@ -153,8 +153,10 @@ public sealed class DeepSeekGradingService
     }
 
     /// <summary>
-    /// 视觉出题：把试卷页面图片（前端 pdf.js 渲染）直接交给视觉模型识别全部题目。
+    /// 视觉出题：把试卷页面图片（前端 pdf.js 渲染）交给视觉模型识别题目。
     /// 数学公式在 PDF 文字层是乱码，渲染成图片后视觉模型读取的是完整版面。
+    /// **分批识别（每批 3 页）**：推理型模型长思考易顶满 max_tokens 导致整卷 JSON 截断，
+    /// 分批后每批输出远小于上限，多页试卷也能完整出题。
     /// </summary>
     public async Task<List<ExtractedQuestion>?> ExtractQuestionsFromImagesAsync(
         IReadOnlyList<byte[]> pageImages, string? answerHint, CancellationToken ct = default)
@@ -166,28 +168,46 @@ public sealed class DeepSeekGradingService
             ? "未提供答案信息：客观题请依据题干自行推断最合理的选项，主观题给出要点式参考答案。"
             : answerHint;
 
-        var prompt = $@"你是专业的试卷结构化解析助手。下面若干张图片是同一份试卷的连续页面（按顺序），请逐页识别并解析出全部题目。
+        const int batchSize = 3;
+        var all = new List<ExtractedQuestion>();
+        var model = string.IsNullOrEmpty(settings.VisionModel) ? settings.Model : settings.VisionModel;
+
+        for (var offset = 0; offset < pageImages.Count; offset += batchSize)
+        {
+            ct.ThrowIfCancellationRequested();
+            var batch = pageImages.Skip(offset).Take(batchSize).ToList();
+            var pageRange = $"第 {offset + 1}-{offset + batch.Count} 页（图片按试卷先后顺序）";
+
+            var prompt = $@"你是专业的试卷结构化解析助手。下面若干张图片是同一份试卷的连续片段：{pageRange}。请逐页识别并解析出该片段内的全部题目。
 
 {answerSection}
 
 要求：
-1. 逐题解析，跨页的题目合并为完整题干，不要遗漏、不要重复
+1. 只解析本片段图片中出现的题目；题目跨页时以本片段可见部分为准
 2. type 取值：single（单选）/ multiple（多选）/ judge（判断）/ blank（填空）/ short（简答）/ essay（作文）
 3. 选择题给出 options（[{{""key"": ""A"", ""text"": ""选项内容""}}…]）；判断题 standardAnswer 用 ""对"" 或 ""错""
-4. 数学公式用 LaTeX 表示（如 y=x^{{-1}} 写作 ""y=x^-1"" 或 LaTeX）
+4. 数学公式用 LaTeX 表示
 5. 分值 score 取卷面标注；未标注按题型估默认（选择/判断 2 分，填空 3 分，简答 8 分，作文 40 分）
 6. 主观题（short/essay）必须提炼评分要点 rubric（分步给分点，格式 ""要点1(2分)；要点2(3分)""，总分等于该题满分）
 7. knowledgeTags 给 1-3 个知识点标签
 8. **直接输出 JSON 数组，不要输出思考过程、解释或 markdown 代码块**：
 [{{""index"":1,""type"":""single"",""content"":""题干"",""options"":[{{""key"":""A"",""text"":""""}}],""standardAnswer"":""A"",""score"":2,""rubric"":null,""knowledgeTags"":[""知识点""]}}]";
 
-        var model = string.IsNullOrEmpty(settings.VisionModel) ? settings.Model : settings.VisionModel;
-        var result = await CallAsync(prompt, model, settings, pageImages, "extract_images", ct, 16384);
-        var parsed = ParseQuestions(result);
-        if (parsed == null && result != null)
-            await WriteLogAsync("extract_images", model, default, 0, false,
-                $"JSON 解析失败，返回前 200 字：{result[..Math.Min(200, result.Length)]}", ct);
-        return parsed;
+            var result = await CallAsync(prompt, model, settings, batch, "extract_images", ct, 16384);
+            SaveRawResponse($"extract_images_p{offset / batchSize + 1}", result); // 排障：原始响应落盘
+            var parsed = ParseQuestions(result);
+            if (parsed == null && result != null)
+            {
+                await WriteLogAsync("extract_images", model, default, 0, false,
+                    $"第 {offset + 1}-{offset + batch.Count} 页 JSON 解析失败，返回前 200 字：{result[..Math.Min(200, result.Length)]}", ct);
+            }
+            if (parsed != null) all.AddRange(parsed);
+        }
+
+        if (all.Count == 0) return null;
+        // 跨批重新编号，保证题号连续
+        for (var i = 0; i < all.Count; i++) all[i].Index = i + 1;
+        return all;
     }
 
     /// <summary>答案图片回填：把答案页的答案与评分细则对应填入已解析的题目。</summary>
@@ -199,33 +219,40 @@ public sealed class DeepSeekGradingService
 
         var questionSummary = JsonSerializer.Serialize(questions.Select(q => new
         {
-            index = q.Index, type = q.Type, content = (q.Content ?? "")[..Math.Min(80, q.Content?.Length ?? 0)],
-            q.StandardAnswer, q.Rubric,
+            index = q.Index,
+            content = (q.Content ?? "")[..Math.Min(60, q.Content?.Length ?? 0)],
         }), new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
 
-        var prompt = $@"你是批改准备助手。第一组图片是一份试卷的**参考答案页**，请把答案页中的逐题答案与评分细则，
-对应填入下面的题目清单（按题号对应；答案页含评分细则/分步得分时完整写入 rubric）。
+        var prompt = $@"你是批改准备助手。下面是试卷的参考答案页图片，请把答案与评分细则按题号对应填入。
 
 题目清单（JSON）：
 {questionSummary}
 
 要求：
-1. 只补全/修正 standardAnswer 与 rubric 字段，content/options/score 等保持原样
-2. 答案页没有的题目保持原值
-3. 数学公式用 LaTeX 或纯文本
-4. 只返回完整的题目清单 JSON 数组（字段与输入一致）";
+1. 只输出答案与评分细则，不要重复题干
+2. 答案页没有的题号不要输出
+3. 数学公式用 LaTeX 或纯文本；评分细则含分步得分时完整写入 rubric
+4. **只返回 JSON 数组，不要思考过程、解释或 markdown 代码块**：
+[{{""index"":1,""standardAnswer"":""…"",""rubric"":""要点1(2分);要点2(3分)""}}]";
 
+        // 分批（每批 5 页）+ 精简输出，避免与出题相同的 max_tokens 截断问题
+        const int batchSize = 5;
         var model = string.IsNullOrEmpty(settings.VisionModel) ? settings.Model : settings.VisionModel;
-        var result = await CallAsync(prompt, model, settings, answerImages, "fill_answers", ct, 16384);
-        var filled = ParseQuestions(result);
-        if (filled == null || filled.Count == 0) return null;
-        // 按题号回填到原清单，保留原 content/options
-        foreach (var f in filled)
+        for (var offset = 0; offset < answerImages.Count; offset += batchSize)
         {
-            var orig = questions.FirstOrDefault(q => q.Index == f.Index);
-            if (orig == null) continue;
-            if (!string.IsNullOrWhiteSpace(f.StandardAnswer)) orig.StandardAnswer = f.StandardAnswer;
-            if (!string.IsNullOrWhiteSpace(f.Rubric)) orig.Rubric = f.Rubric;
+            ct.ThrowIfCancellationRequested();
+            var batch = answerImages.Skip(offset).Take(batchSize).ToList();
+            var result = await CallAsync(prompt, model, settings, batch, "fill_answers", ct, 16384);
+            var filled = ParseQuestions(result);
+            if (filled == null || filled.Count == 0) continue;
+            // 按题号回填到原清单
+            foreach (var f in filled)
+            {
+                var orig = questions.FirstOrDefault(q => q.Index == f.Index);
+                if (orig == null) continue;
+                if (!string.IsNullOrWhiteSpace(f.StandardAnswer)) orig.StandardAnswer = f.StandardAnswer;
+                if (!string.IsNullOrWhiteSpace(f.Rubric)) orig.Rubric = f.Rubric;
+            }
         }
         return questions;
     }
@@ -293,12 +320,15 @@ public sealed class DeepSeekGradingService
         if (last <= first) return null;
         var json = text[first..(last + 1)];
 
-        // 3) 截断修复：裁到最后一个完整 '}' 或 '"' 再补闭合
+        // 3) 截断修复（输出顶满 max_tokens 时 JSON 断尾）：
+        //    裁到最后一个完整对象 '}' 闭合处（数组元素必须完整，不能停在字符串引号上），
+        //    去掉尾部逗号后补外层闭合
         if (json[^1] != closeActual)
         {
-            var cut = Math.Max(json.LastIndexOf('}'), json.LastIndexOf('"'));
-            if (cut > 0) json = json[..(cut + 1)];
-            if (json[^1] == ',') json = json[..^1];
+            var cut = json.LastIndexOf('}');
+            if (cut <= 0) return null;
+            json = json[..(cut + 1)].TrimEnd();
+            if (json.EndsWith(",")) json = json[..^1];
             if (openActual == '[') json += closeActual;
         }
         return json;
@@ -331,12 +361,20 @@ public sealed class DeepSeekGradingService
     {
         var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
+        // 截断残片可能拼出无题干无答案的空壳项，过滤掉
+        static List<ExtractedQuestion>? Clean(List<ExtractedQuestion>? list)
+        {
+            var filtered = list?.Where(q => !string.IsNullOrWhiteSpace(q.Content)
+                                            || !string.IsNullOrWhiteSpace(q.StandardAnswer)).ToList();
+            return filtered is { Count: > 0 } ? filtered : null;
+        }
+
         var json = ExtractJsonBlock(content, expectArray: true);
         if (json != null)
         {
             if (json.StartsWith('['))
             {
-                try { return JsonSerializer.Deserialize<List<ExtractedQuestion>>(json, opts); }
+                try { return Clean(JsonSerializer.Deserialize<List<ExtractedQuestion>>(json, opts)); }
                 catch { }
             }
             try
@@ -349,8 +387,8 @@ public sealed class DeepSeekGradingService
                         if (doc.RootElement.TryGetProperty(key, out var arr) &&
                             arr.ValueKind == JsonValueKind.Array)
                         {
-                            var list = JsonSerializer.Deserialize<List<ExtractedQuestion>>(arr.GetRawText(), opts);
-                            if (list is { Count: > 0 }) return list;
+                            var list = Clean(JsonSerializer.Deserialize<List<ExtractedQuestion>>(arr.GetRawText(), opts));
+                            if (list != null) return list;
                         }
                     }
                 }
