@@ -424,6 +424,7 @@ export const aiApi = {
 }
 
 export interface AiSettings {
+  baseUrl: string
   model: string
   visionModel: string
   temperature: number

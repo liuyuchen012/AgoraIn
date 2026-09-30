@@ -8,6 +8,14 @@
     </template>
 
     <el-form :model="form" label-width="180px" style="max-width:640px" v-loading="loading">
+      <el-form-item label="API 地址">
+        <el-input v-model="form.baseUrl" placeholder="https://api.deepseek.com" style="max-width:420px" />
+        <div class="tip">OpenAI 兼容服务地址（保存到服务器数据库，优先于 appsettings.json）。常见地址：
+          DeepSeek https://api.deepseek.com ·
+          智谱 https://open.bigmodel.cn/api/paas/v4 ·
+          通义 https://dashscope.aliyuncs.com/compatible-mode/v1 ·
+          自建中转填其 BaseUrl。地址末尾已含 /v1 /v4 等版本段时自动适配，无需再补 /v1。</div>
+      </el-form-item>
       <el-form-item label="API 密钥">
         <el-input v-model="apiKeyInput" type="password" show-password
                   :placeholder="form.hasApiKey ? `已配置（${form.apiKeyMasked}），输入新值覆盖，留空不变` : '尚未配置，请输入 API 密钥'"
@@ -87,7 +95,7 @@ import { aiApi, type AiSettings, type AiLogRow } from '@/api/client'
 const loading = ref(false)
 const saving = ref(false)
 const form = ref<AiSettings>({
-  model: '', visionModel: '', temperature: 0.1, maxTokens: 1024,
+  baseUrl: 'https://api.deepseek.com', model: '', visionModel: '', temperature: 0.1, maxTokens: 1024,
   allowImageToCloud: true, humanReviewThreshold: 0.6, retries: 2,
   gradingPromptTemplate: null, hasApiKey: false, apiKeyMasked: '',
 })
@@ -111,6 +119,7 @@ async function save() {
     const payload: Record<string, unknown> = { ...form.value }
     delete payload.hasApiKey
     delete payload.apiKeyMasked
+    payload.baseUrl = (form.value.baseUrl || '').trim().replace(/\/+$/, '')
     if (apiKeyInput.value.trim()) payload.apiKey = apiKeyInput.value.trim()
     else delete payload.apiKey
     form.value = await aiApi.save(payload)

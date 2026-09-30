@@ -10,6 +10,9 @@ public sealed class AiRuntimeSettings
     /// <summary>API 密钥（数据库覆盖 appsettings 的 DeepSeek:ApiKey；管理端在线可改，读取时脱敏）。</summary>
     public string ApiKey { get; set; } = "";
 
+    /// <summary>API 地址（OpenAI 兼容 BaseUrl；数据库覆盖 appsettings 的 DeepSeek:BaseUrl）。</summary>
+    public string BaseUrl { get; set; } = "https://api.deepseek.com";
+
     /// <summary>文本批改模型（OpenAI 兼容）。</summary>
     public string Model { get; set; } = "";
 
@@ -63,6 +66,7 @@ public sealed class AiSettingsService
         var s = new AiRuntimeSettings
         {
             ApiKey = _config["DeepSeek:ApiKey"] ?? "",
+            BaseUrl = _config["DeepSeek:BaseUrl"] ?? "https://api.deepseek.com",
             Model = _config["DeepSeek:Model"] ?? "deepseek-chat",
             VisionModel = _config["DeepSeek:VisionModel"] ?? "",
             Temperature = ParseDouble(_config["DeepSeek:Temperature"], 0.1),
@@ -75,6 +79,7 @@ public sealed class AiSettingsService
         var map = rows.ToDictionary(x => x.Key, x => x.Value);
 
         if (map.TryGetValue(KeyPrefix + "apiKey", out var k) && k.Length > 0) s.ApiKey = k;
+        if (map.TryGetValue(KeyPrefix + "baseUrl", out var bu) && bu.Length > 0) s.BaseUrl = bu;
         if (map.TryGetValue(KeyPrefix + "model", out var m) && m.Length > 0) s.Model = m;
         if (map.TryGetValue(KeyPrefix + "visionModel", out var vm)) s.VisionModel = vm;
         if (map.TryGetValue(KeyPrefix + "temperature", out var t) && double.TryParse(t, out var tv)) s.Temperature = tv;
@@ -93,6 +98,7 @@ public sealed class AiSettingsService
     {
         var updates = new Dictionary<string, string?>
         {
+            [KeyPrefix + "baseUrl"] = string.IsNullOrWhiteSpace(s.BaseUrl) ? null : s.BaseUrl.Trim().TrimEnd('/'),
             [KeyPrefix + "model"] = s.Model,
             [KeyPrefix + "visionModel"] = s.VisionModel,
             [KeyPrefix + "temperature"] = s.Temperature.ToString(System.Globalization.CultureInfo.InvariantCulture),

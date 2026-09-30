@@ -32,7 +32,7 @@ public class AiSettingsController : ControllerBase
         var s = await _settings.LoadAsync(ct);
         return Ok(new
         {
-            s.Model, s.VisionModel, s.Temperature, s.MaxTokens,
+            s.BaseUrl, s.Model, s.VisionModel, s.Temperature, s.MaxTokens,
             s.AllowImageToCloud, s.HumanReviewThreshold, s.Retries,
             s.GradingPromptTemplate,
             hasApiKey = !string.IsNullOrEmpty(s.ApiKey),
@@ -51,6 +51,7 @@ public class AiSettingsController : ControllerBase
         var s = new AiRuntimeSettings
         {
             ApiKey = current.ApiKey,
+            BaseUrl = body.TryGetProperty("baseUrl", out var bu) ? bu.GetString() ?? current.BaseUrl : current.BaseUrl,
             Model = body.TryGetProperty("model", out var m) ? m.GetString() ?? current.Model : current.Model,
             VisionModel = body.TryGetProperty("visionModel", out var vm) ? vm.GetString() ?? "" : current.VisionModel,
             Temperature = body.TryGetProperty("temperature", out var t) && t.TryGetDouble(out var tv) ? tv : current.Temperature,
@@ -77,7 +78,7 @@ public class AiSettingsController : ControllerBase
         var saved = await _settings.LoadAsync(ct);
         return Ok(new
         {
-            saved.Model, saved.VisionModel, saved.Temperature, saved.MaxTokens,
+            saved.BaseUrl, saved.Model, saved.VisionModel, saved.Temperature, saved.MaxTokens,
             saved.AllowImageToCloud, saved.HumanReviewThreshold, saved.Retries,
             saved.GradingPromptTemplate,
             hasApiKey = !string.IsNullOrEmpty(saved.ApiKey),

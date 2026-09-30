@@ -29,8 +29,6 @@ public sealed class DeepSeekGradingService
         _config = config;
     }
 
-    private string BaseUrl => _config["DeepSeek:BaseUrl"] ?? "https://api.deepseek.com";
-
     private const string DefaultGradingTemplate = @"你是一个专业的试卷批改老师。请批改以下题目：
 
 题型：{Type}
@@ -215,6 +213,13 @@ public sealed class DeepSeekGradingService
         _http.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", settings.ApiKey);
 
+        // API 地址智能拼接：地址已带版本段（/v1、/v3、/v4…）时直接接 /chat/completions
+        //（兼容智谱 open.bigmodel.cn/api/paas/v4、通义 …/compatible-mode/v1），否则补 /v1（DeepSeek 官方风格）
+        var baseTrim = (settings.BaseUrl ?? "https://api.deepseek.com").Trim().TrimEnd('/');
+        var chatUrl = System.Text.RegularExpressions.Regex.IsMatch(baseTrim, @"/v[0-9]+$")
+            ? $"{baseTrim}/chat/completions"
+            : $"{baseTrim}/v1/chat/completions";
+
         var retries = Math.Clamp(settings.Retries, 0, 5);
         var started = Environment.TickCount64;
         string? error = null;
@@ -223,7 +228,7 @@ public sealed class DeepSeekGradingService
         {
             try
             {
-                var response = await _http.PostAsJsonAsync($"{BaseUrl}/v1/chat/completions", BuildRequest(), ct);
+                var response = await _http.PostAsJsonAsync(chatUrl, BuildRequest(), ct);
                 response.EnsureSuccessStatusCode();
 
                 var json = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
