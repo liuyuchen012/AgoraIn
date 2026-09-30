@@ -67,9 +67,11 @@ public sealed class DeepSeekGradingService
         var result = await CallAsync(prompt, model, settings, imageData == null ? null : [imageData], "recognize", ct);
         if (result == null) return null;
 
+        var json = ExtractJsonBlock(result, expectArray: false);
+        if (json == null) return null;
         try
         {
-            return JsonSerializer.Deserialize<OmrResult>(result, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return JsonSerializer.Deserialize<OmrResult>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
         }
         catch { return null; }
     }
@@ -94,9 +96,11 @@ public sealed class DeepSeekGradingService
         var result = await CallAsync(prompt, settings.Model, settings, null, "grade", ct);
         if (result == null) return null;
 
+        var json = ExtractJsonBlock(result, expectArray: false);
+        if (json == null) return null;
         try
         {
-            return JsonSerializer.Deserialize<AiGradingResponse>(result, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return JsonSerializer.Deserialize<AiGradingResponse>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
         }
         catch { return null; }
     }
@@ -139,13 +143,11 @@ public sealed class DeepSeekGradingService
 [{{""index"":1,""type"":""single"",""content"":""题干"",""options"":[{{""key"":""A"",""text"":""""}}],""standardAnswer"":""A"",""score"":2,""rubric"":null,""knowledgeTags"":[""知识点""]}}]";
 
         var result = await CallAsync(prompt, settings.Model, settings, null, "extract", ct, 8192);
-        if (result == null) return null;
-
-        try
-        {
-            return JsonSerializer.Deserialize<List<ExtractedQuestion>>(result, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-        }
-        catch { return null; }
+        var parsed = ParseQuestions(result);
+        if (parsed == null && result != null)
+            await WriteLogAsync("extract", settings.Model, default, 0, false,
+                $"JSON 解析失败，返回前 200 字：{result[..Math.Min(200, result.Length)]}", ct);
+        return parsed;
     }
 
     /// <summary>
@@ -179,13 +181,11 @@ public sealed class DeepSeekGradingService
 
         var model = string.IsNullOrEmpty(settings.VisionModel) ? settings.Model : settings.VisionModel;
         var result = await CallAsync(prompt, model, settings, pageImages, "extract_images", ct, 8192);
-        if (result == null) return null;
-
-        try
-        {
-            return JsonSerializer.Deserialize<List<ExtractedQuestion>>(result, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-        }
-        catch { return null; }
+        var parsed = ParseQuestions(result);
+        if (parsed == null && result != null)
+            await WriteLogAsync("extract_images", model, default, 0, false,
+                $"JSON 解析失败，返回前 200 字：{result[..Math.Min(200, result.Length)]}", ct);
+        return parsed;
     }
 
     /// <summary>答案图片回填：把答案页的答案与评分细则对应填入已解析的题目。</summary>
@@ -215,23 +215,17 @@ public sealed class DeepSeekGradingService
 
         var model = string.IsNullOrEmpty(settings.VisionModel) ? settings.Model : settings.VisionModel;
         var result = await CallAsync(prompt, model, settings, answerImages, "fill_answers", ct, 8192);
-        if (result == null) return null;
-
-        try
+        var filled = ParseQuestions(result);
+        if (filled == null || filled.Count == 0) return null;
+        // 按题号回填到原清单，保留原 content/options
+        foreach (var f in filled)
         {
-            var filled = JsonSerializer.Deserialize<List<ExtractedQuestion>>(result, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            if (filled == null || filled.Count == 0) return null;
-            // 按题号回填到原清单，保留原 content/options
-            foreach (var f in filled)
-            {
-                var orig = questions.FirstOrDefault(q => q.Index == f.Index);
-                if (orig == null) continue;
-                if (!string.IsNullOrWhiteSpace(f.StandardAnswer)) orig.StandardAnswer = f.StandardAnswer;
-                if (!string.IsNullOrWhiteSpace(f.Rubric)) orig.Rubric = f.Rubric;
-            }
-            return questions;
+            var orig = questions.FirstOrDefault(q => q.Index == f.Index);
+            if (orig == null) continue;
+            if (!string.IsNullOrWhiteSpace(f.StandardAnswer)) orig.StandardAnswer = f.StandardAnswer;
+            if (!string.IsNullOrWhiteSpace(f.Rubric)) orig.Rubric = f.Rubric;
         }
-        catch { return null; }
+        return questions;
     }
 
     /// <summary>AI 生成标准答案与评分要点（用于缺答案/缺 rubric 的题目）。</summary>
@@ -257,14 +251,89 @@ public sealed class DeepSeekGradingService
         var result = await CallAsync(prompt, settings.Model, settings, null, "generate_answer", ct);
         if (result == null) return null;
 
+        var json = ExtractJsonBlock(result, expectArray: false);
+        if (json == null) return null;
         try
         {
-            var doc = JsonSerializer.Deserialize<JsonElement>(result);
+            var doc = JsonSerializer.Deserialize<JsonElement>(json);
             var answer = doc.TryGetProperty("standardAnswer", out var a) ? a.GetString() : null;
             var rubric = doc.TryGetProperty("rubric", out var r) ? r.GetString() : null;
             return (answer, rubric);
         }
         catch { return null; }
+    }
+
+    /// <summary>
+    /// 从 AI 返回文本中提取可解析的 JSON：剥除 markdown 代码围栏、截取首个 [/{ 到末个 /}]；
+    /// 截断的数组做尾部修复（输出超 max_tokens 时 JSON 断尾）。
+    /// </summary>
+    internal static string? ExtractJsonBlock(string? content, bool expectArray)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return null;
+        var text = content.Trim();
+
+        // 1) 剥 markdown 围栏（```json ... ```）
+        var fence = text.IndexOf("```", StringComparison.Ordinal);
+        if (fence >= 0)
+        {
+            var start = text.IndexOf('\n', fence);
+            var end = text.LastIndexOf("```", StringComparison.Ordinal);
+            if (start >= 0 && end > start)
+                text = text[(start + 1)..end].Trim();
+        }
+
+        // 2) 截取 JSON 主体（期望数组但实际是对象包装时，按实际类型截取，由调用方展开）
+        var first = text.IndexOfAny(new[] { '[', '{' });
+        if (first < 0) return null;
+        var openActual = text[first];
+        var closeActual = openActual == '[' ? ']' : '}';
+        var last = text.LastIndexOf(closeActual);
+        if (last <= first) return null;
+        var json = text[first..(last + 1)];
+
+        // 3) 截断修复：裁到最后一个完整 '}' 或 '"' 再补闭合
+        if (json[^1] != closeActual)
+        {
+            var cut = Math.Max(json.LastIndexOf('}'), json.LastIndexOf('"'));
+            if (cut > 0) json = json[..(cut + 1)];
+            if (json[^1] == ',') json = json[..^1];
+            if (openActual == '[') json += closeActual;
+        }
+        return json;
+    }
+
+    /// <summary>解析 AI 返回的题目清单：裸数组或 {questions|data|items|result:[…]} 包装均可。</summary>
+    internal static List<ExtractedQuestion>? ParseQuestions(string? content)
+    {
+        var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
+        var json = ExtractJsonBlock(content, expectArray: true);
+        if (json != null)
+        {
+            if (json.StartsWith('['))
+            {
+                try { return JsonSerializer.Deserialize<List<ExtractedQuestion>>(json, opts); }
+                catch { }
+            }
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var key in new[] { "questions", "data", "items", "result" })
+                    {
+                        if (doc.RootElement.TryGetProperty(key, out var arr) &&
+                            arr.ValueKind == JsonValueKind.Array)
+                        {
+                            var list = JsonSerializer.Deserialize<List<ExtractedQuestion>>(arr.GetRawText(), opts);
+                            if (list is { Count: > 0 }) return list;
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+        return null;
     }
 
     /// <summary>调用 OpenAI 兼容 chat/completions；支持多图输入与 max_tokens 覆盖；含重试与调用日志。</summary>

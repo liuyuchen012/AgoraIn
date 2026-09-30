@@ -69,8 +69,8 @@
       <el-table-column prop="createdAt" label="时间" width="170">
         <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
       </el-table-column>
-      <el-table-column label="场景" width="90">
-        <template #default="{ row }">{{ row.endpoint === 'recognize' ? '答题卡识别' : '主观题批改' }}</template>
+      <el-table-column label="场景" width="110">
+        <template #default="{ row }">{{ scenarioNames[row.endpoint] || row.endpoint }}</template>
       </el-table-column>
       <el-table-column prop="model" label="模型" min-width="140" />
       <el-table-column prop="promptTokens" label="输入 Token" width="100" />
@@ -135,6 +135,16 @@ async function clearApiKey() {
     apiKeyInput.value = ''
     ElMessage.success('已清除在线密钥，回落服务器配置')
   } finally { saving.value = false }
+}
+
+// AI 调用场景名（与服务端 endpoint 字段对应）
+const scenarioNames: Record<string, string> = {
+  recognize: '答题卡识别',
+  grade: '主观题批改',
+  extract: '文本导题',
+  extract_images: '图片导题',
+  fill_answers: '答案回填',
+  generate_answer: '生成答案',
 }
 
 function formatTime(t: string) { return t ? String(t).replace('T', ' ').substring(0, 19) : '—' }
