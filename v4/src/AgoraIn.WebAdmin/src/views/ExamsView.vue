@@ -610,7 +610,10 @@ async function renderPdfToImages(file: File, maxPages = 12): Promise<Blob[]> {
   let blankPages = 0
   for (let i = 1; i <= pages; i++) {
     const page = await pdf.getPage(i)
-    const viewport = page.getViewport({ scale: 2 })
+    // 目标宽度 ~1400px：AI 视觉识别足够清晰，体积仅为 scale2 的 1/4（移动网络下大幅缩短上传时间）
+    const base = page.getViewport({ scale: 1 })
+    const scale = Math.min(2, Math.max(1, 1400 / base.width))
+    const viewport = page.getViewport({ scale })
     const canvas = document.createElement('canvas')
     canvas.width = viewport.width
     canvas.height = viewport.height
@@ -618,7 +621,7 @@ async function renderPdfToImages(file: File, maxPages = 12): Promise<Blob[]> {
     await page.render({ canvasContext: ctx, viewport }).promise
     // 空白页检测：字符表缺失时中文页会渲染成全白，AI 只能返回 0 题
     if (isMostlyBlank(canvas)) blankPages++
-    const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.85))
+    const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.78))
     if (blob) blobs.push(blob)
     canvas.width = 0
   }
@@ -632,12 +635,15 @@ async function renderPdfToImages(file: File, maxPages = 12): Promise<Blob[]> {
   return blobs
 }
 
-/** 采样画布判断是否近乎全白（<1% 非白像素视为空白页） */
+/** 采样画布判断是否近乎全白（<1% 非白像素视为空白页）：先缩到 64x64 再取样 */
 function isMostlyBlank(canvas: HTMLCanvasElement): boolean {
-  const ctx = canvas.getContext('2d')!
-  const w = canvas.width, h = canvas.height
-  const sw = Math.min(64, w), sh = Math.min(64, h)
-  const data = ctx.getImageData(0, 0, w, h, { width: sw, height: sh } as any).data
+  const sw = 64, sh = 64
+  const tiny = document.createElement('canvas')
+  tiny.width = sw
+  tiny.height = sh
+  const tctx = tiny.getContext('2d')!
+  tctx.drawImage(canvas, 0, 0, sw, sh)
+  const data = tctx.getImageData(0, 0, sw, sh).data
   let nonWhite = 0
   for (let i = 0; i < data.length; i += 4) {
     if (data[i] < 240 || data[i + 1] < 240 || data[i + 2] < 240) nonWhite++
@@ -659,8 +665,12 @@ async function doImportFile() {
       if (importAFile.value && importAFile.value.name.toLowerCase().endsWith('.pdf')) {
         aImgs = await renderPdfToImages(importAFile.value)
       }
-      ElMessage.info(`已渲染 ${qImgs.length} 页，AI 识别中（约 1-2 分钟）…`)
-      const r = await examApi.importImages(editingPaper.value.id, qImgs, aImgs)
+      const totalBytes = qImgs.concat(aImgs).reduce((s2, b) => s2 + b.size, 0)
+      ElMessage.info(`已渲染 ${qImgs.length} 页（${(totalBytes / 1048576).toFixed(1)}MB），上传+识别中，请勿关闭页面…`)
+      let lastPct = -1
+      const r = await examApi.importImages(editingPaper.value.id, qImgs, aImgs, pct => {
+        if (pct >= lastPct + 20) { lastPct = pct; ElMessage({ message: `上传中 ${pct}%…`, type: 'info', duration: 1500 }) }
+      })
       ElMessage.success(`AI 视觉识别并导入 ${r.imported} 题`)
     } else {
       const r = await examApi.importFile(editingPaper.value.id, qf, importAFile.value || undefined)

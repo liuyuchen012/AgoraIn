@@ -9,6 +9,9 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// 试卷图片上传（多页 JPEG）可能超过 Kestrel 默认 30MB 上限
+builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 100 * 1024 * 1024);
+
 // ── 数据目录 ──
 // 可用 appsettings.json 的 Data:Directory 或环境变量 Data__Directory 覆盖（默认 ContentRoot/data）。
 // 注意：SQLite 只会创建数据库**文件**，不会创建所在目录；目录缺失会报
