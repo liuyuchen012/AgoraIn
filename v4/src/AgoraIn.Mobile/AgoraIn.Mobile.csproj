@@ -54,6 +54,18 @@
 		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
 	</ItemGroup>
 
+	<!-- Release 签名：密码不写入本文件，构建时通过
+	     -p:AndroidSigningStorePassword / -p:AndroidSigningKeyPassword 传入
+	     （或环境变量，CI 用 GitHub Secrets）；凭据见 signing/credentials.txt（已 gitignore） -->
+	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
+		<!-- AndroidKeyStore=true 是启用自定义证书的开关：缺省时 .NET Android SDK 会
+		     回退到自动 debug 证书（targets 里 AndroidKeyStore!='True' 走 _ApkDebugKeyStore），
+		     产出的 -Signed.apk 证书与发布证书不一致，App 备案/商店签名核验会失败 -->
+		<AndroidKeyStore>true</AndroidKeyStore>
+		<AndroidSigningKeyStore>signing/agorain-release.keystore</AndroidSigningKeyStore>
+		<AndroidSigningKeyAlias>agorain</AndroidSigningKeyAlias>
+	</PropertyGroup>
+
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />

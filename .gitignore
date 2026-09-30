@@ -76,3 +76,8 @@ CHANGELOG.md
 /README.v3.md.bak
 v4/tools/AgoraIn.LicenseTool/license_private_key.xml
 v4/tools/AgoraIn.LicenseTool/license_public_key.xml
+
+# Android 发布签名材料（绝不入库）
+*.keystore
+*.jks
+v4/src/AgoraIn.Mobile/signing/credentials.txt
