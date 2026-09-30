@@ -441,6 +441,8 @@ const importQFile = ref<File | null>(null)
 const importAFile = ref<File | null>(null)
 const importing = ref(false)
 const generatingAnswers = ref(false)
+// 后台识别轮询
+let pollTimer: ReturnType<typeof setInterval> | null = null
 
 // 成绩统计
 const statsVisible = ref(false)
@@ -666,12 +668,21 @@ async function doImportFile() {
         aImgs = await renderPdfToImages(importAFile.value)
       }
       const totalBytes = qImgs.concat(aImgs).reduce((s2, b) => s2 + b.size, 0)
-      ElMessage.info(`已渲染 ${qImgs.length} 页（${(totalBytes / 1048576).toFixed(1)}MB），上传+识别中，请勿关闭页面…`)
+      ElMessage.info(`已渲染 ${qImgs.length} 页（${(totalBytes / 1048576).toFixed(1)}MB），上传中…`)
+      const paperId = editingPaper.value.id
+      const beforeCount = questions.value.length
       let lastPct = -1
-      const r = await examApi.importImages(editingPaper.value.id, qImgs, aImgs, pct => {
+      const r = await examApi.importImages(paperId, qImgs, aImgs, pct => {
         if (pct >= lastPct + 20) { lastPct = pct; ElMessage({ message: `上传中 ${pct}%…`, type: 'info', duration: 1500 }) }
       })
-      ElMessage.success(`AI 视觉识别并导入 ${r.imported} 题`)
+      // 服务端秒回执 + 后台 AI 识别（推理模型分批可能 2-6 分钟），轮询题目出现
+      if ((r as any)?.accepted) {
+        startPollImport(paperId, beforeCount)
+        ElMessage.success('已提交后台识别，AI 处理中（约 2-6 分钟），题目出现后自动刷新，可先做其他操作')
+        importVisible.value = false
+        return
+      }
+      ElMessage.success(`AI 视觉识别并导入 ${(r as any)?.imported ?? 0} 题`)
     } else {
       const r = await examApi.importFile(editingPaper.value.id, qf, importAFile.value || undefined)
       ElMessage.success(`AI 已识别并导入 ${r.imported} 题`)
@@ -685,6 +696,34 @@ async function doImportFile() {
   } finally {
     importing.value = false
   }
+}
+
+/** 后台识别轮询：题目出现即刷新；每分钟播报；10 分钟超时提示查日志 */
+function startPollImport(paperId: string, beforeCount: number) {
+  stopPollImport()
+  let waited = 0
+  pollTimer = setInterval(async () => {
+    waited += 15
+    try {
+      const list = await examApi.getQuestions(paperId)
+      const arr = (list as any[]) || []
+      if (arr.length > beforeCount) {
+        stopPollImport()
+        importVisible.value = false
+        if (editingPaper.value?.id === paperId) await loadQuestions(paperId)
+        ElMessage.success(`AI 已识别并导入 ${arr.length - beforeCount} 题`)
+      } else if (waited >= 600) {
+        stopPollImport()
+        ElMessage.error('AI 识别超时（10 分钟）。请到「AI 批改设置 → 调用日志」查看后台任务（场景：后台出题）状态')
+      } else if (waited % 60 === 0) {
+        ElMessage({ message: `AI 后台识别中…已等待 ${waited / 60} 分钟`, type: 'info', duration: 2000 })
+      }
+    } catch { /* 网络抖动继续轮询 */ }
+  }, 15000)
+}
+
+function stopPollImport() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
 }
 
 async function aiGenerateAnswers() {

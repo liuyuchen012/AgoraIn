@@ -223,7 +223,7 @@ export const examApi = {
     const fd = new FormData()
     questionImages.forEach((b, i) => fd.append('questionImages', b, `q${i}.jpg`))
     ;(answerImages || []).forEach((b, i) => fd.append('answerImages', b, `a${i}.jpg`))
-    return client.post<{ imported: number; questions: unknown[] }>(`/exams/papers/${paperId}/import-file`, fd,
+    return client.post<{ accepted?: boolean; imported?: number; questions?: unknown[] }>(`/exams/papers/${paperId}/import-file`, fd,
       {
         headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 600000,

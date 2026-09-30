@@ -145,6 +145,7 @@ const scenarioNames: Record<string, string> = {
   extract_images: '图片导题',
   fill_answers: '答案回填',
   generate_answer: '生成答案',
+  import_background: '后台出题',
 }
 
 function formatTime(t: string) { return t ? String(t).replace('T', ' ').substring(0, 19) : '—' }

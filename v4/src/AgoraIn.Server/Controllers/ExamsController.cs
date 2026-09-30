@@ -24,12 +24,14 @@ public class ExamsController : ControllerBase
     private readonly ServerDbContext _db;
     private readonly DeepSeekGradingService _ai;
     private readonly AiSettingsService _aiSettings;
+    private readonly IServiceScopeFactory _scopeFactory;
 
-    public ExamsController(ServerDbContext db, DeepSeekGradingService ai, AiSettingsService aiSettings)
+    public ExamsController(ServerDbContext db, DeepSeekGradingService ai, AiSettingsService aiSettings, IServiceScopeFactory scopeFactory)
     {
         _db = db;
         _ai = ai;
         _aiSettings = aiSettings;
+        _scopeFactory = scopeFactory;
     }
 
     /// <summary>试卷列表。</summary>
@@ -149,10 +151,12 @@ public class ExamsController : ControllerBase
         if (qImgs.Count > 12 || aImgs.Count > 12)
             return BadRequest(new { error = "页面图片最多 12 张，请拆分后分次导入" });
 
-        List<ExtractedQuestion>? extracted;
+        // ── 图片路径：立即回执，后台处理 ──
+        // 推理模型分批识别全流程可能耗时 5-10 分钟，挂在 HTTP 请求上会被
+        // 浏览器/axios 超时断开（499），且断开还会取消 CancellationToken 中止处理。
+        // 改为接收图片后立刻返回 accepted，后台任务独立作用域处理，前端轮询题目出现。
         if (qImgs.Count > 0)
         {
-            // ── 视觉出题路径 ──
             var qBytes = new List<byte[]>();
             foreach (var f in qImgs)
             {
@@ -160,36 +164,27 @@ public class ExamsController : ControllerBase
                 await f.CopyToAsync(ms, ct);
                 qBytes.Add(ms.ToArray());
             }
-
-            extracted = await _ai.ExtractQuestionsFromImagesAsync(qBytes, null, ct);
-            if (extracted == null)
-                return BadRequest(new { error = "AI 识别失败，请检查「AI 批改设置」的 API 密钥/地址，且识别模型需支持图像输入（如 GLM-4V / Qwen-VL）" });
-
-            // 答案图片回填
-            if (aImgs.Count > 0)
+            var aBytes = new List<byte[]>();
+            foreach (var f in aImgs)
             {
-                var aBytes = new List<byte[]>();
-                foreach (var f in aImgs)
-                {
-                    using var ms = new MemoryStream();
-                    await f.CopyToAsync(ms, ct);
-                    aBytes.Add(ms.ToArray());
-                }
-                extracted = await _ai.FillAnswersFromImagesAsync(extracted, aBytes, ct) ?? extracted;
+                using var ms = new MemoryStream();
+                await f.CopyToAsync(ms, ct);
+                aBytes.Add(ms.ToArray());
             }
-        }
-        else
-        {
-            // ── 文本出题路径（docx/txt）──
-            var questionText = await ExtractTextAsync(questionFile!, ct);
-            if (string.IsNullOrWhiteSpace(questionText))
-                return BadRequest(new { error = "无法从文件中提取文本。若为 PDF（尤其是含公式的数学卷），请使用页面图片方式：前端会自动把 PDF 渲染为图片上传" });
 
-            var answerText = answerFile is { Length: > 0 } ? await ExtractTextAsync(answerFile, ct) : null;
-            extracted = await _ai.ExtractQuestionsAsync(questionText, answerText, ct);
-            if (extracted == null)
-                return BadRequest(new { error = "AI 解析失败，请检查 AI 服务配置（需在「AI 批改设置」填写 API 密钥）" });
+            _ = Task.Run(() => ProcessImportInBackgroundAsync(paperId, qBytes, aBytes));
+            return Accepted(new { accepted = true, paperId, mode = "background" });
         }
+
+        // ── 文本路径（docx/txt）：同步处理（AI 调用快，无超时风险） ──
+        var questionText = await ExtractTextAsync(questionFile!, ct);
+        if (string.IsNullOrWhiteSpace(questionText))
+            return BadRequest(new { error = "无法从文件中提取文本。若为 PDF（尤其是含公式的数学卷），请使用页面图片方式：前端会自动把 PDF 渲染为图片上传" });
+
+        var answerText = answerFile is { Length: > 0 } ? await ExtractTextAsync(answerFile, ct) : null;
+        var extracted = await _ai.ExtractQuestionsAsync(questionText, answerText, ct);
+        if (extracted == null)
+            return BadRequest(new { error = "AI 解析失败，请检查 AI 服务配置（需在「AI 批改设置」填写 API 密钥）" });
 
         if (extracted.Count == 0)
             return BadRequest(new { error = "AI 识别到试卷但未解析出题目。常见原因：①页面图片为空白（PDF 渲染失败，请按 Ctrl+F5 强制刷新浏览器后重试）②识别模型不支持图像输入 ③试卷为扫描件图片（非文字版）。原始 AI 响应已存服务器 data/ai-raw/ 供排查" });
@@ -262,6 +257,95 @@ public class ExamsController : ControllerBase
         }
         await _db.SaveChangesAsync(ct);
         return Ok(new { updated, total = questions.Count });
+    }
+
+    /// <summary>
+    /// 后台出题任务：独立 DI 作用域 + CancellationToken.None（客户端断开不中断）。
+    /// 失败时把原因写入 AiCallLogs（Endpoint=import_background）供排查。
+    /// </summary>
+    private async Task ProcessImportInBackgroundAsync(string paperId, List<byte[]> qBytes, List<byte[]> aBytes)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ServerDbContext>();
+            var ai = scope.ServiceProvider.GetRequiredService<DeepSeekGradingService>();
+            var ct = CancellationToken.None;
+
+            var extracted = await ai.ExtractQuestionsFromImagesAsync(qBytes, null, ct);
+            if (extracted != null && aBytes.Count > 0)
+                extracted = await ai.FillAnswersFromImagesAsync(extracted, aBytes, ct) ?? extracted;
+
+            if (extracted == null || extracted.Count == 0)
+            {
+                await LogBackgroundAsync(db, "import_background", false,
+                    "AI 未识别出题目（可能原因：页面图片空白/模型不支持图像/扫描件），详见 data/ai-raw/");
+                return;
+            }
+
+            var startIndex = await db.Questions
+                .Where(q => q.PaperId == paperId)
+                .Select(q => (int?)q.Index)
+                .MaxAsync(ct) ?? -1;
+
+            foreach (var eq in extracted)
+            {
+                db.Questions.Add(new Question
+                {
+                    PaperId = paperId,
+                    Index = ++startIndex,
+                    Type = ParseQuestionType(eq.Type),
+                    Content = eq.Content,
+                    Score = eq.Score > 0 ? eq.Score : 2,
+                    StandardAnswer = eq.StandardAnswer,
+                    OptionsJson = eq.Options is { Count: > 0 }
+                        ? JsonSerializer.Serialize(eq.Options.Select(o => new { key = o.Key, text = o.Text ?? "" }).ToList())
+                        : null,
+                    Rubric = eq.Rubric,
+                    KnowledgeTagsJson = eq.KnowledgeTags is { Count: > 0 } ? JsonSerializer.Serialize(eq.KnowledgeTags) : null,
+                    AiGradingEnabled = null,
+                });
+            }
+            await db.SaveChangesAsync(ct);
+
+            var total = await db.Questions.Where(q => q.PaperId == paperId).SumAsync(q => q.Score);
+            var paper = await db.ExamPapers.FindAsync([paperId], ct);
+            if (paper != null)
+            {
+                paper.TotalScore = total;
+                await db.SaveChangesAsync(ct);
+            }
+
+            await LogBackgroundAsync(db, "import_background", true, $"后台导入 {extracted.Count} 题");
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<ServerDbContext>();
+                await LogBackgroundAsync(db, "import_background", false,
+                    ex.Message.Length > 300 ? ex.Message[..300] : ex.Message);
+            }
+            catch { }
+        }
+    }
+
+    private static async Task LogBackgroundAsync(ServerDbContext db, string endpoint, bool success, string? error)
+    {
+        try
+        {
+            db.AiCallLogs.Add(new AiCallLogEntity
+            {
+                Endpoint = endpoint,
+                Model = "background",
+                Success = success,
+                Error = error,
+                DurationMs = 0,
+            });
+            await db.SaveChangesAsync();
+        }
+        catch { }
     }
 
     /// <summary>从上传文件提取文本（docx / pdf / txt）。</summary>
