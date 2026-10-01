@@ -133,6 +133,19 @@ export const studentApi = {
   create: (data: unknown) => client.post<StudentRow>('/students', data),
   update: (id: string, data: unknown) => client.put<StudentRow>(`/students/${id}`, data),
   remove: (id: string) => client.delete<void>(`/students/${id}`),
+  /** 批量生成考号（写入学号字段，答题卡识别按此匹配） */
+  generateExamNumbers: (data: { classId: string; digits: number; prefix?: string; start: number; overwrite: boolean }) =>
+    client.post<ExamNumberResult>('/students/exam-numbers', data),
+}
+
+export interface ExamNumberResult {
+  classId: string
+  digits: number
+  prefix: string
+  changed: number
+  skipped: number
+  total: number
+  rows: { id: string; name: string; no: string | null; seq: number | null; changed: boolean }[]
 }
 
 // ── 设备 ──
@@ -273,20 +286,39 @@ export const examApi = {
   aiGenerateAnswers: (paperId: string) =>
     client.post<{ updated: number; total: number }>(`/exams/papers/${paperId}/ai-generate-answers`, {}, { timeout: 300000 }),
   // 答题卡渲染（匿名控制器；iframe 不带 JWT，区域用户需显式带 region 参数）
-  sheetUrl: (paperId: string) => `/api/v4/sheet/${paperId}${regionQuery()}`,
-  sheetForStudent: (paperId: string, studentId: string) => `/api/v4/sheet/${paperId}/student/${studentId}${regionQuery()}`,
-  batchSheetUrl: (paperIdId: string, classId: string) => `/api/v4/sheet/${paperIdId}/batch?classId=${classId}${regionQuery('&')}`,
+  // opts：纸张 A4/B4/8K/16K/A3、考号区 bubble(填涂)/handwrite(仅手写)/none、notes 注意事项
+  sheetUrl: (paperId: string, opts?: SheetQuery) => `/api/v4/sheet/${paperId}${sheetQuery(opts)}`,
+  sheetForStudent: (paperId: string, studentId: string, opts?: SheetQuery) =>
+    `/api/v4/sheet/${paperId}/student/${studentId}${sheetQuery(opts)}`,
+  batchSheetUrl: (paperId: string, classId: string, opts?: SheetQuery) =>
+    `/api/v4/sheet/${paperId}/batch${sheetQuery({ classId, ...opts })}`,
+  /** 考号表：把班级考号打印张贴，学生据此填涂通用答题卡 */
+  rosterUrl: (classId: string, opts?: Pick<SheetQuery, 'paper'>) =>
+    `/api/v4/sheet/roster/${classId}${sheetQuery(opts)}`,
 }
 
-/** 当前登录区域（从 localStorage 读取，避免循环依赖 pinia） */
-function regionQuery(prefix = '?'): string {
+/** 答题卡渲染参数 */
+export interface SheetQuery {
+  paper?: string
+  idArea?: 'bubble' | 'handwrite' | 'none'
+  notes?: boolean
+  classId?: string
+}
+
+/** 拼接查询串并附带区域参数（匿名 iframe 需要显式 region） */
+function sheetQuery(params: SheetQuery = {}): string {
+  const q = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === '') continue
+    q.set(k, String(v))
+  }
   try {
     const user = JSON.parse(localStorage.getItem(USER_KEY) || 'null')
     const region = user?.region || 'manager'
-    return region === 'manager' ? '' : `${prefix}region=${encodeURIComponent(region)}`
-  } catch {
-    return ''
-  }
+    if (region !== 'manager') q.set('region', region)
+  } catch { /* 未登录（理论上不会走到渲染） */ }
+  const s = q.toString()
+  return s ? `?${s}` : ''
 }
 
 // ── 点名 ──

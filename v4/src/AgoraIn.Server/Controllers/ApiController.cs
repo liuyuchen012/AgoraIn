@@ -117,6 +117,82 @@ public class StudentsController : ControllerBase
         await _db.SaveChangesAsync();
         return NoContent();
     }
+
+    /// <summary>
+    /// 批量生成考号（写入学生的学号字段，答题卡识别按此匹配）。
+    /// 通用答题卡是全班同一张版（速印机印刷），考号由学生按本表自行填涂，因此考号必须
+    /// 人手一份且足够短——默认 8 位（前缀 + 班内序号），不足位左侧补 0。
+    /// </summary>
+    [HttpPost("exam-numbers")]
+    public async Task<IActionResult> GenerateExamNumbers([FromBody] ExamNumberRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.ClassId)) return BadRequest(new { error = "请选择班级" });
+        var students = await _db.Students
+            .Where(s => s.ClassId == req.ClassId)
+            .OrderBy(s => s.StudentNo ?? "~").ThenBy(s => s.Name)
+            .ToListAsync();
+        if (students.Count == 0) return BadRequest(new { error = "该班级没有学生" });
+
+        var digits = Math.Clamp(req.Digits, 4, 12);
+        var prefix = (req.Prefix ?? "").Trim();
+        if (prefix.Length >= digits) return BadRequest(new { error = $"前缀「{prefix}」长度不能超过考号位数 {digits}" });
+
+        var seqDigits = digits - prefix.Length;
+        var start = Math.Max(1, req.Start);
+        var overwrite = req.Overwrite;
+
+        var changed = 0;
+        var skipped = 0;
+        var rows = new List<object>();
+        var seq = start;
+        foreach (var stu in students)
+        {
+            if (!overwrite && !string.IsNullOrWhiteSpace(stu.StudentNo))
+            {
+                skipped++;
+                rows.Add(new { stu.Id, stu.Name, no = stu.StudentNo, seq = (int?)null, changed = false });
+                continue;
+            }
+            if (seq > Math.Pow(10, seqDigits) - 1)
+                return BadRequest(new { error = $"序号超出 {seqDigits} 位可表示范围（最多 {Math.Pow(10, seqDigits) - 1}）；请增大位数或改小起始号" });
+
+            var no = prefix + seq.ToString().PadLeft(seqDigits, '0');
+            stu.StudentNo = no;
+            changed++;
+            rows.Add(new { stu.Id, stu.Name, no, seq, changed = true });
+            seq++;
+        }
+
+        await _db.SaveChangesAsync();
+        return Ok(new
+        {
+            classId = req.ClassId,
+            digits,
+            prefix,
+            changed,
+            skipped,
+            total = students.Count,
+            rows,
+        });
+    }
+
+    /// <summary>考号生成请求。</summary>
+    public sealed class ExamNumberRequest
+    {
+        public string ClassId { get; set; } = "";
+
+        /// <summary>考号位数（含前缀），默认 8。</summary>
+        public int Digits { get; set; } = 8;
+
+        /// <summary>考号前缀（如学校/年级代码，可空）。</summary>
+        public string? Prefix { get; set; }
+
+        /// <summary>班内起始序号，默认 1。</summary>
+        public int Start { get; set; } = 1;
+
+        /// <summary>是否覆盖已有考号（默认否：只补空白，避免打乱已印好的答题卡）。</summary>
+        public bool Overwrite { get; set; }
+    }
 }
 
 /// <summary>打卡 API。前缀 /api/v4/checkin</summary>

@@ -30,42 +30,95 @@ public class AnswerSheetController : ControllerBase
         return exists;
     }
 
+    /// <summary>把 query 参数（纸张/考号区类型/注意事项）解析为渲染选项。</summary>
+    private static AnswerSheetOptions ParseOptions(
+        string? paper, string? idArea, bool? notes)
+        => new()
+        {
+            Paper = SheetPaper.FromName(paper),
+            IdArea = (idArea ?? "").Trim().ToLowerInvariant() switch
+            {
+                "handwrite" => IdAreaKind.Handwrite,
+                "none" => IdAreaKind.None,
+                _ => IdAreaKind.Bubble,
+            },
+            ShowNotes = notes ?? true,
+        };
+
     [HttpGet("{paperId}")]
-    public async Task<IActionResult> RenderSheet(string paperId, [FromQuery] string? region)
+    public async Task<IActionResult> RenderSheet(
+        string paperId, [FromQuery] string? region,
+        [FromQuery] string? paper = null, [FromQuery] string? idArea = null, [FromQuery] bool? notes = null)
     {
         await ApplyRegionAsync(region);
-        var (paper, questions, options) = await LoadPaperAsync(paperId);
-        if (paper == null) return NotFound(new { error = "试卷不存在" });
-        return Content(AnswerSheetRenderer.Render(paper, questions, options), "text/html; charset=utf-8");
+        var (paperEntity, questions, options) = await LoadPaperAsync(paperId);
+        if (paperEntity == null) return NotFound(new { error = "试卷不存在" });
+        var opt = ParseOptions(paper, idArea, notes);
+        return Content(AnswerSheetRenderer.Render(paperEntity, questions, options, sheetOptions: opt),
+            "text/html; charset=utf-8");
     }
 
     [HttpGet("{paperId}/student/{studentId}")]
-    public async Task<IActionResult> RenderSheetForStudent(string paperId, string studentId, [FromQuery] string? region)
+    public async Task<IActionResult> RenderSheetForStudent(
+        string paperId, string studentId, [FromQuery] string? region,
+        [FromQuery] string? paper = null, [FromQuery] string? idArea = null, [FromQuery] bool? notes = null)
     {
         await ApplyRegionAsync(region);
-        var (paper, questions, options) = await LoadPaperAsync(paperId);
-        if (paper == null) return NotFound(new { error = "试卷不存在" });
+        var (paperEntity, questions, options) = await LoadPaperAsync(paperId);
+        if (paperEntity == null) return NotFound(new { error = "试卷不存在" });
         var student = await _db.Students.FindAsync(studentId);
         if (student == null) return NotFound(new { error = "学生不存在" });
-        return Content(AnswerSheetRenderer.Render(paper, questions, options,
-            studentName: student.Name, studentNo: student.StudentNo ?? student.Id), "text/html; charset=utf-8");
+        var opt = ParseOptions(paper, idArea, notes);
+        return Content(AnswerSheetRenderer.Render(paperEntity, questions, options,
+            studentName: student.Name, studentNo: student.StudentNo ?? student.Id, sheetOptions: opt),
+            "text/html; charset=utf-8");
     }
 
     [HttpGet("{paperId}/batch")]
-    public async Task<IActionResult> RenderBatch(string paperId, [FromQuery] string classId, [FromQuery] string? region)
+    public async Task<IActionResult> RenderBatch(
+        string paperId, [FromQuery] string classId, [FromQuery] string? region,
+        [FromQuery] string? paper = null, [FromQuery] string? idArea = null, [FromQuery] bool? notes = null)
     {
         await ApplyRegionAsync(region);
-        var (paper, questions, options) = await LoadPaperAsync(paperId);
-        if (paper == null) return NotFound(new { error = "试卷不存在" });
+        var (paperEntity, questions, options) = await LoadPaperAsync(paperId);
+        if (paperEntity == null) return NotFound(new { error = "试卷不存在" });
         var students = await _db.Students.Where(s => s.ClassId == classId).OrderBy(s => s.StudentNo).ToListAsync();
         if (students.Count == 0) return NotFound(new { error = "该班级没有学生" });
+        var opt = ParseOptions(paper, idArea, notes);
 
         var parts = new List<string>();
         foreach (var stu in students)
-            parts.Add(AnswerSheetRenderer.Render(paper, questions, options,
-                studentName: stu.Name, studentNo: stu.StudentNo ?? stu.Id));
+            parts.Add(AnswerSheetRenderer.Render(paperEntity, questions, options,
+                studentName: stu.Name, studentNo: stu.StudentNo ?? stu.Id, sheetOptions: opt));
         return Content(string.Join("\n<hr style='page-break-after:always'>\n", parts), "text/html; charset=utf-8");
     }
+
+    /// <summary>
+    /// 考号表（匿名）：把班级学生的考号打印张贴，学生据此在【通用答题卡】上填涂。
+    /// 速印机流程：通用答题卡制版印全班 → 考号表张贴/下发 → 学生自己填考号。
+    /// </summary>
+    [HttpGet("roster/{classId}")]
+    public async Task<IActionResult> RenderRoster(
+        string classId, [FromQuery] string? region, [FromQuery] string? paper = null)
+    {
+        await ApplyRegionAsync(region);
+        var cls = await _db.Classes.FindAsync(classId);
+        if (cls == null) return NotFound(new { error = "班级不存在" });
+        var students = await _db.Students.Where(s => s.ClassId == classId)
+            .OrderBy(s => s.StudentNo).ThenBy(s => s.Name).ToListAsync();
+        if (students.Count == 0) return NotFound(new { error = "该班级没有学生" });
+        var missing = students.Count(s => string.IsNullOrWhiteSpace(s.StudentNo));
+        if (missing > 0)
+            return Content("<h3 style='font-family:sans-serif'>该班级还有 " + missing +
+                           " 名学生没有考号：请先在【试卷管理 → 答题卡配置 → 生成考号】中生成考号。</h3>",
+                "text/html; charset=utf-8");
+
+        var entries = students.Select(s => (s.StudentNo!, s.Name)).ToList();
+        var opt = ParseOptions(paper, null, null);
+        return Content(AnswerSheetRenderer.RenderRoster($"{cls.Name}", entries, opt),
+            "text/html; charset=utf-8");
+    }
+
 
     private async Task<(ExamPaper?, List<Question>, Dictionary<string, List<string>>)> LoadPaperAsync(string paperId)
     {

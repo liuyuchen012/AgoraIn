@@ -132,46 +132,53 @@
 
           <!-- 答题卡配置 -->
           <el-tab-pane label="答题卡配置" name="sheet">
+            <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px">
+              <template #title>试卷通用答题卡：全班共用一张版，不预填任何学生信息，适合速印机（一体机）一次制版批量印刷</template>
+              <div style="font-size:12px;line-height:1.7">
+                速印机打印建议：<b>单面</b>、缩放选<b>实际大小 / 100%</b>、关闭浏览器<b>页眉页脚</b>；<br>
+                学生考号请点右下「生成考号」批量生成后，打印<b>考号表</b>张贴或下发，学生按号自行填涂。
+              </div>
+            </el-alert>
+
             <el-form label-width="100px" style="max-width:600px">
               <el-divider content-position="left">试卷信息</el-divider>
               <el-form-item label="试卷标题"><el-input v-model="sheetConfig.paperTitle" :placeholder="editingPaper.title" /></el-form-item>
               <el-form-item label="科目"><el-input v-model="sheetConfig.subject" :placeholder="editingPaper.subject" /></el-form-item>
 
               <el-divider content-position="left">考号区域</el-divider>
-              <el-form-item label="考号类型">
+              <el-form-item label="考号区形式">
                 <el-radio-group v-model="sheetConfig.idAreaType">
                   <el-radio value="bubble">考号填涂区</el-radio>
-                  <el-radio value="barcode">条形码</el-radio>
-                  <el-radio value="handwrite">手写考号</el-radio>
+                  <el-radio value="handwrite">仅手写考号行</el-radio>
+                  <el-radio value="none">不显示考号区</el-radio>
                 </el-radio-group>
+                <div style="font-size:11px;color:#909399;line-height:1.6">
+                  填涂区＝手写行＋列序号＋0-9 气泡（可机器识别考号）；速印机批量印刷时建议保留填涂区。
+                </div>
               </el-form-item>
 
               <el-divider content-position="left">辅助选项</el-divider>
-              <el-form-item label="密封线"><el-switch v-model="sheetConfig.hasSealLine" /></el-form-item>
-              <el-form-item label="注意事项"><el-switch v-model="sheetConfig.hasNotes" /></el-form-item>
-              <el-form-item label="AB卷"><el-switch v-model="sheetConfig.hasAB" /></el-form-item>
-              <el-form-item label="红色答题卡"><el-switch v-model="sheetConfig.isRed" /></el-form-item>
-              <el-form-item label="客观题竖排"><el-switch v-model="sheetConfig.verticalObj" /></el-form-item>
-              <el-form-item label="分区答题卡"><el-switch v-model="sheetConfig.partitioned" /></el-form-item>
-
-              <el-divider content-position="left">布局</el-divider>
-              <el-form-item label="纸张">
-                <el-select v-model="sheetConfig.pageSize">
-                  <el-option label="A4" value="A4" /><el-option label="A3/B4/8K" value="A3" />
-                </el-select>
+              <el-form-item label="注意事项">
+                <el-switch v-model="sheetConfig.hasNotes" />
+                <span style="font-size:11px;color:#909399;margin-left:8px">卡面顶部印答题须知（填涂规范、违规说明）</span>
               </el-form-item>
-              <el-form-item label="栏数">
-                <el-radio-group v-model="sheetConfig.columns">
-                  <el-radio :value="1">单栏</el-radio>
-                  <el-radio :value="2">双栏</el-radio>
-                </el-radio-group>
+
+              <el-divider content-position="left">纸张</el-divider>
+              <el-form-item label="纸张规格">
+                <el-select v-model="sheetConfig.paperSize" style="width:220px">
+                  <el-option v-for="p in paperOptions" :key="p.value" :label="p.label" :value="p.value" />
+                </el-select>
+                <div style="font-size:11px;color:#909399;line-height:1.6">
+                  速印机常用 8 开（8K）；普通打印机选 A4。改动后请重新预览确认分页。
+                </div>
               </el-form-item>
             </el-form>
 
-            <div style="margin-top:16px;display:flex;gap:12px">
+            <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap">
               <el-button type="primary" @click="previewSheet(editingPaper)">预览答题卡</el-button>
               <el-button type="success" @click="downloadSheet(editingPaper)">下载打印</el-button>
-              <el-button @click="showBatchSheet(editingPaper)">按班级批量生成</el-button>
+              <el-button @click="showBatchSheet(editingPaper)">按班级批量生成（一人一张）</el-button>
+              <el-button type="warning" @click="showExamNumbers(editingPaper)">生成考号</el-button>
             </div>
           </el-tab-pane>
         </el-tabs>
@@ -220,11 +227,66 @@
         </el-form-item>
       </el-form>
       <p style="color:#909399;font-size:12px;margin:0 0 8px">
-        生成一人一张、带学号条码的答题卡页面，打印后按人分发。
+        生成一人一张、带学号条码的答题卡页面，打印后按人分发。<br>
+        速印机（一体机）请改用「预览答题卡」打印<b>通用答题卡</b>：全班同一版。
       </p>
       <template #footer>
         <el-button @click="batchVisible = false">取消</el-button>
         <el-button type="primary" :disabled="!batchClassId" @click="openBatchSheet">生成并打开</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 生成考号（供通用答题卡填涂） -->
+    <el-dialog v-model="examNoVisible" title="生成考号（供通用答题卡填涂）" width="620px" top="6vh">
+      <el-form label-width="110px">
+        <el-form-item label="班级">
+          <el-select v-model="examNoForm.classId" placeholder="选择班级" style="width:200px">
+            <el-option v-for="c in classes" :key="c.id" :label="c.name" :value="c.id!" />
+          </el-select>
+          <span style="font-size:11px;color:#909399;margin-left:8px">按学号/姓名排序后依次编号</span>
+        </el-form-item>
+        <el-form-item label="考号位数">
+          <el-input-number v-model="examNoForm.digits" :min="4" :max="12" />
+          <span style="font-size:11px;color:#909399;margin-left:8px">与答题卡考号区列数一致，默认 8 位</span>
+        </el-form-item>
+        <el-form-item label="前缀">
+          <el-input v-model="examNoForm.prefix" placeholder="可空，如年级/学校代码 2026" style="width:200px" />
+        </el-form-item>
+        <el-form-item label="起始序号">
+          <el-input-number v-model="examNoForm.start" :min="1" />
+        </el-form-item>
+        <el-form-item label="覆盖已有考号">
+          <el-switch v-model="examNoForm.overwrite" />
+          <span style="font-size:11px;color:#909399;margin-left:8px">
+            默认关闭：只给没有考号的学生编号，不影响已印好的答题卡
+          </span>
+        </el-form-item>
+      </el-form>
+
+      <el-alert type="warning" :closable="false" show-icon style="margin-bottom:10px">
+        <template #title>考号写入学生的「学号」字段，答题卡识别时按此匹配</template>
+        <div style="font-size:12px">生成后请打印考号表（张贴或下发），学生据此在自己的通用答题卡上填涂。</div>
+      </el-alert>
+
+      <el-table v-if="examNoResult" :data="examNoResult.rows" size="small" max-height="240" border>
+        <el-table-column type="index" label="#" width="50" />
+        <el-table-column prop="name" label="姓名" />
+        <el-table-column prop="no" label="考号" width="140" />
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag v-if="row.changed" type="success" size="small">新生成</el-tag>
+            <el-tag v-else type="info" size="small">保留原号</el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <template #footer>
+        <el-button @click="examNoVisible = false">关闭</el-button>
+        <el-button :loading="examNoSaving" @click="previewExamNumbers">预览编号</el-button>
+        <el-button type="primary" :loading="examNoSaving" :disabled="!examNoForm.classId" @click="doGenerateExamNumbers">
+          生成考号
+        </el-button>
+        <el-button type="success" :disabled="!examNoForm.classId" @click="openRoster">打印考号表</el-button>
       </template>
     </el-dialog>
 
@@ -386,8 +448,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue'
-import { ElMessage } from 'element-plus'
-import { examApi, classApi, studentApi, type ClassRow, type StudentRow } from '@/api/client'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { examApi, classApi, studentApi, type ClassRow, type StudentRow, type ExamNumberResult } from '@/api/client'
 
 const loading = ref(false)
 const papers = ref<any[]>([])
@@ -399,12 +461,31 @@ const editingPaper = ref<any>(null)
 const questions = ref<any[]>([])
 const totalScore = computed(() => questions.value.reduce((s,q)=>s+(q.score||0),0))
 
-// 答题卡配置
+// 答题卡配置（真正传给渲染接口，见 sheetQuery）
+const paperOptions = [
+  { label: 'A4（210×297，普通打印机）', value: 'A4' },
+  { label: '8K 8开（260×370，速印机常用）', value: '8K' },
+  { label: 'B4（250×353）', value: 'B4' },
+  { label: '16K 16开（185×260，小测验）', value: '16K' },
+  { label: 'A3（297×420）', value: 'A3' },
+]
 const sheetConfig = ref({
   paperTitle: '', subject: '', idAreaType: 'bubble',
-  hasSealLine: false, hasNotes: true, hasAB: false, isRed: false,
-  verticalObj: false, partitioned: false, pageSize: 'A4', columns: 2,
+  hasNotes: true, paperSize: 'A4',
 })
+
+/** 答题卡渲染参数（预览 / 下载 / 批量 共用） */
+const sheetQuery = computed(() => ({
+  paper: sheetConfig.value.paperSize,
+  idArea: sheetConfig.value.idAreaType as 'bubble' | 'handwrite' | 'none',
+  notes: sheetConfig.value.hasNotes,
+}))
+
+// 考号生成
+const examNoVisible = ref(false)
+const examNoSaving = ref(false)
+const examNoForm = ref({ classId: '', digits: 8, prefix: '', start: 1, overwrite: false })
+const examNoResult = ref<ExamNumberResult | null>(null)
 
 // 预览
 const previewVisible = ref(false)
@@ -464,7 +545,7 @@ async function loadPapers() {
 function showCreate() {
   editingPaper.value = { title: '', subject: '', classId: '', isTemplate: false }
   questions.value = []
-  sheetConfig.value = { paperTitle:'', subject:'', idAreaType:'bubble', hasSealLine:false, hasNotes:true, hasAB:false, isRed:false, verticalObj:false, partitioned:false, pageSize:'A4', columns:2 }
+  sheetConfig.value = { paperTitle:'', subject:'', idAreaType:'bubble', hasNotes:true, paperSize:'A4' }
   activeTab.value = 'info'
 }
 
@@ -546,13 +627,14 @@ async function deletePaper(id: string) {
 
 function previewSheet(row: any) {
   currentPreviewPaper.value = row
-  previewUrl.value = examApi.sheetUrl(row.id)
+  previewUrl.value = examApi.sheetUrl(row.id, sheetQuery.value)
   previewVisible.value = true
 }
 
 function downloadSheet(row: any) {
-  window.open(examApi.sheetUrl(row.id), '_blank')
-  ElMessage.info('已在新窗口打开答题卡，使用 Ctrl+P 打印或另存为 PDF')
+  if (!row?.id) return
+  window.open(examApi.sheetUrl(row.id, sheetQuery.value), '_blank')
+  ElMessage.info('已在新窗口打开通用答题卡；速印机请选「实际大小 100%」并关闭页眉页脚后打印')
 }
 
 function printSheet() {
@@ -568,9 +650,74 @@ function showBatchSheet(row: any) {
 }
 function openBatchSheet() {
   if (!currentPreviewPaper.value?.id || !batchClassId.value) return
-  window.open(examApi.batchSheetUrl(currentPreviewPaper.value.id, batchClassId.value), '_blank')
+  window.open(examApi.batchSheetUrl(currentPreviewPaper.value.id, batchClassId.value, sheetQuery.value), '_blank')
   batchVisible.value = false
   ElMessage.info('批量答题卡已生成（一人一张带学号条码），Ctrl+P 即可打印')
+}
+
+// ── 考号生成（通用答题卡配套） ──
+function showExamNumbers(row: any) {
+  examNoForm.value = {
+    classId: row?.classId || '',
+    digits: 8,
+    prefix: '',
+    start: 1,
+    overwrite: false,
+  }
+  examNoResult.value = null
+  examNoVisible.value = true
+}
+
+function examNoPayload(apply: boolean) {
+  return {
+    classId: examNoForm.value.classId,
+    digits: examNoForm.value.digits,
+    prefix: examNoForm.value.prefix.trim(),
+    start: examNoForm.value.start,
+    // 预览不写库：用 overwrite=true 计算编号，但仅对无号学生展示
+    overwrite: apply ? examNoForm.value.overwrite : false,
+  }
+}
+
+/** 预览编号（不写库；有号的按原号显示） */
+async function previewExamNumbers() {
+  if (!examNoForm.value.classId) return
+  examNoSaving.value = true
+  try {
+    const r = await studentApi.generateExamNumbers(examNoPayload(false))
+    examNoResult.value = { ...r, rows: r.rows.map(x => ({ ...x, no: x.no ?? '（待编号）' })) } as ExamNumberResult
+    ElMessage.info(`预览：共 ${r.total} 人，${r.skipped} 人已有考号（预览未写库）`)
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || '预览失败')
+  } finally { examNoSaving.value = false }
+}
+
+/** 正式生成（写库） */
+async function doGenerateExamNumbers() {
+  if (!examNoForm.value.classId) return
+  const overwrite = examNoForm.value.overwrite
+  try {
+    await ElMessageBox.confirm(
+      overwrite
+        ? '将覆盖该班级所有学生已有的考号（写入学号字段），确定继续？'
+        : '将为没有考号的学生生成考号（写入学号字段），已有考号的学生保持不变，确定继续？',
+      '生成考号', { type: 'warning' })
+  } catch { return }
+
+  examNoSaving.value = true
+  try {
+    const r = await studentApi.generateExamNumbers(examNoPayload(true))
+    examNoResult.value = r
+    ElMessage.success(`已生成：新编号 ${r.changed} 人，保留原号 ${r.skipped} 人`)
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || '生成失败')
+  } finally { examNoSaving.value = false }
+}
+
+/** 打印考号表（张贴或下发，学生据此填涂通用答题卡） */
+function openRoster() {
+  if (!examNoForm.value.classId) return
+  window.open(examApi.rosterUrl(examNoForm.value.classId, { paper: sheetConfig.value.paperSize }), '_blank')
 }
 
 // ── 题库复用 ──

@@ -82,3 +82,6 @@ v4/tools/AgoraIn.LicenseTool/license_public_key.xml
 *.jks
 v4/src/AgoraIn.Mobile/signing/credentials.txt
 v4/src/AgoraIn.Mobile/signing/linux-release-private.pem
+
+# 服务端内嵌的 Web 管理面板产物（由 WebAdmin dist 复制而来，CI 会自行注入）
+v4/src/AgoraIn.Server/wwwroot/
