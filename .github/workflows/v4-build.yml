@@ -382,6 +382,5 @@ jobs:
             | Linux 服务端 | `AgoraIn-Server-linux-x64.zip` |
             | macOS 服务端 | `AgoraIn-Server-osx-arm64.zip` |
             | Android | `AgoraIn-Android.apk`（配置了签名 Secrets 时为正式签名，否则为调试签名，仅供测试） |
-            | iOS | `AgoraIn-iOS-simulator.zip`（仅模拟器，真机需签名） |
 
             > 客户端统一连接 `https://agorain.615mc.cn`（服务器地址已锁定，不可配置）。
