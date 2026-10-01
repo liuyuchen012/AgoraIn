@@ -287,11 +287,13 @@ jobs:
 
       - name: 发布 APK
         run: |
+          # 注意属性名：.NET Android SDK 读的是 AndroidSigningStorePass / AndroidSigningKeyPass
+          # （短名），写成 ...StorePassword / ...KeyPassword 会被忽略并报 XA4314「$(AndroidSigningKeyPass)为空」
           dotnet publish v4/src/AgoraIn.Mobile/AgoraIn.Mobile.csproj \
             -f net10.0-android -c Release -r android-arm64 --no-restore \
             -p:AndroidPackageFormat=apk \
-            -p:AndroidSigningStorePassword="$KEYSTORE_PASS" \
-            -p:AndroidSigningKeyPassword="$KEYSTORE_PASS" \
+            -p:AndroidSigningStorePass="$KEYSTORE_PASS" \
+            -p:AndroidSigningKeyPass="$KEYSTORE_PASS" \
             -p:DebugType=none -p:DebugSymbols=false \
             -o publish/android
 

@@ -55,8 +55,8 @@
 	</ItemGroup>
 
 	<!-- Release 签名：密码不写入本文件，构建时通过
-	     -p:AndroidSigningStorePassword / -p:AndroidSigningKeyPassword 传入
-	     （或环境变量，CI 用 GitHub Secrets）；凭据见 signing/credentials.txt（已 gitignore）。
+	     -p:AndroidSigningStorePass / -p:AndroidSigningKeyPass 传入（短名！SDK 读的是这两个，
+	     写成 ...StorePassword / ...KeyPassword 会被忽略并报 XA4314）；凭据见 signing/credentials.txt（已 gitignore）。
 
 	     条件 Exists(...)：正式证书 *.keystore 已 gitignore（公开仓库不能放签名私钥），
 	     CI 上没有该文件。若无条件设 AndroidKeyStore=true，缺少证书会直接
