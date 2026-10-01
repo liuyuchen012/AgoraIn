@@ -144,10 +144,11 @@ public static class AnswerSheetRenderer
   .answer-body { height: var(--h, 30mm); }
   .answer-lines { background-image: repeating-linear-gradient(transparent, transparent 7mm, #ccc 7mm, #ccc 7.2mm); }
 
-  /* ── 页脚：绝对定位在本页容器内（每页各一份） ── */
+  /* ── 页脚：绝对定位在本页容器内（每页各一份）──
+     左右内边距 10mm：避开四角定位标记（占角部 2-8mm 区域），QR 与文字不被遮挡 */
   .footer { position: absolute; bottom: 0; left: 0; right: 0; height: 22mm;
             display: flex; justify-content: space-between; align-items: center;
-            font-size: 8pt; color: #444; border-top: 0.3mm solid #999; padding: 2mm 0 0; }
+            font-size: 8pt; color: #444; border-top: 0.3mm solid #999; padding: 2mm 10mm 0; }
   .qr { width: 18mm; height: 18mm; border: 0.3mm solid #000; display: flex;
         align-items: center; justify-content: center; font-size: 6pt; text-align: center; }
   .barcode { height: 12mm; width: 45mm; border: 0.3mm solid #000; display: flex;
