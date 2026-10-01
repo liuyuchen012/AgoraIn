@@ -224,7 +224,7 @@ public partial class GradingPage : ContentPage
     }
 
     /// <summary>答题卡扫描原图卡片（没有原图时返回 null，界面不出现空块）。</summary>
-    private static async Task<View?> BuildSheetImageCardAsync(SubmissionItem submission)
+    private async Task<View?> BuildSheetImageCardAsync(SubmissionItem submission)
     {
         var source = await App.Api.GetSubmissionImageAsync(submission.Id);
         if (source == null) return null;
@@ -263,7 +263,7 @@ public partial class GradingPage : ContentPage
     }
 
     /// <summary>全屏查看原图：双指缩放 + 旋转 + 放大缩小按钮（课堂改卷常要看小字）。</summary>
-    private static async Task ShowFullImageAsync(ImageSource source, string title)
+    private async Task ShowFullImageAsync(ImageSource source, string title)
     {
         var image = new Image
         {
