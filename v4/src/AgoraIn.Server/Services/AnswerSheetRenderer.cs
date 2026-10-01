@@ -6,23 +6,29 @@ namespace AgoraIn.Server.Services;
 
 /// <summary>
 /// 答题卡渲染器：按试卷生成 A4 可打印 HTML（<c>@media print</c>）。
+///
+/// **服务端分页**：每张物理打印页 = 一个固定高度（<see cref="PageHeightMm"/>）的 .page 容器，
+/// 页容量在服务端精确计算后切分题目，因此每一页都自带四角定位标记与页码二维码，
+/// 不依赖浏览器的 position:fixed 重复渲染（浏览器页眉页脚为浏览器控制，网页无法注入内容）。
+///
 /// 版面要素（规格 6.8）：
 ///   · 页面四角定位标记（拍照透视校正）
 ///   · 学生信息区（姓名手写 + 考号涂卡区 + 可选条码）
-///   · 客观题涂卡区（标准 OMR 间距气泡）
+///   · 客观题涂卡区（标准 OMR 方块，3 列）
 ///   · 主观题作答区（题号 + 边界框，用于切分）
-///   · 页脚二维码占位（试卷 ID + 页码）
+///   · 页脚二维码（试卷 ID + 页码）
 /// </summary>
 public static class AnswerSheetRenderer
 {
-    /// <summary>生成答题卡 HTML。</summary>
-    /// <param name="paper">试卷。</param>
-    /// <param name="questions">题目（按 Index 排序）。</param>
-    /// <param name="options">每题选项（客观题为选项列表，主观题为空）。</param>
-    /// <param name="studentName">指定学生时生成带姓名/条码的专属卡；null 生成通用空白卡。</param>
-    /// <param name="studentNo">学号（用于条码）。</param>
-    /// <param name="pageIndex">页码（1 起）。</param>
-    /// <param name="pageCount">总页数。</param>
+    // ── 版面容量常量（mm），用于服务端分页 ──
+    private const double PageHeightMm = 277.0;   // A4 内容区高度（297 - 上下 10mm 页边距）
+    private const double FooterReserveMm = 24.0; // 页脚（QR + 说明）保留区
+    private const double HeaderBlockMm = 48.0;   // 首页标题 + 学生信息区
+    private const double SectionTitleMm = 10.0;  // 区块标题
+    private const double ObjItemHeightMm = 5.6;  // 单个客观题项（4mm 框 + 1.6mm 间距）
+    private const double ObjColumns = 3;         // 客观题列数
+
+    /// <summary>生成答题卡 HTML（自动服务端分页，每页独立定位标记与页码 QR）。</summary>
     public static string Render(
         ExamPaper paper,
         IReadOnlyList<Question> questions,
@@ -32,10 +38,55 @@ public static class AnswerSheetRenderer
         int pageIndex = 1,
         int pageCount = 1)
     {
-        var sb = new StringBuilder();
         var objective = questions.Where(q => IsObjective(q.Type)).ToList();
         var subjective = questions.Where(q => !IsObjective(q.Type)).ToList();
 
+        // ── 服务端分页：把题目切成若干页，每页内容保证不溢出 ──
+        var pages = new List<(string Html, bool HasHeader)>();
+
+        // 1) 客观题分页（3 列布局）
+        var objIdx = 0;
+        var firstPage = true;
+        while (objIdx < objective.Count)
+        {
+            var avail = PageHeightMm - FooterReserveMm - SectionTitleMm - (firstPage ? HeaderBlockMm : 0);
+            var rows = Math.Max(1, (int)Math.Floor(avail / ObjItemHeightMm));
+            var take = Math.Min(objective.Count - objIdx, rows * (int)ObjColumns);
+            var chunk = objective.Skip(objIdx).Take(take).ToList();
+            objIdx += take;
+            pages.Add((BuildObjectiveSection(chunk, options), firstPage));
+            firstPage = false;
+        }
+
+        // 2) 主观题分页（按作答框高度累计）
+        var subIdx = 0;
+        while (subIdx < subjective.Count)
+        {
+            var avail = PageHeightMm - FooterReserveMm - SectionTitleMm - (firstPage ? HeaderBlockMm : 0);
+            var chunk = new List<Question>();
+            double used = 0;
+            while (subIdx < subjective.Count)
+            {
+                var h = SubjectiveHeightMm(subjective[subIdx]);
+                if (chunk.Count > 0 && used + h > avail) break;
+                chunk.Add(subjective[subIdx]);
+                used += h;
+                subIdx++;
+            }
+            pages.Add((BuildSubjectiveSection(chunk), firstPage));
+            firstPage = false;
+        }
+
+        // 3) 无题兜底：至少生成一页（含空客观题区）
+        if (pages.Count == 0)
+        {
+            pages.Add((BuildObjectiveSection([], options), true));
+        }
+
+        var totalPages = pages.Count;
+
+        // ── 组装 HTML ──
+        var sb = new StringBuilder();
         sb.Append($$"""
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -43,43 +94,43 @@ public static class AnswerSheetRenderer
 <meta charset="utf-8">
 <title>{{Escape(paper.Title)}} - 答题卡</title>
 <style>
-  @page { size: A4; margin: 10mm; margin-bottom: 20mm; }
+  @page { size: A4; margin: 10mm; }
   * { box-sizing: border-box; }
   body { font-family: "SimSun", "Songti SC", serif; margin: 0; color: #000; }
 
-  /* ── 四角定位标记（黑色实心方块，用于透视校正）──
-     position: fixed 在打印时每页重复绘制——多页答题卡每一页都有完整四角标记；
-     标记本身不含页码信息，每页相同即可满足透视校正 */
-  .anchor { position: absolute; width: 6mm; height: 6mm; background: #000; }
-  .anchor.tl { top: 4mm; left: 4mm; }
-  .anchor.tr { top: 4mm; right: 4mm; }
-  .anchor.bl { bottom: 4mm; left: 4mm; }
-  .anchor.br { bottom: 4mm; right: 4mm; }
+  /* ── 物理页容器：高度固定为 A4 内容区，一容器 = 一张打印页；overflow:hidden 防溢出串页 ── */
+  .page { position: relative; width: 190mm; height: 277mm; overflow: hidden;
+          page-break-after: always; }
+  .page:last-child { page-break-after: auto; }
 
-  .sheet { width: 190mm; padding: 10mm; }
-  .page { position: relative; min-height: 267mm; padding: 10mm 0; }
-  .page + .page { page-break-before: always; }
+  /* ── 四角定位标记（每页各自一份，absolute 相对本页，绝不越页） ── */
+  .anchor { position: absolute; width: 6mm; height: 6mm; background: #000; z-index: 2; }
+  .anchor.tl { top: 2mm; left: 2mm; }
+  .anchor.tr { top: 2mm; right: 2mm; }
+  .anchor.bl { bottom: 2mm; left: 2mm; }
+  .anchor.br { bottom: 2mm; right: 2mm; }
+
+  /* ── 内容区：底部留出页脚高度 ── */
+  .content { padding: 6mm 0 0; height: calc(277mm - 24mm); overflow: hidden; }
 
   .title { text-align: center; font-size: 16pt; font-weight: bold; margin-bottom: 2mm; }
   .subtitle { text-align: center; font-size: 10pt; color: #333; margin-bottom: 4mm; }
 
   /* ── 学生信息区 ── */
-  .info { border: 0.4mm solid #000; padding: 3mm; margin-bottom: 4mm; display: flex; gap: 4mm;
-          break-inside: avoid; page-break-inside: avoid; }
+  .info { border: 0.4mm solid #000; padding: 3mm; margin-bottom: 4mm; display: flex; gap: 4mm; }
   .info-left { flex: 1; font-size: 10pt; line-height: 8mm; }
   .info-right { width: 70mm; }
   .write-line { border-bottom: 0.3mm solid #666; display: inline-block; min-width: 30mm; }
 
-  /* ── 考号涂卡区（OMR 气泡，0-9 十行） ── */
+  /* ── 考号涂卡区（标准 OMR 方块） ── */
   .id-grid { display: flex; gap: 1.5mm; }
   .id-col { text-align: center; }
   .id-col .col-label { font-size: 7pt; margin-bottom: 0.5mm; }
   .bubble { width: 6mm; height: 4mm; border: 0.3mm solid #000; margin: 0.4mm auto; }
 
-  /* ── 客观题涂卡区 ── */
-  .section-title { font-size: 11pt; font-weight: bold; margin: 3mm 0 2mm; border-left: 1mm solid #000; padding-left: 2mm;
-                   break-after: avoid; page-break-after: avoid; }
-  .omr-grid { column-count: 3; column-gap: 4mm; }
+  /* ── 客观题涂卡区（3 列） ── */
+  .section-title { font-size: 11pt; font-weight: bold; margin: 2mm 0 2mm; border-left: 1mm solid #000; padding-left: 2mm; }
+  .omr-grid { column-count: {{ObjColumns}}; column-gap: 4mm; }
   .omr-item { break-inside: avoid; margin-bottom: 1.6mm; font-size: 9pt; }
   .omr-row { display: flex; align-items: center; gap: 1mm; }
   .omr-no { width: 7mm; text-align: right; font-weight: bold; }
@@ -87,22 +138,16 @@ public static class AnswerSheetRenderer
   .omr-opt { width: 6mm; height: 4mm; border: 0.3mm solid #000;
              font-size: 7pt; text-align: center; line-height: 4mm; }
 
-  /* ── 主观题作答区（边界框供切分）──
-     break-inside: avoid 防止作答框被打印分页拦腰切开 */
-  .answer-box { border: 0.4mm solid #000; margin-bottom: 3mm;
-                break-inside: avoid; page-break-inside: avoid; }
+  /* ── 主观题作答区 ── */
+  .answer-box { border: 0.4mm solid #000; margin-bottom: 3mm; break-inside: avoid; page-break-inside: avoid; }
   .answer-head { font-size: 9pt; padding: 1mm 2mm; border-bottom: 0.3mm dashed #888; }
   .answer-body { height: var(--h, 30mm); }
   .answer-lines { background-image: repeating-linear-gradient(transparent, transparent 7mm, #ccc 7mm, #ccc 7.2mm); }
 
-  /* ── 页脚（fixed：多页打印时每页重复，QR 为整卷标识） ── */
-  .footer { position: absolute; bottom: 0; left: 0; right: 0; padding: 0 10mm;
+  /* ── 页脚：绝对定位在本页容器内（每页各一份） ── */
+  .footer { position: absolute; bottom: 0; left: 0; right: 0; height: 22mm;
             display: flex; justify-content: space-between; align-items: center;
-            font-size: 8pt; color: #444; border-top: 0.3mm solid #999; padding-top: 2mm; }
-  /* 固定位置 QR 标识：position:fixed 在打印时每页重复；放在 @page 右下角 margin 区域，不遮挡题目 */
-  .qr-badge { position: fixed; bottom: 4mm; right: 4mm; width: 16mm; height: 16mm;
-    border: 0.3mm solid #000; display: flex; align-items: center; justify-content: center;
-    font-size: 5pt; text-align: center; z-index: 1; background: white; }
+            font-size: 8pt; color: #444; border-top: 0.3mm solid #999; padding: 2mm 0 0; }
   .qr { width: 18mm; height: 18mm; border: 0.3mm solid #000; display: flex;
         align-items: center; justify-content: center; font-size: 6pt; text-align: center; }
   .barcode { height: 12mm; width: 45mm; border: 0.3mm solid #000; display: flex;
@@ -110,55 +155,67 @@ public static class AnswerSheetRenderer
 </style>
 </head>
 <body>
-<div class="sheet">
-  <!-- 第一页：学生信息 + 考号 + 客观题 -->
-  <div class="page">
-    <div class="anchor tl"></div><div class="anchor tr"></div>
-    <div class="anchor bl"></div><div class="anchor br"></div>
-
-    <div class="title">{{Escape(paper.Title)}}</div>
-  <div class="subtitle">
-    科目：{{Escape(paper.Subject ?? "—")}}　总分：{{paper.TotalScore:0.#}}　
-    第 {{pageIndex}} / {{pageCount}} 页
-  </div>
-
-  <!-- ═══ 学生信息区 ═══ -->
-  <div class="info">
-    <div class="info-left">
-      班级：<span class="write-line" style="min-width:40mm"></span><br>
-      姓名：<span class="write-line" style="min-width:40mm">{{Escape(studentName ?? "")}}</span><br>
-      学号：<span class="write-line" style="min-width:40mm">{{Escape(studentNo ?? "")}}</span>
-    </div>
-    <div class="info-right">
-      <div style="font-size:8pt;margin-bottom:1mm">考号填涂区（每列涂一个数字）</div>
-      <div class="id-grid">
-        {{BuildIdBubbles()}}
-      </div>
-    </div>
-  </div>
-
-  {{(objective.Count > 0 ? BuildObjectiveSection(objective, options) : "")}}
-
-    <div class="footer">
-      <div><span style="font-size:7pt">请用 2B 铅笔填涂，保持卡面整洁</span></div>
-      {{(string.IsNullOrEmpty(studentNo) ? "" : $"<div class=\"barcode\">{Escape(studentNo)}</div>")}}
-      <div class="qr">{{BuildQrCode(paper.Id, 1)}}</div>
-    </div>
-  </div>
-
-  <!-- 主观题页（page-break-before自动另起一页） -->
-  {{(subjective.Count > 0 ? BuildSubjectivePage(subjective, paper, studentNo, 2) : "")}}
-
-    <div>
-</div>
-</body>
-</html>
 """);
+
+        for (var i = 0; i < totalPages; i++)
+        {
+            var (content, hasHeader) = pages[i];
+            var pageNo = i + 1;
+            sb.Append("<div class=\"page\">");
+            sb.Append("<div class=\"anchor tl\"></div><div class=\"anchor tr\"></div>");
+            sb.Append("<div class=\"anchor bl\"></div><div class=\"anchor br\"></div>");
+            sb.Append("<div class=\"content\">");
+
+            if (hasHeader)
+            {
+                sb.Append($"<div class=\"title\">{Escape(paper.Title)}</div>");
+                sb.Append($"<div class=\"subtitle\">科目：{Escape(paper.Subject ?? "—")}　总分：{paper.TotalScore:0.#}　第 {pageNo} / {totalPages} 页</div>");
+                sb.Append("""
+<div class="info">
+  <div class="info-left">
+    班级：<span class="write-line" style="min-width:40mm"></span><br>
+    姓名：<span class="write-line" style="min-width:40mm">
+""");
+                sb.Append(Escape(studentName ?? ""));
+                sb.Append("</span><br>学号：<span class=\"write-line\" style=\"min-width:40mm\">");
+                sb.Append(Escape(studentNo ?? ""));
+                sb.Append("</span></div><div class=\"info-right\">");
+                sb.Append("<div style=\"font-size:8pt;margin-bottom:1mm\">考号填涂区（每列涂一个数字）</div>");
+                sb.Append($"<div class=\"id-grid\">{BuildIdBubbles()}</div></div></div>");
+            }
+            else
+            {
+                sb.Append($"<div class=\"subtitle\" style=\"margin-bottom:2mm\">第 {pageNo} / {totalPages} 页</div>");
+            }
+
+            sb.Append(content);
+            sb.Append("</div>"); // .content
+
+            // 页脚：本页独立的页码 QR + 学号条码
+            sb.Append("<div class=\"footer\">");
+            sb.Append($"<div><span style=\"font-size:7pt\">试卷编号：{Escape(paper.Id)}　请用 2B 铅笔填涂，保持卡面整洁</span></div>");
+            sb.Append(string.IsNullOrEmpty(studentNo) ? "" : $"<div class=\"barcode\">{Escape(studentNo)}</div>");
+            sb.Append($"<div class=\"qr\">{BuildQrCode(paper.Id, pageNo)}</div>");
+            sb.Append("</div>");
+
+            sb.Append("</div>"); // .page
+        }
+
+        sb.Append("</body>\n</html>");
         return sb.ToString();
     }
 
     private static bool IsObjective(QuestionType t)
         => t is QuestionType.SingleChoice or QuestionType.MultipleChoice or QuestionType.Judge;
+
+    /// <summary>主观题作答框高度（mm，含间距），用于分页累计。</summary>
+    private static double SubjectiveHeightMm(Question q) => q.Type switch
+    {
+        QuestionType.Blank => 21.0,       // 18mm 框 + 3mm 间距
+        QuestionType.ShortAnswer => 38.0, // 35 + 3
+        QuestionType.Essay => 73.0,       // 70 + 3
+        _ => 33.0,
+    };
 
     /// <summary>考号涂卡区：8 列 × 10 行（0-9）。</summary>
     private static string BuildIdBubbles()
@@ -177,11 +234,16 @@ public static class AnswerSheetRenderer
         return sb.ToString();
     }
 
-    /// <summary>客观题区：每题一行题号 + 选项气泡。</summary>
+    /// <summary>客观题区：每题一行题号 + 选项方块。</summary>
     private static string BuildObjectiveSection(IReadOnlyList<Question> questions, IReadOnlyDictionary<string, List<string>> options)
     {
         var sb = new StringBuilder();
         sb.Append("<div class=\"section-title\">一、客观题（请填涂所选选项）</div>");
+        if (questions.Count == 0)
+        {
+            sb.Append("<div style=\"font-size:9pt;color:#666\">（无客观题）</div>");
+            return sb.ToString();
+        }
         sb.Append("<div class=\"omr-grid\">");
 
         foreach (var q in questions)
@@ -201,7 +263,6 @@ public static class AnswerSheetRenderer
                 continue;
             }
 
-            // 选项键：优先用题目 OptionsJson 里配置的，否则默认 A-D
             var keys = options.TryGetValue(q.Id, out var list) && list.Count > 0
                 ? list
                 : ["A", "B", "C", "D"];
@@ -219,21 +280,6 @@ public static class AnswerSheetRenderer
             sb.Append("</div></div></div>");
         }
 
-        sb.Append("</div>");
-        return sb.ToString();
-    }
-
-    /// <summary>主观题独立页：.page 容器，自带四角标记 + 页码 QR + 学号条码。</summary>
-    private static string BuildSubjectivePage(IReadOnlyList<Question> questions, ExamPaper paper, string? studentNo, int pageIdx)
-    {
-        var sb = new StringBuilder();
-        sb.Append("<div class=\"page\" style=\"page-break-before:always\">");
-        sb.Append("<div class=\"anchor tl\"></div><div class=\"anchor tr\"></div>");
-        sb.Append("<div class=\"anchor bl\"></div><div class=\"anchor br\"></div>");
-        sb.Append(BuildSubjectiveSection(questions));
-        sb.Append("<div class=\"footer\"><div><span style=\"font-size:7pt\">主观题作答区</span></div>");
-        sb.Append(string.IsNullOrEmpty(studentNo) ? "" : $"<div class=\"barcode\">{Escape(studentNo)}</div>");
-        sb.Append($"<div class=\"qr\">{BuildQrCode(paper.Id, pageIdx)}</div></div>");
         sb.Append("</div>");
         return sb.ToString();
     }
