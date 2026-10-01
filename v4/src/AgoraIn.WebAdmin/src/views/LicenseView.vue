@@ -70,11 +70,11 @@
       <el-alert v-if="state.warning" :title="state.warning" type="warning" show-icon :closable="false" style="margin-top:16px" />
     </el-card>
 
-    <el-card shadow="never" class="page-card">
+    <el-card v-if="auth.isManager" shadow="never" class="page-card">
       <template #header>
         <span class="card-title">输入激活码</span>
       </template>
-      <p class="hint">将激活码粘贴到下方，点击「激活」完成授权。激活码格式：<code>AGRN-xxxxx-xxxxx-…</code></p>
+      <p class="hint">将服务器激活码粘贴到下方，点击「激活」完成服务器整体授权。激活码格式：<code>AGRN-xxxxx-xxxxx-…</code>（区域租户请勿使用此栏——租户激活码在上方"激活区域"处输入）</p>
 
       <el-input v-model="activationCode" type="textarea" :rows="3" placeholder="请粘贴完整的激活码" style="max-width:600px" />
 
