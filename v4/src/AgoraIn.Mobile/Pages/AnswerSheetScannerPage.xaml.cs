@@ -1,4 +1,6 @@
 using System.Net.Http.Headers;
+using Microsoft.Maui.Graphics;
+using Microsoft.Maui.Graphics.Platform;
 
 namespace AgoraIn.Mobile.Pages;
 
@@ -79,14 +81,40 @@ public partial class AnswerSheetScannerPage : ContentPage
         await using var stream = await photo.OpenReadAsync();
         using var ms = new MemoryStream();
         await stream.CopyToAsync(ms);
-        _imageBytes = ms.ToArray();
+        var raw = ms.ToArray();
+        // 手机原图常 15-30MB，移动网络上传易超时/中断；识别也不需要原分辨率，长边压到 1600px
+        _imageBytes = await CompressAsync(raw);
 
         PreviewImage.Source = ImageSource.FromStream(() => new MemoryStream(_imageBytes));
         OnPropertyChanged(nameof(ShowPlaceholder));
 
         StatusLabel.Text = $"已选择：{photo.FileName}";
-        ResultLabel.Text = $"图片大小：{_imageBytes.Length / 1024} KB";
+        ResultLabel.Text = _imageBytes.Length < raw.Length
+            ? $"图片大小：{raw.Length / 1024} KB → {_imageBytes.Length / 1024} KB（已压缩）"
+            : $"图片大小：{_imageBytes.Length / 1024} KB";
         UploadButton.IsEnabled = true;
+    }
+
+    /// <summary>长边压缩到 <paramref name="maxEdge"/> 像素的 JPEG；失败时原样返回，不阻断上传。</summary>
+    private static async Task<byte[]> CompressAsync(byte[] raw, int maxEdge = 1600, float quality = 0.82f)
+    {
+        try
+        {
+            using var input = new MemoryStream(raw);
+            using var image = PlatformImage.FromStream(input);
+            if (image == null) return raw;
+            if (Math.Max(image.Width, image.Height) <= maxEdge) return raw;
+
+            using var resized = image.Downsize(maxEdge);
+            using var output = new MemoryStream();
+            await resized.SaveAsync(output, ImageFormat.Jpeg, quality);
+            var bytes = output.ToArray();
+            return bytes.Length > 0 && bytes.Length < raw.Length ? bytes : raw;
+        }
+        catch
+        {
+            return raw;
+        }
     }
 
     private async void OnUpload(object? sender, EventArgs e)
@@ -113,14 +141,21 @@ public partial class AnswerSheetScannerPage : ContentPage
 
             if (result != null)
             {
-                StatusLabel.Text = "✅ 识别完成";
+                StatusLabel.Text = result.Status switch
+                {
+                    "AiGraded" => "✅ 识别并自动判分完成",
+                    "NeedsHuman" => "⚠️ 已识别，待人工复核",
+                    _ => "✅ 识别完成",
+                };
                 var lines = new List<string>();
                 if (!string.IsNullOrEmpty(result.RecognizedStudent))
-                    lines.Add($"识别学生：{result.RecognizedStudent}");
-                if (result.Answers != null)
+                    lines.Add($"识别考号：{result.RecognizedStudent}");
+                if (result.Answers is { Count: > 0 })
                     lines.Add($"识别答案：{string.Join(", ", result.Answers)}");
+                else
+                    lines.Add("未识别到涂卡答案，请在电脑端手动批改");
                 if (result.Confidence.HasValue)
-                    lines.Add($"置信度：{result.Confidence:P0}");
+                    lines.Add($"置信度：{result.Confidence.Value:P0}");
                 ResultLabel.Text = string.Join("\n", lines);
             }
             else
@@ -153,6 +188,7 @@ public partial class AnswerSheetScannerPage : ContentPage
     private class SubmissionResult
     {
         public string? SubmissionId { get; set; }
+        public string? Status { get; set; }
         public string? RecognizedStudent { get; set; }
         public List<string>? Answers { get; set; }
         public double? Confidence { get; set; }

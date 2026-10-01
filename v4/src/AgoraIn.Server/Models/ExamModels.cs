@@ -12,7 +12,8 @@ public sealed class OmrResult
     /// <summary>逐题识别结果。</summary>
     public List<OmrQuestionAnswer> Answers { get; set; } = new();
 
-    /// <summary>整体置信度（0~1）。</summary>
+    /// <summary>整体置信度（0~1）。模型回传的字段名是 confidence，需显式映射（否则恒为 0）。</summary>
+    [System.Text.Json.Serialization.JsonPropertyName("confidence")]
     public double OverallConfidence { get; set; }
 }
 

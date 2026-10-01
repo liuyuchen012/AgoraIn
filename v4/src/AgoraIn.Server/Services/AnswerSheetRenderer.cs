@@ -22,14 +22,16 @@ public static class AnswerSheetRenderer
 {
     // ── 版面容量常量（mm）─────────────────────────────────────────────
     // 这些常量必须与下方 CSS 中的显式高度严格一致；宁可留有余量，也不允许溢出
-    // （.page 与 .content 均为 overflow:hidden，一旦高估容量就会静默裁切末尾题目）。
-    private const double PageHeightMm = 277.0;   // A4 内容区高度（297 - 上下 10mm 页边距）
-    private const double ContentInsetMm = 26.0;  // .content 底部预留（页脚 22mm + 4mm 间隙）
-    private const double ContentPadTopMm = 6.0;  // .content 顶部内边距
-    private const double PageUsableMm = PageHeightMm - ContentInsetMm - ContentPadTopMm; // 245mm
+    // （.content 为 overflow:hidden，一旦高估容量就会静默裁切末尾题目）。
+    //
+    // 纸张几何（@page margin:0 + 页容器自带内边距）：
+    //   纸张 210×297mm；.page 210×289mm（留 8mm 余量，浏览器页盒略小时也不跨页漂移）
+    //   .page 内边距 14/14/16mm → 内容盒 182×259mm；页脚 18mm 贴在内容区底部
+    //   四角定位标记 6mm 见方、距纸边 7mm（避开打印机不可打印边距，且不被内容框压住）
+    private const double PageUsableMm = 241.0;   // .content 可用高度
     private const double SafetyMm = 6.0;         // 排版误差安全余量（字体度量/行高取整）
 
-    private const double HeaderBlockMm = 96.0;   // 首页：标题 + 副标题 + 信息区 + 考号区
+    private const double HeaderBlockMm = 92.0;   // 首页：标题 + 副标题 + 信息区 + 考号区
     private const int IdDigitRows = 10;          // 考号位数 0-9
     private const int IdDigitColumns = 8;        // 考号列数（8 位考号）
     private const double IdRowPitchMm = 4.0;     // 考号涂卡行距（3.6mm 框 + 0.4mm 间距）
@@ -137,24 +139,27 @@ public static class AnswerSheetRenderer
 <meta charset="utf-8">
 <title>{{Escape(paper.Title)}} - 答题卡</title>
 <style>
-  @page { size: A4; margin: 10mm; }
+  /* 纸张不交给浏览器算边距：@page margin:0 + 页容器自带内边距。
+     浏览器若按打印机硬件边距重算页盒（页盒变小），固定高度的页容器会跨页拆开，
+     表现为「第二页起内容整体下移」；页容器固定 289mm（比 A4 矮 8mm）后不再依赖页盒精度。 */
+  @page { size: A4; margin: 0; }
   * { box-sizing: border-box; }
   body { font-family: "SimSun", "Songti SC", serif; margin: 0; color: #000; }
 
-  /* ── 物理页容器：高度固定为 A4 内容区，一容器 = 一张打印页；overflow:hidden 防溢出串页 ── */
-  .page { position: relative; width: 190mm; height: 277mm; overflow: hidden;
-          page-break-after: always; break-after: page; }
+  /* ── 物理页容器：一容器 = 一张打印页；overflow:hidden 防溢出串页 ── */
+  .page { position: relative; width: 210mm; height: 289mm; padding: 14mm 14mm 16mm;
+          overflow: hidden; page-break-after: always; break-after: page; }
   .page:last-child { page-break-after: auto; break-after: auto; }
 
-  /* ── 四角定位标记（每页各自一份，absolute 相对本页，绝不越页） ── */
-  .anchor { position: absolute; width: 6mm; height: 6mm; background: #000; z-index: 2; }
-  .anchor.tl { top: 2mm; left: 2mm; }
-  .anchor.tr { top: 2mm; right: 2mm; }
-  .anchor.bl { bottom: 2mm; left: 2mm; }
-  .anchor.br { bottom: 2mm; right: 2mm; }
+  /* ── 四角定位标记：距纸边 7mm，避开打印机不可打印边距；每页各自一份，绝不越页 ── */
+  .anchor { position: absolute; width: 6mm; height: 6mm; background: #000; z-index: 3; }
+  .anchor.tl { top: 7mm; left: 7mm; }
+  .anchor.tr { top: 7mm; right: 7mm; }
+  .anchor.bl { bottom: 7mm; left: 7mm; }
+  .anchor.br { bottom: 7mm; right: 7mm; }
 
-  /* ── 内容区：底部留出页脚高度 ── */
-  .content { height: 251mm; padding: 6mm 0 0; overflow: hidden; }
+  /* ── 内容区（241mm）与页脚 ── */
+  .content { height: 241mm; overflow: hidden; }
 
   .title { font-size: 16pt; line-height: 1.2; text-align: center; font-weight: bold; margin: 0 0 2mm; }
   .subtitle { font-size: 10pt; line-height: 1.2; text-align: center; color: #333; margin: 0 0 4mm; }
@@ -206,12 +211,11 @@ public static class AnswerSheetRenderer
   .answer-body { height: var(--h, 30mm); }
   .answer-lines { background-image: repeating-linear-gradient(transparent, transparent 7mm, #ccc 7mm, #ccc 7.2mm); }
 
-  /* ── 页脚：绝对定位在本页容器内（每页各一份）──
-     左右内边距 10mm：避开四角定位标记（占角部 2-8mm 区域），QR 与文字不被遮挡 */
-  .footer { position: absolute; bottom: 0; left: 0; right: 0; height: 22mm;
+  /* ── 页脚：绝对定位在本页容器内（每页各一份），位于内容区底部，上方是题目、下方是定位标记 ── */
+  .footer { position: absolute; left: 14mm; right: 14mm; bottom: 16mm; height: 18mm;
             display: flex; justify-content: space-between; align-items: center;
-            font-size: 8pt; color: #444; border-top: 0.3mm solid #999; padding: 2mm 10mm 0; }
-  .qr { width: 18mm; height: 18mm; border: 0.3mm solid #000; display: flex;
+            font-size: 8pt; color: #444; border-top: 0.3mm solid #999; padding: 1mm 0 0; }
+  .qr { width: 16mm; height: 16mm; border: 0.3mm solid #000; display: flex;
         align-items: center; justify-content: center; font-size: 6pt; text-align: center; }
   .barcode { height: 12mm; width: 45mm; border: 0.3mm solid #000; display: flex;
              align-items: center; justify-content: center; font-size: 7pt; letter-spacing: 1mm; }

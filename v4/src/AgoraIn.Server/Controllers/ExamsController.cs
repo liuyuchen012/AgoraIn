@@ -646,6 +646,8 @@ public class ExamsController : ControllerBase
             .OrderBy(q => q.Index)
             .ToListAsync();
         var byIndex = questions.ToDictionary(q => q.Index);
+        // 卡面印刷的是「题号」= Index + 1；识别结果按卡面题号回传，故按题号索引（旧代码用 Index 会整体错位一题）
+        var byNo = questions.ToDictionary(q => q.Index + 1);
         var settings = await _aiSettings.LoadAsync();
         var lowestConfidence = 1.0;
         var autoScored = 0;
@@ -662,7 +664,9 @@ public class ExamsController : ControllerBase
 
             foreach (var ans in omrResult.Answers)
             {
-                if (!byIndex.TryGetValue(ans.Index, out var q)) continue;
+                // 兼容模型偶发返回 0 起编号：先按卡面题号取，取不到再按 0 起 Index 兜底
+                if (!byNo.TryGetValue(ans.Index, out var q)
+                    && !byIndex.TryGetValue(ans.Index, out q)) continue;
                 lowestConfidence = Math.Min(lowestConfidence, ans.Confidence);
 
                 if (IsObjective(q.Type) && q.AiGradingEnabled != false && !string.IsNullOrEmpty(q.StandardAnswer))
@@ -708,6 +712,11 @@ public class ExamsController : ControllerBase
                 : SubmissionStatus.AiGraded;
             submission.AiGradedAt = DateTime.Now;
         }
+        else if (omrResult != null && omrResult.Answers.Count == 0)
+        {
+            // 一道题都没识别出来（如卡面反光/未涂卡）：不要误判为「AI 已批 0 分」
+            submission.Status = SubmissionStatus.NeedsHuman;
+        }
 
         _db.AnswerSheetSubmissions.Add(submission);
         await _db.SaveChangesAsync();
@@ -718,6 +727,13 @@ public class ExamsController : ControllerBase
             status = submission.Status.ToString(),
             recognizedStudent = omrResult?.StudentRef,
             matchedStudentId = submission.StudentId,
+            // 移动端扫卡结果回显：题号:答案（卡面题号，1 起）
+            answers = omrResult?.Answers
+                .OrderBy(a => a.Index)
+                .Select(a => $"{a.Index}:{a.Answer}")
+                .ToList() ?? [],
+            confidence = omrResult?.OverallConfidence,
+
             autoScored,
         });
     }
@@ -1076,12 +1092,12 @@ public class ExamsController : ControllerBase
         => type is QuestionType.SingleChoice or QuestionType.MultipleChoice or QuestionType.Judge;
 
     /// <summary>客观题答案归一化：去空格、大写、多选题按字母排序后比较。</summary>
-    private static string NormalizeAnswer(string? answer)
-    {
-        if (string.IsNullOrWhiteSpace(answer)) return "";
-        var cleaned = new string(answer.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
-        return string.Concat(cleaned.OrderBy(c => c));
-    }
+    /// <summary>
+    /// 答案归一化：多选按字母排序（"ABD"），大小写不敏感。
+    /// 判断题必须特判——卡面选项印的是 √（U+221A）/ ×（U+00D7），题库里标准答案存的是 对 / 错，
+    /// 若按「只保留字母数字」处理，两者都会被清成空串而互相相等，导致所有判断题被判为答对。
+    /// </summary>
+    private static string NormalizeAnswer(string? answer) => AgoraIn.Core.Domain.AnswerNormalizer.Normalize(answer);
 
     private static void AppendHistory(QuestionResult? existing, double? score, string? comment, GradingSource source)
     {
