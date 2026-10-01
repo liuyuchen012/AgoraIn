@@ -210,12 +210,126 @@ public partial class GradingPage : ContentPage
         confirm.Clicked += async (_, _) => await ConfirmAsync();
         layout.Children.Add(confirm);
 
+        // 答题卡原图：人工复盘要对着学生原卷改分（点开可全屏放大查看）
+        var sheetCard = await BuildSheetImageCardAsync(submission);
+        if (sheetCard != null) layout.Children.Add(sheetCard);
+
         foreach (var r in _results)
         {
             layout.Children.Add(BuildQuestionCard(r));
         }
 
         page.Content = new ScrollView { Content = layout };
+        await Navigation.PushAsync(page);
+    }
+
+    /// <summary>答题卡扫描原图卡片（没有原图时返回 null，界面不出现空块）。</summary>
+    private static async Task<View?> BuildSheetImageCardAsync(SubmissionItem submission)
+    {
+        var source = await App.Api.GetSubmissionImageAsync(submission.Id);
+        if (source == null) return null;
+
+        var border = new Border
+        {
+            BackgroundColor = Colors.White,
+            StrokeThickness = 0,
+            StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = new CornerRadius(12) },
+            Padding = 12,
+        };
+        var stack = new VerticalStackLayout { Spacing = 8 };
+
+        stack.Children.Add(new Label
+        {
+            Text = "答题卡原图（点图放大）",
+            FontSize = 13,
+            FontAttributes = FontAttributes.Bold,
+            TextColor = Color.FromArgb("#4285f4"),
+        });
+
+        var image = new Image
+        {
+            Source = source,
+            Aspect = Aspect.AspectFit,
+            HeightRequest = 320,
+            BackgroundColor = Color.FromArgb("#f0f2f5"),
+        };
+        var tap = new TapGestureRecognizer();
+        tap.Tapped += async (_, _) => await ShowFullImageAsync(source, submission.StudentName ?? "答题卡");
+        image.GestureRecognizers.Add(tap);
+        stack.Children.Add(image);
+
+        border.Content = stack;
+        return border;
+    }
+
+    /// <summary>全屏查看原图：双指缩放 + 旋转 + 放大缩小按钮（课堂改卷常要看小字）。</summary>
+    private static async Task ShowFullImageAsync(ImageSource source, string title)
+    {
+        var image = new Image
+        {
+            Source = source,
+            Aspect = Aspect.AspectFit,
+            BackgroundColor = Colors.Black,
+        };
+        var scale = 1.0;
+        var rotation = 0.0;
+
+        void Apply()
+        {
+            image.Scale = scale;
+            image.Rotation = rotation;
+        }
+
+        var pinch = new PinchGestureRecognizer();
+        pinch.PinchUpdated += (_, e) =>
+        {
+            if (e.Status == GestureStatus.Running)
+            {
+                scale = Math.Clamp(e.Scale, 0.5, 6.0);
+                Apply();
+            }
+        };
+        image.GestureRecognizers.Add(pinch);
+        var pan = new PanGestureRecognizer();
+        pan.PanUpdated += (_, e) =>
+        {
+            if (e.StatusType == GestureStatus.Running)
+            {
+                image.TranslationX += e.TotalX * 0.2;
+                image.TranslationY += e.TotalY * 0.2;
+            }
+        };
+        image.GestureRecognizers.Add(pan);
+
+        var buttons = new HorizontalStackLayout
+        {
+            Spacing = 8,
+            HorizontalOptions = LayoutOptions.Center,
+            Padding = new Thickness(0, 8),
+        };
+        Button MakeButton(string text, Action action)
+        {
+            var b = new Button { Text = text, FontSize = 14, TextColor = Colors.White, BackgroundColor = Color.FromArgb("#4285f4"), CornerRadius = 8 };
+            b.Clicked += (_, _) => action();
+            return b;
+        }
+        buttons.Children.Add(MakeButton("－", () => { scale = Math.Max(0.5, scale - 0.25); Apply(); }));
+        buttons.Children.Add(MakeButton("＋", () => { scale = Math.Min(6.0, scale + 0.25); Apply(); }));
+        buttons.Children.Add(MakeButton("旋转", () => { rotation = (rotation + 90) % 360; Apply(); }));
+        buttons.Children.Add(MakeButton("复位", () => { scale = 1; rotation = 0; image.TranslationX = 0; image.TranslationY = 0; Apply(); }));
+
+        var page = new ContentPage
+        {
+            Title = title,
+            BackgroundColor = Colors.Black,
+            Content = new Grid
+            {
+                RowDefinitions = new RowDefinitionCollection(new RowDefinition(GridLength.Star), new RowDefinition(GridLength.Auto)),
+                Children = { image, buttons },
+            },
+        };
+        Grid.SetRow(image, 0);
+        Grid.SetRow(buttons, 1);
         await Navigation.PushAsync(page);
     }
 

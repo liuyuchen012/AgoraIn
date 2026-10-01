@@ -109,6 +109,25 @@ public sealed class ApiClient
     public Task<List<QuestionResultItem>?> GetSubmissionResultsAsync(string submissionId)
         => GetAsync<List<QuestionResultItem>?>($"/api/v4/exams/submissions/{submissionId}/results");
 
+    /// <summary>答题卡扫描原图（人工复盘对照学生原卷）。失败返回 null（如未存图）。</summary>
+    public async Task<ImageSource?> GetSubmissionImageAsync(string submissionId)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get,
+                $"{BaseUrl}/api/v4/exams/submissions/{submissionId}/image");
+            AddAuth(req);
+            using var res = await Http.SendAsync(req, HttpCompletionOption.ResponseContentRead);
+            if (!res.IsSuccessStatusCode) return null;
+            var bytes = await res.Content.ReadAsByteArrayAsync();
+            return bytes.Length == 0 ? null : ImageSource.FromStream(() => new MemoryStream(bytes));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>教师人工改分（留痕，状态推进到待人工）。</summary>
     public Task<object?> OverrideResultAsync(string submissionId, string questionId, double score, string? comment)
         => PutAsync<object>($"/api/v4/exams/submissions/{submissionId}/results/{questionId}",

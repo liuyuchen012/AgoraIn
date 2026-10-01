@@ -341,8 +341,31 @@
     </el-dialog>
 
     <!-- 逐题批改对话框 -->
-    <el-dialog v-model="resultsVisible" :title="`逐题批改 — ${currentSubmission?.studentName || currentSubmission?.studentRef || ''}`" width="85%" destroy-on-close>
-      <el-table :data="results" v-loading="resultsLoading" stripe size="small">
+    <el-dialog v-model="resultsVisible" :title="`逐题批改 — ${currentSubmission?.studentName || currentSubmission?.studentRef || ''}`"
+               width="92%" top="4vh" destroy-on-close @closed="closeSheetImage">
+      <div style="display:flex;gap:12px;height:72vh">
+        <!-- 左：答题卡扫描原图（人工复盘要对着学生原卷改分） -->
+        <div style="flex:0 0 42%;display:flex;flex-direction:column;border:1px solid #e4e7ed;border-radius:6px;overflow:hidden">
+          <div style="padding:6px 10px;background:#f5f7fa;display:flex;align-items:center;justify-content:space-between">
+            <span style="font-size:13px;color:#606266">答题卡原图</span>
+            <div style="display:flex;align-items:center;gap:4px">
+              <el-button link size="small" @click="sheetZoom = Math.max(20, sheetZoom - 25)">－</el-button>
+              <span style="font-size:12px;color:#909399;width:44px;text-align:center">{{ sheetZoom }}%</span>
+              <el-button link size="small" @click="sheetZoom = Math.min(400, sheetZoom + 25)">＋</el-button>
+              <el-button link size="small" @click="sheetRotate = (sheetRotate + 90) % 360">旋转</el-button>
+              <el-button link size="small" :loading="sheetImageLoading" @click="loadSheetImage(currentSubmission?.id)">重载</el-button>
+            </div>
+          </div>
+          <div style="flex:1;overflow:auto;background:#f0f2f5;text-align:center;padding:8px">
+            <img v-if="sheetImageUrl" :src="sheetImageUrl" alt="答题卡原图"
+                 :style="{ width: sheetZoom + '%', transform: `rotate(${sheetRotate}deg)`, transformOrigin: 'top center' }" />
+            <el-empty v-else :description="sheetImageLoading ? '正在加载原图…' : '该记录没有扫描原图'" :image-size="80" />
+          </div>
+        </div>
+
+        <!-- 右：逐题结果 -->
+        <div style="flex:1;overflow:auto">
+          <el-table :data="results" v-loading="resultsLoading" stripe size="small">
         <el-table-column prop="index" label="题号" width="60">
           <template #default="{row}">{{ row.index + 1 }}</template>
         </el-table-column>
@@ -379,7 +402,9 @@
             <el-button link type="primary" size="small" @click="saveResult(row)">保存</el-button>
           </template>
         </el-table-column>
-      </el-table>
+          </el-table>
+        </div>
+      </div>
       <template #footer>
         <div style="display:flex;justify-content:space-between;align-items:center">
           <el-select v-model="bindStudentId" placeholder="绑定学生（考号识别结果需确认）" size="small" style="width:280px" clearable>
@@ -936,11 +961,39 @@ async function openResults(row: any) {
   currentSubmission.value = row
   bindStudentId.value = row.studentId || ''
   resultsVisible.value = true
+  sheetZoom.value = 100
+  sheetRotate.value = 0
+  void loadSheetImage(row.id)
   resultsLoading.value = true
   try {
     const data = await examApi.getResults(row.id)
     results.value = (data || []).map(r => ({ ...r, editScore: r.score ?? undefined, editComment: r.comment ?? '' }))
   } catch { results.value = [] } finally { resultsLoading.value = false }
+}
+
+// ── 答题卡原图（人工复盘对照用；接口要鉴权，所以取 blob 再转 objectURL）──
+const sheetImageUrl = ref('')
+const sheetImageLoading = ref(false)
+const sheetZoom = ref(100)
+const sheetRotate = ref(0)
+
+async function loadSheetImage(submissionId?: string) {
+  if (!submissionId) return
+  closeSheetImage()
+  sheetImageLoading.value = true
+  try {
+    const res: any = await examApi.submissionImage(submissionId)
+    const blob = res?.data instanceof Blob ? res.data : new Blob([res?.data ?? res], { type: 'image/jpeg' })
+    sheetImageUrl.value = URL.createObjectURL(blob)
+  } catch (e: any) {
+    sheetImageUrl.value = ''
+    if (e?.response?.status === 404) ElMessage.info('该记录没有扫描原图（早期上传或存图失败）')
+    else ElMessage.error('加载答题卡原图失败')
+  } finally { sheetImageLoading.value = false }
+}
+
+function closeSheetImage() {
+  if (sheetImageUrl.value) { URL.revokeObjectURL(sheetImageUrl.value); sheetImageUrl.value = '' }
 }
 
 async function saveResult(row: any) {

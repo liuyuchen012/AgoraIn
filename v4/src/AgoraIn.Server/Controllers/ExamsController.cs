@@ -25,13 +25,16 @@ public class ExamsController : ControllerBase
     private readonly DeepSeekGradingService _ai;
     private readonly AiSettingsService _aiSettings;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ServerPaths _paths;
 
-    public ExamsController(ServerDbContext db, DeepSeekGradingService ai, AiSettingsService aiSettings, IServiceScopeFactory scopeFactory)
+    public ExamsController(ServerDbContext db, DeepSeekGradingService ai, AiSettingsService aiSettings,
+        IServiceScopeFactory scopeFactory, ServerPaths paths)
     {
         _db = db;
         _ai = ai;
         _aiSettings = aiSettings;
         _scopeFactory = scopeFactory;
+        _paths = paths;
     }
 
     /// <summary>试卷列表。</summary>
@@ -616,7 +619,46 @@ public class ExamsController : ControllerBase
             s.Id, s.PaperId, s.StudentId, s.StudentRef, s.Status, s.TotalScore,
             s.SubmittedAt, s.AiGradedAt, s.ConfirmedAt, s.ImagePathsJson,
             studentName = s.StudentId != null && names.TryGetValue(s.StudentId, out var n) ? n : null,
+            /** 是否有扫描原图（人工复盘要对照原卷改分） */
+            hasImage = FirstStoredImage(s) != null,
         }));
+    }
+
+    /// <summary>取某次提交的第一张扫描原图（人工复盘时对照原卷）。</summary>
+    [HttpGet("submissions/{submissionId}/image")]
+    public async Task<IActionResult> GetSubmissionImage(string submissionId)
+    {
+        var submission = await _db.AnswerSheetSubmissions.FindAsync(submissionId);
+        if (submission == null) return NotFound(new { error = "提交记录不存在" });
+        var stored = FirstStoredImage(submission);
+        if (stored == null) return NotFound(new { error = "这条记录没有存原图（早期上传或存图失败）" });
+
+        var full = Path.Combine(_paths.SheetDirectory, stored);
+        if (!System.IO.File.Exists(full)) return NotFound(new { error = "原图文件已丢失" });
+
+        Response.Headers.CacheControl = "private, max-age=86400";
+        return PhysicalFile(full, "image/jpeg", enableRangeProcessing: true);
+    }
+
+    /// <summary>从 ImagePathsJson 取第一张「已存储」的文件名（只接受纯文件名，防目录穿越）。</summary>
+    private static string? FirstStoredImage(AnswerSheetSubmission submission)
+    {
+        if (string.IsNullOrWhiteSpace(submission.ImagePathsJson)) return null;
+        try
+        {
+            var names = System.Text.Json.JsonSerializer.Deserialize<List<string>>(submission.ImagePathsJson);
+            var first = names?.FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
+            if (first == null || first != Path.GetFileName(first)) return null;
+            var ext = Path.GetExtension(first);
+            if (!ext.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
+                && !ext.Equals(".jpeg", StringComparison.OrdinalIgnoreCase)
+                && !ext.Equals(".png", StringComparison.OrdinalIgnoreCase)) return null;
+            return first;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -635,9 +677,21 @@ public class ExamsController : ControllerBase
         var submission = new AnswerSheetSubmission
         {
             PaperId = paperId,
-            ImagePathsJson = $"[\"{file.FileName}\"]",
             Status = SubmissionStatus.NotGraded,
         };
+
+        // 原图落盘：人工复盘要对着学生原卷改分，只存文件名等于没存
+        var storedName = $"{submission.Id}.jpg";
+        try
+        {
+            await System.IO.File.WriteAllBytesAsync(Path.Combine(_paths.SheetDirectory, storedName), imageData);
+            submission.ImagePathsJson = System.Text.Json.JsonSerializer.Serialize(new[] { storedName });
+        }
+        catch
+        {
+            // 存图失败不阻断识别链路，只是复盘时看不到原卷
+            submission.ImagePathsJson = System.Text.Json.JsonSerializer.Serialize(new[] { file.FileName });
+        }
 
         var questions = await _db.Questions
             .Where(q => q.PaperId == paperId)

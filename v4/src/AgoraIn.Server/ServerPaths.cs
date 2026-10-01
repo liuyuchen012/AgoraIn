@@ -14,6 +14,9 @@ public sealed class ServerPaths
 
         ResourceDirectory = Path.Combine(DataDirectory, "resources");
         Directory.CreateDirectory(ResourceDirectory);
+
+        SheetDirectory = Path.Combine(DataDirectory, "sheets");
+        Directory.CreateDirectory(SheetDirectory);
     }
 
     /// <summary>数据目录（数据库、上传资源均位于其下）。</summary>
@@ -21,6 +24,9 @@ public sealed class ServerPaths
 
     /// <summary>上传资源目录。</summary>
     public string ResourceDirectory { get; }
+
+    /// <summary>答题卡扫描原图目录（人工复盘需要对着学生原卷改分）。</summary>
+    public string SheetDirectory { get; }
 
     /// <summary>数据库文件路径。</summary>
     public string DatabaseFile => Path.Combine(DataDirectory, "server.db");
