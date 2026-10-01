@@ -20,11 +20,13 @@ public class RegionsController : ControllerBase
 {
     private readonly ServerDbContext _db;
     private readonly RegionCodeService _codes;
+    private readonly AiQuotaService _quota;
 
-    public RegionsController(ServerDbContext db, RegionCodeService codes)
+    public RegionsController(ServerDbContext db, RegionCodeService codes, AiQuotaService quota)
     {
         _db = db;
         _codes = codes;
+        _quota = quota;
     }
 
     /// <summary>区域列表（仅主区域）。</summary>
@@ -214,6 +216,67 @@ public class RegionsController : ControllerBase
         return Ok(new { regionId = region.RegionId, hasCustom = region.CustomPrivacyContent != null, updatedAt = region.CustomPrivacyUpdatedAt });
     }
 
+    /// <summary>当前区域的 AI 额度（元 + 按各模型折算的 Token 数）。</summary>
+    [HttpGet("ai-quota")]
+    public async Task<IActionResult> AiQuota(CancellationToken ct)
+    {
+        var regionId = RegionContext.Current;
+        var balance = await _quota.GetBalanceAsync(regionId, ct);
+        return Ok(new
+        {
+            regionId,
+            balanceYuan = balance,
+            mimoTokens = balance * AiQuotaService.MimoTokensPerYuan,
+            deepseekTokens = balance * AiQuotaService.DeepSeekTokensPerYuan,
+            rates = new
+            {
+                mimoTokensPerYuan = AiQuotaService.MimoTokensPerYuan,
+                deepseekTokensPerYuan = AiQuotaService.DeepSeekTokensPerYuan,
+            },
+        });
+    }
+
+    /// <summary>兑换 AI 额度（输入主区域颁发的 AGRT- 额度码，面额入账）。</summary>
+    [HttpPost("redeem-quota")]
+    public async Task<IActionResult> RedeemQuota([FromBody] RedeemQuotaRequest req, CancellationToken ct)
+    {
+        var regionId = RegionContext.Current;
+        if (regionId == RegionContext.ManagerRegion)
+            return BadRequest(new { error = "主区域使用平台 AI 无需兑换额度" });
+
+        var payload = await _codes.VerifyQuotaCodeAsync(req.Code ?? "", regionId, ct);
+        if (payload == null) return BadRequest(new { error = "额度兑换码无效或不属于当前区域" });
+
+        var balance = await _quota.AddAsync(regionId, payload.AmountYuan, ct);
+        return Ok(new
+        {
+            redeemed = payload.AmountYuan,
+            balanceYuan = balance,
+            mimoTokens = balance * AiQuotaService.MimoTokensPerYuan,
+            deepseekTokens = balance * AiQuotaService.DeepSeekTokensPerYuan,
+        });
+    }
+
+    /// <summary>为子区域签发 AI 额度兑换码（仅主区域；面额为元，按模型折算 Token）。</summary>
+    [HttpPost("{regionId}/issue-quota-code")]
+    public async Task<IActionResult> IssueQuotaCode(string regionId, [FromBody] IssueQuotaCodeRequest req, CancellationToken ct)
+    {
+        if (!await IsManagerAsync(ct)) return Forbid();
+        var region = await _db.Regions.FirstOrDefaultAsync(r => r.RegionId == regionId, ct);
+        if (region == null) return NotFound(new { error = "区域不存在" });
+        if (req.AmountYuan is < 1 or > 100000)
+            return BadRequest(new { error = "面额须在 1-100000 元之间" });
+
+        var code = await _codes.IssueQuotaCodeAsync(region.RegionId, req.AmountYuan.Value, ct);
+        return Ok(new
+        {
+            activationCode = code,
+            amountYuan = req.AmountYuan,
+            mimoTokens = req.AmountYuan.Value * AiQuotaService.MimoTokensPerYuan,
+            deepseekTokens = req.AmountYuan.Value * AiQuotaService.DeepSeekTokensPerYuan,
+        });
+    }
+
     /// <summary>删除子区域（仅主区域；区域内数据将不可见但保留，误删可联系运维恢复）。</summary>
     [HttpDelete("{regionId}")]
     public async Task<IActionResult> Delete(string regionId, CancellationToken ct)
@@ -271,4 +334,6 @@ public class RegionsController : ControllerBase
 public record CreateRegionRequest(string? RegionId, string Name, string OwnerUsername, string OwnerPassword, string? OwnerDisplayName);
 public record IssueRegionCodeRequest(int Months, int MaxDevices);
 public record ActivateRegionRequest(string? ActivationCode);
+public record RedeemQuotaRequest(string? Code);
+public record IssueQuotaCodeRequest(decimal? AmountYuan);
 public record RegionAgreementRequest(string? Content);

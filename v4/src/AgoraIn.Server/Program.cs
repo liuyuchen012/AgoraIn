@@ -64,6 +64,7 @@ builder.Services.AddSignalR();
 
 // ── DeepSeek AI ──
 builder.Services.AddScoped<AiSettingsService>();
+builder.Services.AddScoped<AiQuotaService>();
 // 推理型模型（如 mimo/DeepSeek-R1）思考耗时长，默认 100s 会超时
 builder.Services.AddHttpClient<DeepSeekGradingService>(c => c.Timeout = TimeSpan.FromSeconds(300));
 

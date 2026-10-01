@@ -6,6 +6,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AgoraIn.Server.Services;
 
+/// <summary>区域 AI 额度兑换码载荷（面额为人民币元）。</summary>
+public sealed record RegionQuotaPayload(string Region, decimal AmountYuan, string IssuedAt, string Nonce);
+
 /// <summary>区域激活码载荷（HMAC-SHA256 签名，服务端签发 + 服务端验证，与 v3.2 区域激活同思路）。</summary>
 public sealed record RegionCodePayload(string Region, int Months, int MaxDevices, string IssuedAt, string Nonce);
 
@@ -88,6 +91,58 @@ public sealed class RegionCodeService
         else _db.AppSettings.Add(new Core.Entities.AppSetting { Key = KeySettingName, Value = hex });
         await _db.SaveChangesAsync(ct);
         return key;
+    }
+
+    /// <summary>
+    /// 为区域签发 AI 额度兑换码（AGRT- 前缀，绑定区域，面额为人民币元）。
+    /// 租户在 AI 批改设置页兑换后额度入账；兑换码与区域激活码（AGRR-）相互独立。
+    /// </summary>
+    public async Task<string> IssueQuotaCodeAsync(string regionId, decimal amountYuan, CancellationToken ct = default)
+    {
+        if (amountYuan is < 1 or > 100000) throw new ArgumentException("面额须在 1-100000 元之间", nameof(amountYuan));
+
+        var payload = new RegionQuotaPayload(
+            regionId, amountYuan,
+            DateTime.Now.ToString("O"),
+            Convert.ToHexString(RandomNumberGenerator.GetBytes(8)));
+
+        var json = JsonSerializer.Serialize(payload, JsonOpts);
+        var key = await GetOrCreateKeyAsync(ct);
+        var sig = HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(json));
+
+        return "AGRT-"
+            + Convert.ToBase64String(Encoding.UTF8.GetBytes(json)).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+            + "."
+            + Convert.ToBase64String(sig).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    }
+
+    /// <summary>校验额度兑换码；无效返回 null，区域不匹配返回 null。</summary>
+    public async Task<RegionQuotaPayload?> VerifyQuotaCodeAsync(string code, string expectedRegion, CancellationToken ct = default)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(code) || !code.StartsWith("AGRT-", StringComparison.Ordinal)) return null;
+
+            var body = code["AGRT-".Length..];
+            var dot = body.IndexOf('.');
+            if (dot <= 0) return null;
+
+            var json = Encoding.UTF8.GetString(Convert.FromBase64String(Pad(body[..dot].Replace('-', '+').Replace('_', '/'))));
+            var sig = Convert.FromBase64String(Pad(body[(dot + 1)..].Replace('-', '+').Replace('_', '/')));
+
+            var key = await GetOrCreateKeyAsync(ct);
+            var expected = HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(json));
+            if (!CryptographicOperations.FixedTimeEquals(expected, sig)) return null;
+
+            var payload = JsonSerializer.Deserialize<RegionQuotaPayload>(json, JsonOpts);
+            if (payload == null || payload.AmountYuan is < 1 or > 100000) return null;
+            if (!string.Equals(payload.Region, expectedRegion, StringComparison.OrdinalIgnoreCase)) return null;
+            return payload;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string Pad(string b64)

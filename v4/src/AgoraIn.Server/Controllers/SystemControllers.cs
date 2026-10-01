@@ -25,7 +25,7 @@ public class AiSettingsController : ControllerBase
         _settings = settings;
     }
 
-    /// <summary>读取 AI 批改设置（API 密钥脱敏返回）。</summary>
+    /// <summary>读取 AI 批改设置（API 密钥脱敏返回）。租户读到的是本区域生效配置（含作用域标注）。</summary>
     [HttpGet]
     public async Task<IActionResult> Get(CancellationToken ct)
     {
@@ -37,6 +37,8 @@ public class AiSettingsController : ControllerBase
             s.GradingPromptTemplate,
             hasApiKey = !string.IsNullOrEmpty(s.ApiKey),
             apiKeyMasked = MaskKey(s.ApiKey),
+            s.Scope,
+            s.HasRegionOverride,
         });
     }
 
@@ -73,7 +75,19 @@ public class AiSettingsController : ControllerBase
         if (s.Temperature is < 0 or > 2) return BadRequest(new { error = "温度须在 0-2 之间" });
         if (s.MaxTokens is < 128 or > 32768) return BadRequest(new { error = "maxTokens 须在 128-32768 之间" });
         if (s.HumanReviewThreshold is < 0 or > 1) return BadRequest(new { error = "低置信度阈值须在 0-1 之间" });
-        await _settings.SaveAsync(s, ct);
+
+        // 作用域：主区域保存平台默认；区域保存本区域独立覆盖（优先于平台默认）
+        var isRegion = !AgoraIn.Server.Security.RegionContext.IsManager;
+        var regionScope = isRegion ? AgoraIn.Server.Security.RegionContext.Current : null;
+
+        if (isRegion && body.TryGetProperty("resetRegion", out var rr) && rr.ValueKind == JsonValueKind.True)
+        {
+            await _settings.ResetRegionAsync(AgoraIn.Server.Security.RegionContext.Current, ct);
+        }
+        else
+        {
+            await _settings.SaveAsync(s, regionScope, ct);
+        }
 
         var saved = await _settings.LoadAsync(ct);
         return Ok(new
@@ -83,6 +97,8 @@ public class AiSettingsController : ControllerBase
             saved.GradingPromptTemplate,
             hasApiKey = !string.IsNullOrEmpty(saved.ApiKey),
             apiKeyMasked = MaskKey(saved.ApiKey),
+            saved.Scope,
+            saved.HasRegionOverride,
         });
     }
 

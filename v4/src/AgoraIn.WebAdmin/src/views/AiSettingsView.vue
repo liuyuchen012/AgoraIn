@@ -8,6 +8,39 @@
     </template>
 
     <el-form :model="form" label-width="180px" style="max-width:640px" v-loading="loading">
+      <el-alert v-if="auth.isManager" type="info" :closable="false" style="margin-bottom:14px"
+                title="以下为服务器默认配置（对所有未自行配置的区域生效）。各区域主账号可在本页为本区域配置独立的 AI 服务。" />
+      <el-alert v-else type="info" :closable="false" style="margin-bottom:14px"
+                :title="form.hasRegionOverride ? '以下为本区域独立配置（优先于平台默认配置）' : '以下为平台默认配置；修改后将保存为本区域独立配置（仅对本区域生效）'" />
+
+      <el-card v-if="!auth.isManager" shadow="never" class="page-card" style="margin-bottom:14px" v-loading="quotaLoading">
+        <template #header>
+          <div class="card-header">
+            <span class="card-title">平台 AI 额度</span>
+            <span v-if="!form.hasRegionOverride && quota.balanceYuan > 0" style="font-size:12px;color:#67c23a">
+              已有额度，使用平台配置时从此扣减
+            </span>
+            <span v-else-if="!form.hasRegionOverride && quota.balanceYuan <= 0" style="font-size:12px;color:#e6a23c">
+              额度为 0，使用平台配置将被拦截
+            </span>
+          </div>
+        </template>
+        <el-descriptions :column="3" border size="small">
+          <el-descriptions-item label="余额">
+            <span style="font-size:18px;font-weight:700;color:#4285f4">{{ quota.balanceYuan.toFixed(2) }} 元</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="≈ Mimo Token">{{ quota.mimoTokens ? (quota.mimoTokens / 1e8).toFixed(1) + ' 亿' : '—' }}</el-descriptions-item>
+          <el-descriptions-item label="≈ DeepSeek Token">{{ quota.deepseekTokens ? (quota.deepseekTokens / 1e4).toFixed(0) + ' 万' : '—' }}</el-descriptions-item>
+        </el-descriptions>
+        <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+          <el-input v-model="quotaCode" placeholder="输入 AGRT- 额度兑换码（由主区域签发）" style="max-width:400px" />
+          <el-button type="primary" :loading="redeeming" :disabled="!quotaCode.trim()" @click="redeemQuota">兑换</el-button>
+        </div>
+      </el-card>
+
+      <el-form-item v-if="!auth.isManager && form.hasRegionOverride">
+        <el-button size="small" @click="resetRegion">清除本区域独立配置（恢复平台默认）</el-button>
+      </el-form-item>
       <el-form-item label="API 地址">
         <el-input v-model="form.baseUrl" placeholder="https://api.deepseek.com" style="max-width:420px" />
         <div class="tip">OpenAI 兼容服务地址（保存到服务器数据库，优先于 appsettings.json）。常见地址：
@@ -90,7 +123,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { aiApi, type AiSettings, type AiLogRow } from '@/api/client'
+import { aiApi, regionApi, type AiSettings, type AiLogRow } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
+
+const auth = useAuthStore()
 
 const loading = ref(false)
 const saving = ref(false)
@@ -100,6 +136,10 @@ const form = ref<AiSettings>({
   gradingPromptTemplate: null, hasApiKey: false, apiKeyMasked: '',
 })
 const apiKeyInput = ref('')
+const quotaLoading = ref(false)
+const quota = ref({ balanceYuan: 0, mimoTokens: 0, deepseekTokens: 0 })
+const quotaCode = ref('')
+const redeeming = ref(false)
 const logs = ref<{ totalTokens: number; logs: AiLogRow[] } | null>(null)
 
 onMounted(loadAll)
@@ -109,7 +149,25 @@ async function loadAll() {
   try {
     form.value = await aiApi.get()
     logs.value = await aiApi.logs()
+    if (!auth.isManager) {
+      quotaLoading.value = true
+      try {
+        const q = await regionApi.aiQuota()
+        quota.value = { balanceYuan: q.balanceYuan, mimoTokens: q.mimoTokens, deepseekTokens: q.deepseekTokens }
+      } finally { quotaLoading.value = false }
+    }
   } finally { loading.value = false }
+}
+
+async function redeemQuota() {
+  if (!quotaCode.value.trim()) return
+  redeeming.value = true
+  try {
+    const r = await regionApi.redeemQuota(quotaCode.value.trim())
+    quota.value = { balanceYuan: r.balanceYuan, mimoTokens: r.mimoTokens, deepseekTokens: r.deepseekTokens }
+    quotaCode.value = ''
+    ElMessage.success(`兑换成功：+${r.redeemed} 元，当前余额 ${r.balanceYuan.toFixed(2)} 元`)
+  } finally { redeeming.value = false }
 }
 
 async function save() {
@@ -125,6 +183,15 @@ async function save() {
     form.value = await aiApi.save(payload)
     apiKeyInput.value = ''
     ElMessage.success('已保存（即时生效）')
+  } finally { saving.value = false }
+}
+
+async function resetRegion() {
+  saving.value = true
+  try {
+    form.value = await aiApi.save({ resetRegion: true })
+    apiKeyInput.value = ''
+    ElMessage.success('已清除本区域独立配置，恢复使用平台默认')
   } finally { saving.value = false }
 }
 

@@ -42,6 +42,12 @@ public sealed class AiRuntimeSettings
     /// {StandardAnswer} 标准答案 / {Rubric} 评分要点 / {MaxScore} 满分；空 = 使用内置默认模板）。
     /// </summary>
     public string? GradingPromptTemplate { get; set; }
+
+    /// <summary>配置作用域：global（平台默认）/ region（区域独立配置）。读取接口填充。</summary>
+    public string? Scope { get; set; }
+
+    /// <summary>当前区域是否存在独立覆盖（仅区域请求填充）。</summary>
+    public bool HasRegionOverride { get; set; }
 }
 
 /// <summary>
@@ -73,44 +79,79 @@ public sealed class AiSettingsService
             MaxTokens = (int)ParseDouble(_config["DeepSeek:MaxTokens"], 1024),
         };
 
+        var regionId = Security.RegionContext.Current;
+        var isRegion = regionId != Security.RegionContext.ManagerRegion;
+        var regionPrefix = KeyPrefix + regionId + ".";
+
         var rows = await _db.AppSettings
             .Where(x => x.Key.StartsWith(KeyPrefix))
             .ToListAsync(ct);
-        var map = rows.ToDictionary(x => x.Key, x => x.Value);
+        // 全局键 = ai. 后恰一段（ai.model）；区域键 = ai.{regionId}.xxx（区域代号无点，不会混淆）
+        var globalEntries = rows.Where(x => System.Text.RegularExpressions.Regex.IsMatch(x.Key, @"^ai\.[^.]+$"));
+        var regionEntries = rows.Where(x => x.Key.StartsWith(regionPrefix));
 
-        if (map.TryGetValue(KeyPrefix + "apiKey", out var k) && k.Length > 0) s.ApiKey = k;
-        if (map.TryGetValue(KeyPrefix + "baseUrl", out var bu) && bu.Length > 0) s.BaseUrl = bu;
-        if (map.TryGetValue(KeyPrefix + "model", out var m) && m.Length > 0) s.Model = m;
-        if (map.TryGetValue(KeyPrefix + "visionModel", out var vm)) s.VisionModel = vm;
-        if (map.TryGetValue(KeyPrefix + "temperature", out var t) && double.TryParse(t, out var tv)) s.Temperature = tv;
-        if (map.TryGetValue(KeyPrefix + "maxTokens", out var mt) && int.TryParse(mt, out var mv)) s.MaxTokens = mv;
-        if (map.TryGetValue(KeyPrefix + "allowImageToCloud", out var ai)) s.AllowImageToCloud = ai != "false";
-        if (map.TryGetValue(KeyPrefix + "humanReviewThreshold", out var ht) && double.TryParse(ht, out var hv)) s.HumanReviewThreshold = hv;
-        if (map.TryGetValue(KeyPrefix + "retries", out var r) && int.TryParse(r, out var rv)) s.Retries = rv;
-        if (map.TryGetValue(KeyPrefix + "gradingPromptTemplate", out var gpt)) s.GradingPromptTemplate = gpt;
+        void Apply(IEnumerable<KeyValuePair<string, string>> entries, int skip)
+        {
+            foreach (var e in entries)
+            {
+                var key = e.Key;
+                var value = e.Value;
+                var field = key[skip..];
+                switch (field)
+                {
+                    case "apiKey": if (value.Length > 0) s.ApiKey = value; break;
+                    case "baseUrl": if (value.Length > 0) s.BaseUrl = value; break;
+                    case "model": if (value.Length > 0) s.Model = value; break;
+                    case "visionModel": s.VisionModel = value; break;
+                    case "temperature": if (double.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out var tv)) s.Temperature = tv; break;
+                    case "maxTokens": if (int.TryParse(value, out var mv)) s.MaxTokens = mv; break;
+                    case "allowImageToCloud": s.AllowImageToCloud = value != "false"; break;
+                    case "humanReviewThreshold": if (double.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out var hv)) s.HumanReviewThreshold = hv; break;
+                    case "retries": if (int.TryParse(value, out var rv)) s.Retries = rv; break;
+                    case "gradingPromptTemplate": s.GradingPromptTemplate = value; break;
+                }
+            }
+        }
+
+        // 第一层：全局覆盖（主区域维护的平台默认）
+        Apply(globalEntries.Select(e => new KeyValuePair<string, string>(e.Key, e.Value)), KeyPrefix.Length);
+
+        // 第二层：区域覆盖（租户自配，优先级最高）
+        if (isRegion)
+        {
+            Apply(regionEntries.Select(e => new KeyValuePair<string, string>(e.Key, e.Value)), regionPrefix.Length);
+            s.HasRegionOverride = regionEntries.Any();
+        }
+        s.Scope = isRegion ? "region" : "global";
         return s;
     }
 
     /// <summary>
-    /// 保存设置。apiKey 语义：null = 不变；"" = 清除（回落 appsettings）；非空 = 更新。
+    /// 保存设置。apiKey 语义：null = 不变；"" = 清除（回落上级配置）；非空 = 更新。
+    /// regionScope 为 null 时写入全局覆盖（主区域维护平台默认）；
+    /// 为区域代号时写入该区域独立覆盖（ai.{regionId}.*，优先于全局）。
     /// </summary>
-    public async Task SaveAsync(AiRuntimeSettings s, CancellationToken ct = default)
+    public async Task SaveAsync(AiRuntimeSettings s, string? regionScope = null, CancellationToken ct = default)
     {
+        var prefix = string.IsNullOrEmpty(regionScope) || regionScope == Security.RegionContext.ManagerRegion
+            ? KeyPrefix
+            : KeyPrefix + regionScope + ".";
+
         var updates = new Dictionary<string, string?>
         {
-            [KeyPrefix + "baseUrl"] = string.IsNullOrWhiteSpace(s.BaseUrl) ? null : s.BaseUrl.Trim().TrimEnd('/'),
-            [KeyPrefix + "model"] = s.Model,
-            [KeyPrefix + "visionModel"] = s.VisionModel,
-            [KeyPrefix + "temperature"] = s.Temperature.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            [KeyPrefix + "maxTokens"] = s.MaxTokens.ToString(),
-            [KeyPrefix + "allowImageToCloud"] = s.AllowImageToCloud ? "true" : "false",
-            [KeyPrefix + "humanReviewThreshold"] = s.HumanReviewThreshold.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            [KeyPrefix + "retries"] = s.Retries.ToString(),
-            [KeyPrefix + "gradingPromptTemplate"] = string.IsNullOrWhiteSpace(s.GradingPromptTemplate) ? null : s.GradingPromptTemplate,
+            [prefix + "baseUrl"] = string.IsNullOrWhiteSpace(s.BaseUrl) ? null : s.BaseUrl.Trim().TrimEnd('/'),
+            [prefix + "model"] = s.Model,
+            [prefix + "visionModel"] = s.VisionModel,
+            [prefix + "temperature"] = s.Temperature.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            [prefix + "maxTokens"] = s.MaxTokens.ToString(),
+            [prefix + "allowImageToCloud"] = s.AllowImageToCloud ? "true" : "false",
+            [prefix + "humanReviewThreshold"] = s.HumanReviewThreshold.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            [prefix + "retries"] = s.Retries.ToString(),
+            [prefix + "gradingPromptTemplate"] = string.IsNullOrWhiteSpace(s.GradingPromptTemplate) ? null : s.GradingPromptTemplate,
         };
         if (s.ApiKey != null)
         {
-            updates[KeyPrefix + "apiKey"] = s.ApiKey.Length == 0 ? null : s.ApiKey;
+            updates[prefix + "apiKey"] = s.ApiKey.Length == 0 ? null : s.ApiKey;
         }
 
         var keys = updates.Keys.ToList();
@@ -121,13 +162,24 @@ public sealed class AiSettingsService
         {
             if (value == null)
             {
-                // null = 清除该覆盖项（回落 appsettings 默认值）
+                // null = 清除该覆盖项（回落上级默认值）
                 if (existing.TryGetValue(key, out var row0)) _db.AppSettings.Remove(row0);
                 continue;
             }
             if (existing.TryGetValue(key, out var row)) row.Value = value;
             else _db.AppSettings.Add(new Core.Entities.AppSetting { Key = key, Value = value });
         }
+        await _db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>清除指定区域的独立覆盖（恢复使用平台默认配置）。</summary>
+    public async Task ResetRegionAsync(string regionId, CancellationToken ct = default)
+    {
+        var prefix = KeyPrefix + regionId + ".";
+        var rows = await _db.AppSettings
+            .Where(x => x.Key.StartsWith(prefix))
+            .ToListAsync(ct);
+        _db.AppSettings.RemoveRange(rows);
         await _db.SaveChangesAsync(ct);
     }
 

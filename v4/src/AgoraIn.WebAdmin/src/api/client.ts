@@ -87,6 +87,15 @@ export const regionApi = {
   /** 区域激活（输入主区域颁发的激活码） */
   activateRegion: (activationCode: string) =>
     client.post<{ regionId: string; expireAt?: string; maxDevices?: number }>('/regions/activate', { activationCode }),
+  /** 当前区域 AI 额度（元 + 各模型折算 Token） */
+  aiQuota: () =>
+    client.get<{ regionId: string; balanceYuan: number; mimoTokens: number; deepseekTokens: number; rates: { mimoTokensPerYuan: number; deepseekTokensPerYuan: number } }>('/regions/ai-quota'),
+  /** 兑换 AI 额度（输入 AGRT- 额度码） */
+  redeemQuota: (code: string) =>
+    client.post<{ redeemed: number; balanceYuan: number; mimoTokens: number; deepseekTokens: number }>('/regions/redeem-quota', { code }),
+  /** 主区域为子区域签发 AI 额度兑换码 */
+  issueQuotaCode: (regionId: string, amountYuan: number) =>
+    client.post<{ activationCode: string; amountYuan: number; mimoTokens: number; deepseekTokens: number }>(`/regions/${regionId}/issue-quota-code`, { amountYuan }),
   create: (data: { regionId?: string; name: string; ownerUsername: string; ownerPassword: string; ownerDisplayName?: string }) =>
     client.post<RegionRow>('/regions', data),
   issueCode: (regionId: string, months: number, maxDevices: number) =>
@@ -464,7 +473,7 @@ export interface SmtpConfig {
 // ── AI 批改设置（需 system.settings 权限） ──
 export const aiApi = {
   get: () => client.get<AiSettings>('/settings/ai'),
-  save: (data: Partial<AiSettings>) => client.put<AiSettings>('/settings/ai', data),
+  save: (data: Partial<AiSettings> & { resetRegion?: boolean }) => client.put<AiSettings>('/settings/ai', data),
   logs: (take = 100) =>
     client.get<{ totalTokens: number; logs: AiLogRow[] }>('/settings/ai/logs', { params: { take } }),
 }
@@ -482,6 +491,8 @@ export interface AiSettings {
   hasApiKey?: boolean
   apiKeyMasked?: string
   apiKey?: string
+  scope?: 'global' | 'region'
+  hasRegionOverride?: boolean
 }
 
 export interface AiLogRow {

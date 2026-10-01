@@ -35,6 +35,7 @@
       <el-table-column label="操作" width="310" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="showIssue(row)">颁发激活码</el-button>
+          <el-button link type="warning" size="small" @click="showIssueQuota(row)">签发额度</el-button>
           <el-button link type="success" size="small" @click="showAgreement(row)">协议制作</el-button>
           <el-button link size="small" @click="showDevicePwd(row)">设备密码</el-button>
           <el-popconfirm title="删除该区域？区域内数据将不可见。" @confirm="removeRegion(row)">
@@ -101,6 +102,28 @@
       <el-button type="primary" :loading="savingAgreement" @click="saveAgreement">保存</el-button>
     </template>
   </el-dialog>
+
+  <!-- 签发额度对话框 -->
+  <el-dialog v-model="quotaVisible" :title="`签发 AI 额度 — ${quotaRegion?.name || ''}`" width="480px">
+    <p class="hint" style="margin-bottom:12px">
+      为该区域签发 AI 额度兑换码（AGRT- 开头，仅对该区域有效）。
+      填入人民币金额后自动生成：区域主账号在「AI 批改设置」页输入兑换码完成入账，使用平台 AI 配置时自动扣减。
+      <b>定价标准：</b>40 元 = Mimo 3.9 亿 Token / DeepSeek 3700 万 Token（等比例，自配独立 AI 服务不消耗平台额度）。
+    </p>
+    <el-form label-width="90px">
+      <el-form-item label="金额（元）">
+        <el-input-number v-model="quotaAmount" :min="1" :max="100000" :step="40" />
+      </el-form-item>
+    </el-form>
+    <p v-if="quotaMimo" style="color:#909399;font-size:12px">
+      ≈ Mimo {{ (quotaMimo / 1e8).toFixed(1) }} 亿 Token / DeepSeek {{ (quotaDeepseek / 1e4).toFixed(0) }} 万 Token
+    </p>
+    <el-input v-if="issuedQuotaCode" :model-value="issuedQuotaCode" readonly type="textarea" :rows="3" />
+    <template #footer>
+      <el-button @click="quotaVisible = false">关闭</el-button>
+      <el-button type="primary" :loading="issuingQuota" :disabled="!quotaAmount" @click="issueQuota">签发额度码</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
@@ -142,6 +165,32 @@ async function saveAgreement() {
     agreementVisible.value = false
     await load()
   } finally { savingAgreement.value = false }
+}
+
+// 签发额度
+const quotaVisible = ref(false)
+const quotaRegion = ref<RegionRow | null>(null)
+const quotaAmount = ref(40)
+const issuingQuota = ref(false)
+const issuedQuotaCode = ref('')
+const quotaMimo = computed(() => (quotaAmount.value || 0) * 9_750_000)
+const quotaDeepseek = computed(() => (quotaAmount.value || 0) * 925_000)
+
+function showIssueQuota(row: RegionRow) {
+  quotaRegion.value = row
+  quotaAmount.value = 40
+  issuedQuotaCode.value = ''
+  quotaVisible.value = true
+}
+
+async function issueQuota() {
+  if (!quotaRegion.value || !quotaAmount.value) return
+  issuingQuota.value = true
+  try {
+    const r = await regionApi.issueQuotaCode(quotaRegion.value.regionId, quotaAmount.value)
+    issuedQuotaCode.value = r.activationCode
+    ElMessage.success(`额度码已生成：${r.amountYuan} 元（≈ Mimo ${(r.mimoTokens/1e8).toFixed(1)} 亿 / DeepSeek ${(r.deepseekTokens/1e4).toFixed(0)} 万 Token）`)
+  } finally { issuingQuota.value = false }
 }
 
 const issueVisible = ref(false)

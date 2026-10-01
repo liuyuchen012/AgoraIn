@@ -16,17 +16,20 @@ public sealed class DeepSeekGradingService
     private readonly AiSettingsService _settings;
     private readonly IDbContextFactory<ServerDbContext> _dbFactory;
     private readonly IConfiguration _config;
+    private readonly AiQuotaService _quota;
 
     public DeepSeekGradingService(
         HttpClient http,
         AiSettingsService settings,
         IDbContextFactory<ServerDbContext> dbFactory,
-        IConfiguration config)
+        IConfiguration config,
+        AiQuotaService quota)
     {
         _http = http;
         _settings = settings;
         _dbFactory = dbFactory;
         _config = config;
+        _quota = quota;
     }
 
     private const string DefaultGradingTemplate = @"你是一个专业的试卷批改老师。请批改以下题目：
@@ -439,6 +442,14 @@ public sealed class DeepSeekGradingService
         _http.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", settings.ApiKey);
 
+        // 租户使用平台配置（未自配独立 AI）：校验并按实际消耗扣减额度；
+        // 租户自配（区域覆盖）与主区域调用不受限
+        var isTenantPlatformUsage = !AgoraIn.Server.Security.RegionContext.IsManager && !settings.HasRegionOverride;
+        if (isTenantPlatformUsage)
+        {
+            await _quota.EnsureSufficientAsync(AgoraIn.Server.Security.RegionContext.Current, ct);
+        }
+
         // API 地址智能拼接：地址已带版本段（/v1、/v3、/v4…）时直接接 /chat/completions
         //（兼容智谱 open.bigmodel.cn/api/paas/v4、通义 …/compatible-mode/v1），否则补 /v1（DeepSeek 官方风格）
         var baseTrim = (settings.BaseUrl ?? "https://api.deepseek.com").Trim().TrimEnd('/');
@@ -470,6 +481,14 @@ public sealed class DeepSeekGradingService
                 var usage = json.TryGetProperty("usage", out var u) ? u : default;
                 await WriteLogAsync(endpoint, model, usage, Environment.TickCount64 - started,
                     success: true, error: null, ct);
+
+                // 按实际消耗扣减租户额度
+                if (isTenantPlatformUsage &&
+                    usage.ValueKind == JsonValueKind.Object &&
+                    usage.TryGetProperty("total_tokens", out var tt) && tt.TryGetInt64(out var totalTokens))
+                {
+                    await _quota.DeductAsync(AgoraIn.Server.Security.RegionContext.Current, totalTokens, model, ct);
+                }
                 return content;
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException && attempt < retries)
