@@ -233,6 +233,21 @@ export const examApi = {
     return client.post<{ imported: number; questions: unknown[] }>(`/exams/papers/${paperId}/import-file`, fd,
       { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600000 })
   },
+  /** 分批视觉出题：一批页面图片（≤3 张）立即解析入库，返回本批 AI 原文（前端实时展示） */
+  extractBatch: (paperId: string, images: Blob[], startNumber: number) => {
+    const fd = new FormData()
+    images.forEach((b, i) => fd.append('images', b, `p${startNumber + i}.jpg`))
+    return client.post<{ imported: number; raw: string; questions: unknown[] }>(
+      `/exams/papers/${paperId}/extract-batch?startNumber=${startNumber}`, fd,
+      { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600000 })
+  },
+  /** 分批答案回填：一批答案页图片（≤5 张） */
+  fillBatch: (paperId: string, images: Blob[]) => {
+    const fd = new FormData()
+    images.forEach((b, i) => fd.append('images', b, `a${i}.jpg`))
+    return client.post<{ updated: number }>(`/exams/papers/${paperId}/fill-batch`, fd,
+      { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600000 })
+  },
   /** 上传试卷页面图片（前端把 PDF 渲染成图）AI 视觉识别出题；答案页图片可选 */
   importImages: (paperId: string, questionImages: Blob[], answerImages?: Blob[], onProgress?: (pct: number) => void) => {
     const fd = new FormData()

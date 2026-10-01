@@ -153,61 +153,71 @@ public sealed class DeepSeekGradingService
     }
 
     /// <summary>
-    /// 视觉出题：把试卷页面图片（前端 pdf.js 渲染）交给视觉模型识别题目。
-    /// 数学公式在 PDF 文字层是乱码，渲染成图片后视觉模型读取的是完整版面。
-    /// **分批识别（每批 3 页）**：推理型模型长思考易顶满 max_tokens 导致整卷 JSON 截断，
-    /// 分批后每批输出远小于上限，多页试卷也能完整出题。
+    /// 视觉出题（多批总入口）：把试卷页面图片（前端 pdf.js 渲染）分批交给视觉模型识别。
+    /// 每批 3 页独立调用——推理型模型整卷思考极易顶满 max_tokens 截断，分批保证完整出题。
     /// </summary>
     public async Task<List<ExtractedQuestion>?> ExtractQuestionsFromImagesAsync(
         IReadOnlyList<byte[]> pageImages, string? answerHint, CancellationToken ct = default)
     {
-        var settings = await _settings.LoadAsync(ct);
-        if (string.IsNullOrEmpty(settings.ApiKey)) return null;
-
-        var answerSection = string.IsNullOrWhiteSpace(answerHint)
-            ? "未提供答案信息：客观题请依据题干自行推断最合理的选项，主观题给出要点式参考答案。"
-            : answerHint;
-
-        const int batchSize = 3;
         var all = new List<ExtractedQuestion>();
-        var model = string.IsNullOrEmpty(settings.VisionModel) ? settings.Model : settings.VisionModel;
-
-        for (var offset = 0; offset < pageImages.Count; offset += batchSize)
+        var start = 1;
+        for (var offset = 0; offset < pageImages.Count; offset += 3)
         {
             ct.ThrowIfCancellationRequested();
-            var batch = pageImages.Skip(offset).Take(batchSize).ToList();
-            var pageRange = $"第 {offset + 1}-{offset + batch.Count} 页（图片按试卷先后顺序）";
+            var batch = pageImages.Skip(offset).Take(3).ToList();
+            var (items, _) = await ExtractOneBatchAsync(batch, start, ct);
+            if (items != null && items.Count > 0)
+            {
+                all.AddRange(items);
+                start += items.Count;
+            }
+        }
+        return all.Count > 0 ? all : null;
+    }
 
-            var prompt = $@"你是专业的试卷结构化解析助手。下面若干张图片是同一份试卷的连续片段：{pageRange}。请逐页识别并解析出该片段内的全部题目。
+    /// <summary>
+    /// 单批视觉出题：一批页面图片（≤3 页）独立调用，返回解析后的题目与本批 AI 原文。
+    /// startNumber 为本批第一题的起始题号（跨批连续编号）。
+    /// </summary>
+    public async Task<(List<ExtractedQuestion>? Items, string? Raw)> ExtractOneBatchAsync(
+        IReadOnlyList<byte[]> batchImages, int startNumber, CancellationToken ct = default)
+    {
+        var settings = await _settings.LoadAsync(ct);
+        if (string.IsNullOrEmpty(settings.ApiKey)) return (null, null);
 
-{answerSection}
+        var prompt = $@"你是专业的试卷结构化解析助手。下面若干张图片是同一份试卷的连续页面片段。请识别其中全部题目，题号从 {startNumber} 开始连续编号。
+
+排版注意：
+- 若图片为**横向大页（A3 两栏排版）**：页面分为左右两栏，必须先读左栏（自上而下）、再读右栏（自上而下），题目按该顺序连续编号，不得漏栏
+- 图片可能包含“选择题选项仅字母无题干”的排版：客观题无需转录题干原文
 
 要求：
-1. 只解析本片段图片中出现的题目；题目跨页时以本片段可见部分为准
-2. type 取值：single（单选）/ multiple（多选）/ judge（判断）/ blank（填空）/ short（简答）/ essay（作文）
-3. 选择题给出 options（[{{""key"": ""A"", ""text"": ""选项内容""}}…]）；判断题 standardAnswer 用 ""对"" 或 ""错""
+1. type 取值：single（单选）/ multiple（多选）/ judge（判断）/ blank（填空）/ short（简答）/ essay（作文）
+2. **客观题（single/multiple/judge/blank）**：content 仅需 ≤15 字的简要提示（可留空），重点是 options 的选项个数与 standardAnswer；不要转录题干原文
+3. 选择题给出 options（[{{""key"": ""A"", ""text"": """"}}…]，key 连续）；判断题 standardAnswer 用 ""对"" 或 ""错""
 4. 数学公式用 LaTeX 表示
 5. 分值 score 取卷面标注；未标注按题型估默认（选择/判断 2 分，填空 3 分，简答 8 分，作文 40 分）
 6. 主观题（short/essay）必须提炼评分要点 rubric（分步给分点，格式 ""要点1(2分)；要点2(3分)""，总分等于该题满分）
 7. knowledgeTags 给 1-3 个知识点标签
 8. **直接输出 JSON 数组，不要输出思考过程、解释或 markdown 代码块**：
-[{{""index"":1,""type"":""single"",""content"":""题干"",""options"":[{{""key"":""A"",""text"":""""}}],""standardAnswer"":""A"",""score"":2,""rubric"":null,""knowledgeTags"":[""知识点""]}}]";
+[{{""index"":{startNumber},""type"":""single"",""content"":""题干提示"",""options"":[{{""key"":""A"",""text"":""""}}],""standardAnswer"":""A"",""score"":2,""rubric"":null,""knowledgeTags"":[""知识点""]}}]";
 
-            var result = await CallAsync(prompt, model, settings, batch, "extract_images", ct, 16384);
-            SaveRawResponse($"extract_images_p{offset / batchSize + 1}", result); // 排障：原始响应落盘
-            var parsed = ParseQuestions(result);
-            if (parsed == null && result != null)
-            {
-                await WriteLogAsync("extract_images", model, default, 0, false,
-                    $"第 {offset + 1}-{offset + batch.Count} 页 JSON 解析失败，返回前 200 字：{result[..Math.Min(200, result.Length)]}", ct);
-            }
-            if (parsed != null) all.AddRange(parsed);
+        var model = string.IsNullOrEmpty(settings.VisionModel) ? settings.Model : settings.VisionModel;
+        var result = await CallAsync(prompt, model, settings, batchImages, "extract_images", ct, 16384);
+        SaveRawResponse($"extract_images_n{startNumber}", result); // 排障：原始响应落盘
+
+        var items = ParseQuestions(result);
+        if (items != null)
+        {
+            // 按起始题号重编，保证跨批连续
+            for (var i = 0; i < items.Count; i++) items[i].Index = startNumber + i;
         }
-
-        if (all.Count == 0) return null;
-        // 跨批重新编号，保证题号连续
-        for (var i = 0; i < all.Count; i++) all[i].Index = i + 1;
-        return all;
+        else if (result != null)
+        {
+            await WriteLogAsync("extract_images", model, default, 0, false,
+                $"JSON 解析失败，返回前 200 字：{result[..Math.Min(200, result.Length)]}", ct);
+        }
+        return (items, result);
     }
 
     /// <summary>答案图片回填：把答案页的答案与评分细则对应填入已解析的题目。</summary>
@@ -231,8 +241,10 @@ public sealed class DeepSeekGradingService
 要求：
 1. 只输出答案与评分细则，不要重复题干
 2. 答案页没有的题号不要输出
-3. 数学公式用 LaTeX 或纯文本；评分细则含分步得分时完整写入 rubric
-4. **只返回 JSON 数组，不要思考过程、解释或 markdown 代码块**：
+3. **客观题（选择/判断/填空）只识别答案本身**（选项字母/对错/数值），不要转录或描述原题内容
+4. 若答案页为**横向大页（A3 两栏排版）**：先读左栏（自上而下）、再读右栏，按题号对应
+5. 数学公式用 LaTeX 或纯文本；评分细则含分步得分时完整写入 rubric
+6. **只返回 JSON 数组，不要思考过程、解释或 markdown 代码块**：
 [{{""index"":1,""standardAnswer"":""…"",""rubric"":""要点1(2分);要点2(3分)""}}]";
 
         // 分批（每批 5 页）+ 精简输出，避免与出题相同的 max_tokens 截断问题

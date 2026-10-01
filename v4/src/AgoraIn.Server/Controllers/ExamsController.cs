@@ -229,6 +229,118 @@ public class ExamsController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// 分批视觉出题（前端逐批上传页面图片，实时展示）：每批 ≤3 张，
+    /// 立即解析入库并返回本批 AI 原文（前端实时展示），题号按 startNumber 连续。
+    /// </summary>
+    [HttpPost("papers/{paperId}/extract-batch")]
+    [RequestSizeLimit(30 * 1024 * 1024)]
+    public async Task<IActionResult> ExtractBatch(
+        string paperId, [FromForm] List<IFormFile>? images,
+        [FromQuery] int startNumber = 1, CancellationToken ct = default)
+    {
+        if (images == null || images.Count == 0 || images.Count > 4)
+            return BadRequest(new { error = "每批请上传 1-4 张页面图片" });
+
+        var bytes = new List<byte[]>();
+        foreach (var f in images)
+        {
+            using var ms = new MemoryStream();
+            await f.CopyToAsync(ms, ct);
+            bytes.Add(ms.ToArray());
+        }
+
+        var (items, raw) = await _ai.ExtractOneBatchAsync(bytes, Math.Max(1, startNumber), ct);
+        if (items == null || items.Count == 0)
+            return BadRequest(new
+            {
+                error = "AI 未识别出题目（可能页面空白或模型不支持图像，详见调用日志）",
+                raw = raw != null ? raw[..Math.Min(400, raw.Length)] : null,
+            });
+
+        var startIndex = await _db.Questions
+            .Where(q => q.PaperId == paperId)
+            .Select(q => (int?)q.Index)
+            .MaxAsync(ct) ?? -1;
+
+        var created = new List<Question>();
+        foreach (var eq in items)
+        {
+            var q = new Question
+            {
+                PaperId = paperId,
+                Index = ++startIndex,
+                Type = ParseQuestionType(eq.Type),
+                Content = eq.Content,
+                Score = eq.Score > 0 ? eq.Score : 2,
+                StandardAnswer = eq.StandardAnswer,
+                OptionsJson = eq.Options is { Count: > 0 }
+                    ? JsonSerializer.Serialize(eq.Options.Select(o => new { key = o.Key, text = o.Text ?? "" }).ToList())
+                    : null,
+                Rubric = eq.Rubric,
+                KnowledgeTagsJson = eq.KnowledgeTags is { Count: > 0 } ? JsonSerializer.Serialize(eq.KnowledgeTags) : null,
+                AiGradingEnabled = null,
+            };
+            _db.Questions.Add(q);
+            created.Add(q);
+        }
+        await _db.SaveChangesAsync(ct);
+        await RefreshPaperTotalAsync(paperId);
+
+        return Ok(new
+        {
+            imported = created.Count,
+            raw = raw ?? "",
+            questions = created.OrderBy(q => q.Index).Select(q => new
+            {
+                q.Id, q.Index, type = q.Type.ToString(), q.Content, q.Score, q.StandardAnswer, q.Rubric,
+            }),
+        });
+    }
+
+    /// <summary>分批答案回填：上传答案页图片（≤5 张），把答案与评分细则按题号回填到已导入的题目。</summary>
+    [HttpPost("papers/{paperId}/fill-batch")]
+    [RequestSizeLimit(30 * 1024 * 1024)]
+    public async Task<IActionResult> FillBatch(string paperId, [FromForm] List<IFormFile>? images, CancellationToken ct = default)
+    {
+        if (images == null || images.Count == 0 || images.Count > 6)
+            return BadRequest(new { error = "每批请上传 1-6 张答案页图片" });
+
+        var questions = await _db.Questions
+            .Where(q => q.PaperId == paperId)
+            .OrderBy(q => q.Index)
+            .ToListAsync(ct);
+        if (questions.Count == 0) return BadRequest(new { error = "请先完成题目导入" });
+
+        var eqList = questions.Select(q => new ExtractedQuestion
+        {
+            Index = q.Index + 1,
+            Content = (q.Content ?? "")[..Math.Min(60, q.Content?.Length ?? 0)],
+            StandardAnswer = q.StandardAnswer,
+            Rubric = q.Rubric,
+        }).ToList();
+
+        var bytes = new List<byte[]>();
+        foreach (var f in images)
+        {
+            using var ms = new MemoryStream();
+            await f.CopyToAsync(ms, ct);
+            bytes.Add(ms.ToArray());
+        }
+
+        var filled = await _ai.FillAnswersFromImagesAsync(eqList, bytes, ct);
+        var updated = 0;
+        foreach (var f in filled ?? [])
+        {
+            var q = questions.FirstOrDefault(x => x.Index == f.Index - 1);
+            if (q == null) continue;
+            if (!string.IsNullOrWhiteSpace(f.StandardAnswer)) { q.StandardAnswer = f.StandardAnswer; updated++; }
+            if (!string.IsNullOrWhiteSpace(f.Rubric)) q.Rubric = f.Rubric;
+        }
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { updated });
+    }
+
     /// <summary>AI 生成标准答案与评分要点（只处理缺失项；开启 AI 后主观题阅卷提示词随 rubric 自动生效）。</summary>
     [HttpPost("papers/{paperId}/ai-generate-answers")]
     public async Task<IActionResult> AiGenerateAnswers(string paperId, CancellationToken ct)

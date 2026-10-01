@@ -105,15 +105,15 @@
                 <span v-if="q.knowledgeTags" style="font-size:11px;color:#909399">{{ q.knowledgeTags }}</span>
                 <el-button link type="danger" size="small" style="margin-left:auto" @click="questions.splice(idx,1)">删除</el-button>
               </div>
-              <el-input v-model="q.content" size="small" :type="q.type>=3?'textarea':'text'" :rows="q.type>=3?2:1"
+              <el-input v-if="q.type>=3" v-model="q.content" size="small" :type="q.type>=3?'textarea':'text'" :rows="q.type>=3?2:1"
                         placeholder="题目内容/题干" style="margin:6px 0" />
               <template v-if="q.type<=1">
-                <div v-for="(opt,oi) in getOpts(q)" :key="oi" style="display:flex;align-items:center;gap:4px;margin:2px 0">
-                  <span style="font-weight:600;font-size:12px;min-width:16px">{{String.fromCharCode(65+oi)}}</span>
-                  <el-input :model-value="opt.text" size="small" placeholder="选项" style="flex:1"
-                            @input="(v:string) => syncOpt(q, oi, v)" />
+                <div style="display:flex;align-items:center;gap:8px;margin:6px 0">
+                  <span style="font-size:12px;color:#606266">选项个数</span>
+                  <el-input-number :model-value="optCount(q)" size="small" :min="2" :max="8"
+                                   @change="(v:number|undefined) => setOptCount(q, v ?? 4)" />
+                  <span style="font-size:11px;color:#909399">答题卡仅绘制选项气泡，无需题干</span>
                 </div>
-                <el-button size="small" text @click="addOpt(q)">+ 选项</el-button>
               </template>
               <el-input v-model="q.standardAnswer" size="small" placeholder="标准答案" style="margin-top:4px" />
               <el-input v-if="q.type>=3" v-model="q.knowledgeTags" size="small" placeholder="知识点标签（逗号分隔）" style="margin-top:4px" />
@@ -203,6 +203,7 @@
         支持 docx / pdf / txt。PDF（含数学公式的试卷）会自动把每页渲染成图片交给 AI 视觉识别，
         公式不会乱码；docx/txt 走文本解析。解析后逐题生成（题型/选项/答案/分值/评分要点/知识点）。
       </p>
+      <div v-if="importLog" ref="logEl" class="import-log">{{ importLog }}</div>
       <template #footer>
         <el-button @click="importVisible = false">取消</el-button>
         <el-button type="primary" :disabled="!importQFile" :loading="importing" @click="doImportFile">上传并解析</el-button>
@@ -384,7 +385,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { examApi, classApi, studentApi, type ClassRow, type StudentRow } from '@/api/client'
 
@@ -441,8 +442,13 @@ const importQFile = ref<File | null>(null)
 const importAFile = ref<File | null>(null)
 const importing = ref(false)
 const generatingAnswers = ref(false)
-// 后台识别轮询
-let pollTimer: ReturnType<typeof setInterval> | null = null
+const importLog = ref('')
+const logEl = ref<HTMLElement>()
+
+function appendLog(text: string) {
+  importLog.value += (importLog.value ? '\n' : '') + text
+  void nextTick(() => { if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight })
+}
 
 // 成绩统计
 const statsVisible = ref(false)
@@ -495,12 +501,18 @@ function addQ(type: number) {
 function getOpts(q: any): {key:string;text:string}[] {
   try { const a=JSON.parse(q.optionsJson||'[]'); return Array.isArray(a)?a:[] } catch {} return [{key:'A',text:''},{key:'B',text:''}]
 }
-function syncOpt(q: any, idx: number, val: string) {
-  const o=getOpts(q); if(o[idx]) o[idx].text=val; q.optionsJson=JSON.stringify(o)
+function optCount(q: any): number {
+  const o = getOpts(q)
+  return o.length || 4
 }
-function addOpt(q: any) {
-  const o=getOpts(q); o.push({key:String.fromCharCode(65+o.length),text:''}); q.optionsJson=JSON.stringify(o)
+
+function setOptCount(q: any, n: number) {
+  const opts = getOpts(q)
+  while (opts.length < n) opts.push({ key: String.fromCharCode(65 + opts.length), text: '' })
+  while (opts.length > n) opts.pop()
+  q.optionsJson = JSON.stringify(opts)
 }
+
 
 async function saveAll() {
   if (!editingPaper.value?.title) { ElMessage.warning('请填写标题'); return }
@@ -661,32 +673,42 @@ async function doImportFile() {
   try {
     const isPdf = qf.name.toLowerCase().endsWith('.pdf')
     if (isPdf) {
+      // ── 逐批实时流程：每批 3 页 → 上传 → AI 识别 → 实时展示回复 → 自动入库 ──
       ElMessage.info('正在把 PDF 渲染为页面图片…')
       const qImgs = await renderPdfToImages(qf)
-      let aImgs: Blob[] = []
-      if (importAFile.value && importAFile.value.name.toLowerCase().endsWith('.pdf')) {
-        aImgs = await renderPdfToImages(importAFile.value)
+      const aImgs = importAFile.value && importAFile.value.name.toLowerCase().endsWith('.pdf')
+        ? await renderPdfToImages(importAFile.value)
+        : []
+
+      importLog.value = `已渲染试卷 ${qImgs.length} 页${aImgs.length ? ` + 答案 ${aImgs.length} 页` : ''}\n`
+      let importedTotal = 0
+      let startNumber = questions.value.length + 1
+
+      for (let i = 0; i < qImgs.length; i += 3) {
+        const batch = qImgs.slice(i, i + 3)
+        appendLog(`── 第 ${i + 1}-${i + batch.length} 页识别中… ──`)
+        const r: any = await examApi.extractBatch(editingPaper.value.id, batch, startNumber)
+        appendLog((r.raw || '(AI 无文本返回)').trim())
+        appendLog(`✔ 本批导入 ${r.imported} 题`)
+        importedTotal += r.imported || 0
+        startNumber += r.imported || 0
       }
-      const totalBytes = qImgs.concat(aImgs).reduce((s2, b) => s2 + b.size, 0)
-      ElMessage.info(`已渲染 ${qImgs.length} 页（${(totalBytes / 1048576).toFixed(1)}MB），上传中…`)
-      const paperId = editingPaper.value.id
-      const beforeCount = questions.value.length
-      let lastPct = -1
-      const r = await examApi.importImages(paperId, qImgs, aImgs, pct => {
-        if (pct >= lastPct + 20) { lastPct = pct; ElMessage({ message: `上传中 ${pct}%…`, type: 'info', duration: 1500 }) }
-      })
-      // 服务端秒回执 + 后台 AI 识别（推理模型分批可能 2-6 分钟），轮询题目出现
-      if ((r as any)?.accepted) {
-        startPollImport(paperId, beforeCount)
-        ElMessage.success('已提交后台识别，AI 处理中（约 2-6 分钟），题目出现后自动刷新，可先做其他操作')
-        importVisible.value = false
-        return
+
+      if (aImgs.length) {
+        appendLog('── 答案页回填中… ──')
+        for (let i = 0; i < aImgs.length; i += 5) {
+          const r = await examApi.fillBatch(editingPaper.value.id, aImgs.slice(i, i + 5))
+          appendLog(`✔ 答案回填 ${r.updated} 题`)
+        }
       }
-      ElMessage.success(`AI 视觉识别并导入 ${(r as any)?.imported ?? 0} 题`)
-    } else {
-      const r = await examApi.importFile(editingPaper.value.id, qf, importAFile.value || undefined)
-      ElMessage.success(`AI 已识别并导入 ${r.imported} 题`)
+
+      appendLog(`── 完成：共导入 ${importedTotal} 题 ──`)
+      ElMessage.success(`AI 识别并导入 ${importedTotal} 题`)
+      await loadQuestions(editingPaper.value.id)
+      return
     }
+    const r = await examApi.importFile(editingPaper.value.id, qf, importAFile.value || undefined)
+    ElMessage.success(`AI 已识别并导入 ${r.imported} 题`)
     importVisible.value = false
     await loadQuestions(editingPaper.value.id)
   } catch (e: any) {
@@ -699,32 +721,7 @@ async function doImportFile() {
 }
 
 /** 后台识别轮询：题目出现即刷新；每分钟播报；10 分钟超时提示查日志 */
-function startPollImport(paperId: string, beforeCount: number) {
-  stopPollImport()
-  let waited = 0
-  pollTimer = setInterval(async () => {
-    waited += 15
-    try {
-      const list = await examApi.getQuestions(paperId)
-      const arr = (list as any[]) || []
-      if (arr.length > beforeCount) {
-        stopPollImport()
-        importVisible.value = false
-        if (editingPaper.value?.id === paperId) await loadQuestions(paperId)
-        ElMessage.success(`AI 已识别并导入 ${arr.length - beforeCount} 题`)
-      } else if (waited >= 600) {
-        stopPollImport()
-        ElMessage.error('AI 识别超时（10 分钟）。请到「AI 批改设置 → 调用日志」查看后台任务（场景：后台出题）状态')
-      } else if (waited % 60 === 0) {
-        ElMessage({ message: `AI 后台识别中…已等待 ${waited / 60} 分钟`, type: 'info', duration: 2000 })
-      }
-    } catch { /* 网络抖动继续轮询 */ }
-  }, 15000)
-}
 
-function stopPollImport() {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
-}
 
 async function aiGenerateAnswers() {
   if (!editingPaper.value?.id) { ElMessage.warning('请先保存试卷'); return }
@@ -845,6 +842,13 @@ onMounted(async () => { loadPapers(); try { classes.value = await classApi.list(
 .card-title { font-weight: 600; }
 .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .q-card { border: 1px solid #e4e7ed; border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; background: #fafafa; }
+.import-log {
+  background: #1e1e2e; color: #cdd6f4; border-radius: 8px;
+  padding: 10px 12px; max-height: 220px; overflow-y: auto;
+  font-family: Consolas, Menlo, monospace; font-size: 12px;
+  white-space: pre-wrap; word-break: break-all; line-height: 1.6;
+  margin-bottom: 10px;
+}
 .q-head { display: flex; align-items: center; gap: 8px; }
 .q-num { font-weight: 700; font-size: 13px; color: #409eff; min-width: 20px; }
 </style>

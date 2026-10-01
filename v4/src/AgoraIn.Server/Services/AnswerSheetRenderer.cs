@@ -47,8 +47,10 @@ public static class AnswerSheetRenderer
   * { box-sizing: border-box; }
   body { font-family: "SimSun", "Songti SC", serif; margin: 0; color: #000; }
 
-  /* ── 四角定位标记（黑色实心方块，用于透视校正） ── */
-  .anchor { position: absolute; width: 6mm; height: 6mm; background: #000; }
+  /* ── 四角定位标记（黑色实心方块，用于透视校正）──
+     position: fixed 在打印时每页重复绘制——多页答题卡每一页都有完整四角标记；
+     标记本身不含页码信息，每页相同即可满足透视校正 */
+  .anchor { position: fixed; width: 6mm; height: 6mm; background: #000; }
   .anchor.tl { top: 4mm; left: 4mm; }
   .anchor.tr { top: 4mm; right: 4mm; }
   .anchor.bl { bottom: 4mm; left: 4mm; }
@@ -60,7 +62,8 @@ public static class AnswerSheetRenderer
   .subtitle { text-align: center; font-size: 10pt; color: #333; margin-bottom: 4mm; }
 
   /* ── 学生信息区 ── */
-  .info { border: 0.4mm solid #000; padding: 3mm; margin-bottom: 4mm; display: flex; gap: 4mm; }
+  .info { border: 0.4mm solid #000; padding: 3mm; margin-bottom: 4mm; display: flex; gap: 4mm;
+          break-inside: avoid; page-break-inside: avoid; }
   .info-left { flex: 1; font-size: 10pt; line-height: 8mm; }
   .info-right { width: 70mm; }
   .write-line { border-bottom: 0.3mm solid #666; display: inline-block; min-width: 30mm; }
@@ -72,7 +75,8 @@ public static class AnswerSheetRenderer
   .bubble { width: 4.5mm; height: 4.5mm; border: 0.3mm solid #000; border-radius: 50%; margin: 0.6mm auto; }
 
   /* ── 客观题涂卡区 ── */
-  .section-title { font-size: 11pt; font-weight: bold; margin: 3mm 0 2mm; border-left: 1mm solid #000; padding-left: 2mm; }
+  .section-title { font-size: 11pt; font-weight: bold; margin: 3mm 0 2mm; border-left: 1mm solid #000; padding-left: 2mm;
+                   break-after: avoid; page-break-after: avoid; }
   .omr-grid { column-count: 3; column-gap: 4mm; }
   .omr-item { break-inside: avoid; margin-bottom: 1.6mm; font-size: 9pt; }
   .omr-row { display: flex; align-items: center; gap: 1mm; }
@@ -81,14 +85,16 @@ public static class AnswerSheetRenderer
   .omr-opt { width: 4.5mm; height: 4.5mm; border: 0.3mm solid #000; border-radius: 50%;
              font-size: 6pt; text-align: center; line-height: 4.5mm; }
 
-  /* ── 主观题作答区（边界框供切分） ── */
-  .answer-box { border: 0.4mm solid #000; margin-bottom: 3mm; }
+  /* ── 主观题作答区（边界框供切分）──
+     break-inside: avoid 防止作答框被打印分页拦腰切开 */
+  .answer-box { border: 0.4mm solid #000; margin-bottom: 3mm;
+                break-inside: avoid; page-break-inside: avoid; }
   .answer-head { font-size: 9pt; padding: 1mm 2mm; border-bottom: 0.3mm dashed #888; }
   .answer-body { height: var(--h, 30mm); }
   .answer-lines { background-image: repeating-linear-gradient(transparent, transparent 7mm, #ccc 7mm, #ccc 7.2mm); }
 
-  /* ── 页脚 ── */
-  .footer { position: absolute; bottom: 12mm; left: 10mm; right: 10mm;
+  /* ── 页脚（fixed：多页打印时每页重复，QR 为整卷标识） ── */
+  .footer { position: fixed; bottom: 12mm; left: 10mm; right: 10mm;
             display: flex; justify-content: space-between; align-items: center;
             font-size: 8pt; color: #444; border-top: 0.3mm solid #999; padding-top: 2mm; }
   .qr { width: 18mm; height: 18mm; border: 0.3mm solid #000; display: flex;
@@ -133,7 +139,7 @@ public static class AnswerSheetRenderer
       <span style="font-size:7pt">请用 2B 铅笔填涂，保持卡面整洁</span>
     </div>
     {{(string.IsNullOrEmpty(studentNo) ? "" : $"<div class=\"barcode\">{Escape(studentNo)}</div>")}}
-    <div class="qr">{{BuildQrCode(paper.Id, pageIndex)}}</div>
+    <div class="qr">{{BuildQrCode(paper.Id, pageCount > 1 ? 0 : pageIndex)}}</div>
   </div>
 </div>
 </body>
@@ -241,7 +247,7 @@ public static class AnswerSheetRenderer
     {
         try
         {
-            var payload = $"agorain:sheet:{paperId}:p{pageIndex}";
+            var payload = pageIndex > 0 ? $"agorain:sheet:{paperId}:p{pageIndex}" : $"agorain:sheet:{paperId}";
             using var qrGenerator = new QRCodeGenerator();
             var qrData = qrGenerator.CreateQrCode(payload, QRCodeGenerator.ECCLevel.M);
             var pngQr = new PngByteQRCode(qrData);
