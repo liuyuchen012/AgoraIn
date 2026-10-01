@@ -620,18 +620,22 @@ public class ExamsController : ControllerBase
             s.SubmittedAt, s.AiGradedAt, s.ConfirmedAt, s.ImagePathsJson,
             studentName = s.StudentId != null && names.TryGetValue(s.StudentId, out var n) ? n : null,
             /** 是否有扫描原图（人工复盘要对照原卷改分） */
-            hasImage = FirstStoredImage(s) != null,
+            hasImage = StoredImages(s).Count > 0,
+            /** 已存页数（多页答题卡按页归并到同一份提交） */
+            imageCount = StoredImages(s).Count,
         }));
     }
 
-    /// <summary>取某次提交的第一张扫描原图（人工复盘时对照原卷）。</summary>
+    /// <summary>取某次提交的扫描原图（人工复盘时对照原卷；多页答卷用 ?page=N 选页）。</summary>
     [HttpGet("submissions/{submissionId}/image")]
-    public async Task<IActionResult> GetSubmissionImage(string submissionId)
+    public async Task<IActionResult> GetSubmissionImage(string submissionId, [FromQuery] int page = 1)
     {
         var submission = await _db.AnswerSheetSubmissions.FindAsync(submissionId);
         if (submission == null) return NotFound(new { error = "提交记录不存在" });
-        var stored = FirstStoredImage(submission);
-        if (stored == null) return NotFound(new { error = "这条记录没有存原图（早期上传或存图失败）" });
+        var images = StoredImages(submission);
+        if (images.Count == 0) return NotFound(new { error = "这条记录没有存原图（早期上传或存图失败）" });
+        var idx = Math.Clamp(page - 1, 0, images.Count - 1);
+        var stored = images[idx];
 
         var full = Path.Combine(_paths.SheetDirectory, stored);
         if (!System.IO.File.Exists(full)) return NotFound(new { error = "原图文件已丢失" });
@@ -640,33 +644,47 @@ public class ExamsController : ControllerBase
         return PhysicalFile(full, "image/jpeg", enableRangeProcessing: true);
     }
 
-    /// <summary>从 ImagePathsJson 取第一张「已存储」的文件名（只接受纯文件名，防目录穿越）。</summary>
-    private static string? FirstStoredImage(AnswerSheetSubmission submission)
+    /// <summary>提交里「已落盘」的原图文件名（按页号升序）。只认本服务生成的 {提交Id}-p{页}.jpg 命名，
+    /// 早期记录里存的原始文件名（如 answersheet.jpg）没有对应文件，不算。</summary>
+    private static List<string> StoredImages(AnswerSheetSubmission submission)
     {
-        if (string.IsNullOrWhiteSpace(submission.ImagePathsJson)) return null;
+        var result = new List<string>();
+        if (string.IsNullOrWhiteSpace(submission.ImagePathsJson)) return result;
         try
         {
             var names = System.Text.Json.JsonSerializer.Deserialize<List<string>>(submission.ImagePathsJson);
-            var first = names?.FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
-            if (first == null || first != Path.GetFileName(first)) return null;
-            var ext = Path.GetExtension(first);
-            if (!ext.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
-                && !ext.Equals(".jpeg", StringComparison.OrdinalIgnoreCase)
-                && !ext.Equals(".png", StringComparison.OrdinalIgnoreCase)) return null;
-            return first;
+            if (names == null) return result;
+            foreach (var n in names)
+            {
+                if (string.IsNullOrWhiteSpace(n) || n != Path.GetFileName(n)) continue;
+                if (!System.Text.RegularExpressions.Regex.IsMatch(n,
+                        @"^[0-9a-fA-F-]{36}-p\d+\.(jpg|jpeg|png)$")) continue;
+                result.Add(n);
+            }
+            result.Sort((a, b) =>
+            {
+                var pa = int.Parse(System.Text.RegularExpressions.Regex.Match(a, @"-p(\d+)\.").Groups[1].Value);
+                var pb = int.Parse(System.Text.RegularExpressions.Regex.Match(b, @"-p(\d+)\.").Groups[1].Value);
+                return pa.CompareTo(pb);
+            });
         }
-        catch
-        {
-            return null;
-        }
+        catch { /* JSON 损坏按无图处理 */ }
+        return result;
     }
 
     /// <summary>
     /// 上传答题卡图片并触发识别（考号涂卡 + 客观题 OMR）。
-    /// 客观题识别后立即与标准答案比对自动判分（Source=Ai）；识别到考号时按考号回填学生（学号匹配）。
+    ///
+    /// **多页答题卡**：一份答卷的各页应归并到同一条提交记录，而不是每页各建一条——
+    ///   1. App 扫完第 1 页后带上 ?submissionId= 继续扫后续页（主流程，归属明确）；
+    ///   2. 第 1 页重复扫/换设备再扫：同试卷、同考号、未确认的已有答卷会被复用（按考号去重）；
+    ///   3. 不带 submissionId 的续页（网页单张上传）：当该试卷只有一份"缺这一页"的未完成答卷时
+    ///      自动并入；有多份无法确定归属时不落库，提示按顺序扫描。
+    /// 客观题识别后立即与标准答案比对自动判分；识别到考号时按考号回填学生（学号匹配）。
     /// </summary>
     [HttpPost("submissions")]
-    public async Task<IActionResult> UploadSubmission([FromForm] IFormFile file, [FromQuery] string paperId)
+    public async Task<IActionResult> UploadSubmission(
+        [FromForm] IFormFile file, [FromQuery] string paperId, [FromQuery] string? submissionId)
     {
         if (file == null || file.Length == 0) return BadRequest("请上传答题卡图片");
 
@@ -674,36 +692,18 @@ public class ExamsController : ControllerBase
         await file.CopyToAsync(ms);
         var imageData = ms.ToArray();
 
-        var submission = new AnswerSheetSubmission
-        {
-            PaperId = paperId,
-            Status = SubmissionStatus.NotGraded,
-        };
-
-        // 原图落盘：人工复盘要对着学生原卷改分，只存文件名等于没存
-        var storedName = $"{submission.Id}.jpg";
-        try
-        {
-            await System.IO.File.WriteAllBytesAsync(Path.Combine(_paths.SheetDirectory, storedName), imageData);
-            submission.ImagePathsJson = System.Text.Json.JsonSerializer.Serialize(new[] { storedName });
-        }
-        catch
-        {
-            // 存图失败不阻断识别链路，只是复盘时看不到原卷
-            submission.ImagePathsJson = System.Text.Json.JsonSerializer.Serialize(new[] { file.FileName });
-        }
-
         var questions = await _db.Questions
             .Where(q => q.PaperId == paperId)
             .OrderBy(q => q.Index)
             .ToListAsync();
         var optionKeys = BuildOptionKeys(questions);
 
-        // 先本地识别（切卡 + 客观题 + 考号，不调大模型、不外发图像）；
+        // 先本地识别（切卡 + 客观题 + 考号 + 页码，不调大模型、不外发图像）；
         // 找不到四角定位标记（没拍全/太模糊）才回退到视觉模型。
         string recognizeSource = "ai";
         var local = OmrRecognizer.Recognize(imageData, questions, optionKeys);
         OmrResult? omrResult;
+        int pageNo = 1, totalPages = 1;
         if (local != null)
         {
             recognizeSource = "local";
@@ -713,11 +713,68 @@ public class ExamsController : ControllerBase
                 OverallConfidence = local.Confidence,
                 Answers = local.Answers,
             };
+            pageNo = local.PageNo;
+            totalPages = local.TotalPages;
         }
         else
         {
             omrResult = await _ai.RecognizeAnswerSheetAsync(imageData);
         }
+
+        // ── 定位这份答卷该归并到哪条提交（多页答题卡的核心）──
+        var (target, isNew, resolveWarning) = await ResolveTargetSubmissionAsync(paperId, submissionId, pageNo, omrResult?.StudentRef);
+        if (target == null)
+        {
+            // 无法确定归属（多份未完成答卷抢同一续页）：不落库，避免产生垃圾提交
+            return Ok(new
+            {
+                submissionId = (string?)null,
+                status = SubmissionStatus.NotGraded.ToString(),
+                isNew = false,
+                pageNo,
+                totalPages,
+                storedPages = 0,
+                recognizedStudent = omrResult?.StudentRef,
+                matchedStudentId = (string?)null,
+                answers = new List<string>(),
+                confidence = omrResult?.OverallConfidence,
+                warning = resolveWarning,
+                recognizeSource,
+                recognizeDebug = local?.Debug,
+                autoScored = 0,
+            });
+        }
+
+        // ── 原图落盘：{提交Id}-p{页}.jpg，多页按页归并到同一份提交 ──
+        var images = StoredImages(target);
+        var page = local != null ? pageNo : images.Count + 1;   // 无页码信息时追加到末尾
+        var storedName = $"{target.Id}-p{page}.jpg";
+        try
+        {
+            await System.IO.File.WriteAllBytesAsync(Path.Combine(_paths.SheetDirectory, storedName), imageData);
+            images.RemoveAll(n => n.Contains($"-p{page}.", StringComparison.OrdinalIgnoreCase));
+            images.Add(storedName);
+            images.Sort(ComparePageName);
+            target.ImagePathsJson = System.Text.Json.JsonSerializer.Serialize(images);
+        }
+        catch
+        {
+            // 存图失败不阻断识别链路，只是复盘时看不到原卷
+        }
+
+        if (isNew) _db.AnswerSheetSubmissions.Add(target);   // 新答卷（续页归并的目标已在上下文中跟踪）
+
+        // 考号 → 学号辅助匹配（结果须教师在批改工作台确认绑定）
+        if (!string.IsNullOrEmpty(omrResult?.StudentRef))
+        {
+            if (string.IsNullOrEmpty(target.StudentRef)) target.StudentRef = omrResult.StudentRef;
+            if (target.StudentId == null)
+            {
+                var stu = await _db.Students.FirstOrDefaultAsync(s => s.StudentNo == omrResult.StudentRef);
+                if (stu != null) target.StudentId = stu.Id;
+            }
+        }
+
         var byIndex = questions.ToDictionary(q => q.Index);
         // 卡面印刷的是「题号」= Index + 1；识别结果按卡面题号回传，故按题号索引（旧代码用 Index 会整体错位一题）
         var byNo = questions.ToDictionary(q => q.Index + 1);
@@ -727,19 +784,25 @@ public class ExamsController : ControllerBase
 
         if (omrResult != null)
         {
-            submission.StudentRef = omrResult.StudentRef;
-            // 考号 → 学号辅助匹配（结果须教师在批改工作台确认绑定）
-            if (!string.IsNullOrEmpty(omrResult.StudentRef))
-            {
-                var stu = await _db.Students.FirstOrDefaultAsync(s => s.StudentNo == omrResult.StudentRef);
-                if (stu != null) submission.StudentId = stu.Id;
-            }
-
             foreach (var ans in omrResult.Answers)
             {
                 // 兼容模型偶发返回 0 起编号：先按卡面题号取，取不到再按 0 起 Index 兜底
                 if (!byNo.TryGetValue(ans.Index, out var q)
                     && !byIndex.TryGetValue(ans.Index, out q)) continue;
+
+                // 同题已有结果（重复上传同一页 / 教师已改）：不重复插入
+                var existing = await _db.QuestionResults.FirstOrDefaultAsync(r =>
+                    r.SubmissionId == target.Id && r.QuestionId == q.Id);
+                if (existing != null)
+                {
+                    if (existing.Source != GradingSource.Teacher)
+                    {
+                        existing.RecognizedAnswer = ans.Answer;
+                        existing.Confidence = ans.Confidence;
+                    }
+                    continue;
+                }
+
                 lowestConfidence = Math.Min(lowestConfidence, ans.Confidence);
 
                 if (IsObjective(q.Type) && q.AiGradingEnabled != false && !string.IsNullOrEmpty(q.StandardAnswer))
@@ -748,7 +811,7 @@ public class ExamsController : ControllerBase
                     var correct = NormalizeAnswer(ans.Answer) == NormalizeAnswer(q.StandardAnswer);
                     _db.QuestionResults.Add(new QuestionResult
                     {
-                        SubmissionId = submission.Id,
+                        SubmissionId = target.Id,
                         QuestionId = q.Id,
                         RecognizedAnswer = ans.Answer,
                         Score = correct ? q.Score : 0,
@@ -764,7 +827,7 @@ public class ExamsController : ControllerBase
                     // 先存识别内容，等待教师阅卷（"待人工"）
                     _db.QuestionResults.Add(new QuestionResult
                     {
-                        SubmissionId = submission.Id,
+                        SubmissionId = target.Id,
                         QuestionId = q.Id,
                         RecognizedAnswer = ans.Answer,
                         Score = null,
@@ -779,25 +842,24 @@ public class ExamsController : ControllerBase
         {
             // 有客观题自动判分即视为 AI 已批；识别置信度低或存在未定分主观题 → 待人工
             var hasUndecided = await _db.QuestionResults.CountAsync(r =>
-                r.SubmissionId == submission.Id && r.Score == null) > 0;
-            submission.Status = (hasUndecided || lowestConfidence < settings.HumanReviewThreshold)
+                r.SubmissionId == target.Id && r.Score == null) > 0;
+            target.Status = (hasUndecided || lowestConfidence < settings.HumanReviewThreshold)
                 ? SubmissionStatus.NeedsHuman
                 : SubmissionStatus.AiGraded;
-            submission.AiGradedAt = DateTime.Now;
+            target.AiGradedAt = DateTime.Now;
         }
-        else if (omrResult != null && omrResult.Answers.Count == 0)
+        else if (omrResult != null && omrResult.Answers.Count == 0 && isNew)
         {
             // 一道题都没识别出来（如卡面反光/未涂卡）：不要误判为「AI 已批 0 分」
-            submission.Status = SubmissionStatus.NeedsHuman;
+            target.Status = SubmissionStatus.NeedsHuman;
         }
 
-        _db.AnswerSheetSubmissions.Add(submission);
         await _db.SaveChangesAsync();
 
         // 识别没返回结果时，把最近的 AI 调用错误带回给 App：
         // 否则手机上只看到「没有识别结果」，分不清是没涂卡、没配密钥还是上游欠费。
-        string? warning = null;
-        if (omrResult == null)
+        string? warning = resolveWarning;
+        if (omrResult == null && warning == null)
         {
             var lastError = await _db.AiCallLogs
                 .Where(l => !l.Success && l.Endpoint == "recognize")
@@ -811,10 +873,14 @@ public class ExamsController : ControllerBase
 
         return Ok(new
         {
-            submissionId = submission.Id,
-            status = submission.Status.ToString(),
-            recognizedStudent = omrResult?.StudentRef,
-            matchedStudentId = submission.StudentId,
+            submissionId = target.Id,
+            status = target.Status.ToString(),
+            isNew,
+            pageNo,
+            totalPages,
+            storedPages = images.Count,
+            recognizedStudent = target.StudentRef ?? omrResult?.StudentRef,
+            matchedStudentId = target.StudentId,
             // 移动端扫卡结果回显：题号:答案（卡面题号，1 起）
             answers = omrResult?.Answers
                 .OrderBy(a => a.Index)
@@ -830,6 +896,61 @@ public class ExamsController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// 多页归并的目标提交解析。
+    /// 返回 (目标提交, 警告)；目标为 null 表示无法确定归属（调用方不落库）。
+    /// 新建的提交只 new 了对象、未入库（Id 由调用方 Add + SaveChanges 落库）。
+    /// </summary>
+    private async Task<(AnswerSheetSubmission Target, bool IsNew, string? Warning)> ResolveTargetSubmissionAsync(
+        string paperId, string? submissionId, int pageNo, string? studentRef)
+    {
+        // 1) App 链式上传：显式指定续传目标
+        if (!string.IsNullOrWhiteSpace(submissionId))
+        {
+            var target = await _db.AnswerSheetSubmissions.FindAsync(submissionId);
+            if (target != null && target.PaperId == paperId && target.Status != SubmissionStatus.Confirmed)
+            {
+                // 该页带考号且与已有答卷的考号不同 → 这是下一份答卷的第 1 页，开新份而不是并进去
+                var differentStudent = !string.IsNullOrEmpty(target.StudentRef)
+                                       && !string.IsNullOrEmpty(studentRef)
+                                       && target.StudentRef != studentRef;
+                if (!differentStudent) return (target, false, null);
+            }
+            // 找不到 / 已确认 / 跨试卷 / 换了考生：静默开新份
+        }
+
+        // 2) 首页（带考号）：同试卷同考号已有未确认答卷 → 并入，避免重复扫描生成两条
+        if (pageNo <= 1 && !string.IsNullOrEmpty(studentRef))
+        {
+            var cutoff = DateTime.Now.AddHours(-24);
+            var dup = await _db.AnswerSheetSubmissions
+                .Where(s => s.PaperId == paperId && s.Status != SubmissionStatus.Confirmed
+                            && s.SubmittedAt >= cutoff && s.StudentRef == studentRef)
+                .OrderByDescending(s => s.SubmittedAt)
+                .FirstOrDefaultAsync();
+            if (dup != null) return (dup, false, "该考号已有未完成的答卷，本页已并入（重复扫描不会产生重复记录）");
+        }
+
+        // 3) 无显式目标的续页（网页单张上传）：仅当该试卷恰好只有一份缺这一页的未完成答卷时自动并入
+        if (pageNo > 1)
+        {
+            var cutoff = DateTime.Now.AddHours(-24);
+            var open = await _db.AnswerSheetSubmissions
+                .Where(s => s.PaperId == paperId && s.Status != SubmissionStatus.Confirmed
+                            && s.SubmittedAt >= cutoff)
+                .OrderByDescending(s => s.SubmittedAt)
+                .ToListAsync();
+            var missing = open.Where(s => StoredImages(s).Count < pageNo).ToList();
+            if (missing.Count == 1) return (missing[0], false, null);
+            if (missing.Count > 1)
+                return (null!, false, $"扫到第 {pageNo} 页，但有 {missing.Count} 份未完成答卷，无法确定归属；" +
+                                      "请在 App 中按 1→2→3 顺序连续扫描同一份，或先扫该生的第 1 页");
+            return (null!, false, $"扫到第 {pageNo} 页，但没有找到未完成的答卷；请先扫该生的第 1 页");
+        }
+
+        return (new AnswerSheetSubmission { PaperId = paperId, Status = SubmissionStatus.NotGraded }, true, null);
+    }
+
     /// <summary>题目选项字母表（本地 OMR 需要知道每题有几个气泡）。</summary>
     private static Dictionary<string, List<string>> BuildOptionKeys(List<Question> questions)
     {
@@ -842,12 +963,20 @@ public class ExamsController : ControllerBase
                 using var doc = System.Text.Json.JsonDocument.Parse(q.OptionsJson);
                 var keys = doc.RootElement.EnumerateArray()
                     .Select(o => o.TryGetProperty("key", out var k) ? k.GetString() ?? "" : "")
-                    .Where(s => s.Length > 0).ToList();
+                    .Where(x => x.Length > 0).ToList();
                 if (keys.Count > 0) map[q.Id] = keys;
             }
             catch { /* 选项 JSON 损坏则按默认 ABCD 处理 */ }
         }
         return map;
+    }
+
+    /// <summary>按文件名里的 -p{N} 页号排序。</summary>
+    private static int ComparePageName(string a, string b)
+    {
+        var pa = int.Parse(System.Text.RegularExpressions.Regex.Match(a, @"-p(\d+)\.").Groups[1].Value);
+        var pb = int.Parse(System.Text.RegularExpressions.Regex.Match(b, @"-p(\d+)\.").Groups[1].Value);
+        return pa.CompareTo(pb);
     }
 
     /// <summary>整卷 AI 批改：对主观题（填空/简答/作文）逐题调用大模型按评分要点给分。</summary>

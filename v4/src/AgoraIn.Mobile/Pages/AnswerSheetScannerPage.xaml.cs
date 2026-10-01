@@ -12,6 +12,13 @@ public partial class AnswerSheetScannerPage : ContentPage
     private string? _selectedPaperId;
     private bool _loading;
 
+    // ── 多页答题卡连续扫描状态 ──
+    // 扫到第 1 页后服务端返回 submissionId；后续页带上它归并到同一份答卷。
+    // 扫到下一份的第 1 页（考号不同）时服务端会自动开新份，这里的状态只是跟随更新。
+    private string? _chainSubmissionId;
+    private int _chainPage = 1;
+    private int _chainTotal = 1;
+
     public AnswerSheetScannerPage() : this(App.Api) { }
 
     public AnswerSheetScannerPage(Services.ApiClient api)
@@ -178,16 +185,37 @@ public partial class AnswerSheetScannerPage : ContentPage
             imageContent.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
             content.Add(imageContent, "file", "answersheet.jpg");
 
+            var chain = _chainSubmissionId != null ? $"&submissionId={_chainSubmissionId}" : "";
             var result = await _api.PostAsync<SubmissionResult>(
-                $"/api/v4/exams/submissions?paperId={_selectedPaperId}", content);
+                $"/api/v4/exams/submissions?paperId={_selectedPaperId}{chain}", content);
+
+            if (result != null && !string.IsNullOrEmpty(result.Warning) && result.SubmissionId == null)
+            {
+                // 服务端无法确定该页归属（如未扫第 1 页就先扫了第 2 页）
+                StatusLabel.Text = "⚠️ 该页没有并入任何答卷";
+                ResultLabel.Text = result.Warning;
+                _chainSubmissionId = null;
+                NewSheetButton.IsVisible = false;
+                return;
+            }
 
             if (result != null)
             {
+                // 更新连续扫描状态：第 1 页起链，后续页跟随；换考生时服务端自动开新份
+                if (!string.IsNullOrEmpty(result.SubmissionId))
+                {
+                    _chainSubmissionId = result.SubmissionId;
+                    _chainPage = Math.Max(1, result.PageNo);
+                    _chainTotal = Math.Max(_chainPage, result.TotalPages);
+                    NewSheetButton.IsVisible = _chainTotal > 1;
+                }
+
+                var pageMark = _chainTotal > 1 ? $"第 {_chainPage}/{_chainTotal} 页 " : "";
                 StatusLabel.Text = result.Status switch
                 {
-                    "AiGraded" => "✅ 识别并自动判分完成",
-                    "NeedsHuman" => "⚠️ 已识别，待人工复核",
-                    _ => "✅ 识别完成",
+                    "AiGraded" => $"✅ {pageMark}识别并自动判分完成",
+                    "NeedsHuman" => $"⚠️ {pageMark}已识别，待人工复核",
+                    _ => $"✅ {pageMark}识别完成",
                 };
                 var lines = new List<string>();
                 if (!string.IsNullOrEmpty(result.Warning))
@@ -217,6 +245,20 @@ public partial class AnswerSheetScannerPage : ContentPage
         }
     }
 
+    private void OnNewSheet(object? sender, EventArgs e)
+    {
+        _chainSubmissionId = null;
+        _chainPage = 1;
+        _chainTotal = 1;
+        NewSheetButton.IsVisible = false;
+        _imageBytes = null;
+        PreviewImage.Source = null;
+        OnPropertyChanged(nameof(ShowPlaceholder));
+        UploadButton.IsEnabled = false;
+        StatusLabel.Text = "已开始新的一份，请扫第 1 页";
+        ResultLabel.Text = "";
+    }
+
     public class PaperOption
     {
         public string Id { get; set; } = "";
@@ -238,5 +280,10 @@ public partial class AnswerSheetScannerPage : ContentPage
         public double? Confidence { get; set; }
         /// <summary>识别未返回结果时的原因（如上游 AI 欠费 402）。</summary>
         public string? Warning { get; set; }
+        /// <summary>本页页码 / 该答卷总页数（多页答题卡归并用）。</summary>
+        public int PageNo { get; set; }
+        public int TotalPages { get; set; }
+        /// <summary>是否新建了答卷（false = 并入已有答卷）。</summary>
+        public bool IsNew { get; set; }
     }
 }

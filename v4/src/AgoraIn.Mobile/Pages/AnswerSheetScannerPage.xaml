@@ -50,6 +50,10 @@
             <Button x:Name="UploadButton" Text="上传识别" Clicked="OnUpload"
                     BackgroundColor="#ea4335" TextColor="White" CornerRadius="8" HeightRequest="48"
                     IsEnabled="False" />
+            <!-- 多页答题卡：扫完一份后开始下一份（不再并入上一份） -->
+            <Button x:Name="NewSheetButton" Text="📄 新的一份（下一张从第 1 页开始）" Clicked="OnNewSheet"
+                    BackgroundColor="#fbbc05" TextColor="White" CornerRadius="8" HeightRequest="44"
+                    IsVisible="False" />
         </StackLayout>
     </Grid>
 </ContentPage>

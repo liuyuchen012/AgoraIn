@@ -8,6 +8,7 @@ namespace AgoraIn.Server.Services;
 public sealed record OmrLocalResult(
     string PaperName,
     int PageNo,
+    int TotalPages,
     string? StudentRef,
     List<OmrQuestionAnswer> Answers,
     double Confidence,
@@ -137,7 +138,7 @@ public static class OmrRecognizer
         var confidence = total == 0 ? 0 : Math.Clamp(answers.Count / (double)total, 0, 1);
 
         return new OmrLocalResult(
-            paper.Name, page.PageNo, studentRef, answers, confidence,
+            paper.Name, page.PageNo, page.TotalPages, studentRef, answers, confidence,
             $"markers=4 paper={paper.Name} {paper.WidthMm:0}x{paper.HeightMm:0}mm pxPerMm={pxPerMm:0.0} " +
             $"page={page.PageNo}/{page.TotalPages} ringScore={bestScore:0.00} " +
             $"all=[{string.Join(" ", pageScores.Take(6))}] " +
@@ -156,6 +157,7 @@ public static class OmrRecognizer
         const double white = 235.0;
         SheetPageLayout? best = null;
         var bestScore = 0.0;
+        var bestMarks = 0;
         var scores = new List<string>();
         foreach (var showNotes in new[] { true, false })
         foreach (var idArea in new[] { IdAreaKind.Bubble, IdAreaKind.Handwrite, IdAreaKind.None })
@@ -167,7 +169,15 @@ public static class OmrRecognizer
                 var score = RingMatchScore(canon, pages[i], WarpPpm, white);
                 if (score < 0.4) continue;
                 scores.Add($"{(showNotes ? "N" : "-")}{(idArea == IdAreaKind.Bubble ? "B" : idArea == IdAreaKind.Handwrite ? "H" : "-")}p{i + 1}:{score:0.00}");
-                if (score > bestScore) { bestScore = score; best = pages[i]; }
+                // 平分时选"标记更多"的版式：内容较少的页是较多页的子集（如纯主观页 2 与 3 结构相近），
+                // 子集页也能拿满分，必须取题目更全的那一页
+                var marks = pages[i].Options.Count + pages[i].Frames.Count;
+                if (score > bestScore + 0.02 || (score > bestScore - 0.02 && marks > bestMarks))
+                {
+                    bestScore = Math.Max(bestScore, score);
+                    bestMarks = marks;
+                    best = pages[i];
+                }
             }
         }
         return (best, bestScore, scores);
@@ -543,23 +553,47 @@ public static class OmrRecognizer
     }
 
     /// <summary>气泡外框是否存在（用于判断当前页布局是否匹配照片）。</summary>
-    private static bool RingPresent(Gray img, BubbleMark b, int ppm)
+    private static bool RingPresent(Gray img, BubbleMark b, int ppm, bool search = false)
     {
         // 沿边框取 4 条薄带，平均灰度越暗说明外框在
-        var t = 0.45;    // 带宽 mm
-        var top = MeanRegion(img, b.Xmm, b.Ymm, b.Xmm + b.Wmm, b.Ymm + t, ppm);
-        var bottom = MeanRegion(img, b.Xmm, b.Ymm + b.Hmm - t, b.Xmm + b.Wmm, b.Ymm + b.Hmm, ppm);
-        var left = MeanRegion(img, b.Xmm, b.Ymm, b.Xmm + t, b.Ymm + b.Hmm, ppm);
-        var right = MeanRegion(img, b.Xmm + b.Wmm - t, b.Ymm, b.Xmm + b.Wmm, b.Ymm + b.Hmm, ppm);
-        var ring = (top + bottom + left + right) / 4;
-        return 1.0 - ring / 235.0 > RingInkThreshold;
+        const double t = 0.45;    // 带宽 mm
+        double Top(double dy) => MeanRegion(img, b.Xmm, b.Ymm + dy, b.Xmm + b.Wmm, b.Ymm + dy + t, ppm);
+        double Bottom(double dy) => MeanRegion(img, b.Xmm, b.Ymm + b.Hmm - t - dy, b.Xmm + b.Wmm, b.Ymm + b.Hmm - dy, ppm);
+        double Left(double dx) => MeanRegion(img, b.Xmm + dx, b.Ymm, b.Xmm + dx + t, b.Ymm + b.Hmm, ppm);
+        double Right(double dx) => MeanRegion(img, b.Xmm + b.Wmm - t - dx, b.Ymm, b.Xmm + b.Wmm - dx, b.Ymm + b.Hmm, ppm);
+
+        if (!search)
+        {
+            var ring = (Top(0) + Bottom(0) + Left(0) + Right(0)) / 4;
+            return 1.0 - ring / 235.0 > RingInkThreshold;
+        }
+
+        // 大外框（主观题作答框）：模型与实印可能有亚毫米级偏差，固定位置的带会扫空；
+        // 在 ±1.2mm 内给每条边找最暗的带，四条边都各自找到暗带才算这一页匹配
+        var thr = 235.0 * (1.0 - RingInkThreshold);
+        return MinBand(Top) < thr && MinBand(Bottom) < thr && MinBand(Left) < thr && MinBand(Right) < thr;
+    }
+
+    /// <summary>在 ±1.2mm 范围内以 0.3mm 步进平移采样带，返回最暗（最小）的带均值。</summary>
+    private static double MinBand(Func<double, double> band)
+    {
+        var best = double.MaxValue;
+        for (var d = -1.2; d <= 1.21; d += 0.3)
+        {
+            var v = band(d);
+            if (v < best) best = v;
+        }
+        return best;
     }
 
     internal static double RingMatchScore(Gray img, SheetPageLayout page, int ppm, double white)
     {
-        if (page.Options.Count == 0) return 0;
-        var present = page.Options.Count(o => RingPresent(img, o.Bubble, ppm));
-        return present / (double)page.Options.Count;
+        // 页面指纹 = 客观题气泡外框 + 主观题作答框外框（纯主观页没有气泡，靠作答框识别页码）
+        var total = page.Options.Count + page.Frames.Count;
+        if (total == 0) return 0;
+        var present = page.Options.Count(o => RingPresent(img, o.Bubble, ppm))
+                    + page.Frames.Count(f => RingPresent(img, f, ppm, search: true));
+        return present / (double)total;
     }
 
     private static double MeanRegion(Gray img, double x0mm, double y0mm, double x1mm, double y1mm, int ppm)

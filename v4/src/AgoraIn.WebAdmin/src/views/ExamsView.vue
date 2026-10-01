@@ -347,7 +347,13 @@
         <!-- 左：答题卡扫描原图（人工复盘要对着学生原卷改分） -->
         <div style="flex:0 0 42%;display:flex;flex-direction:column;border:1px solid #e4e7ed;border-radius:6px;overflow:hidden">
           <div style="padding:6px 10px;background:#f5f7fa;display:flex;align-items:center;justify-content:space-between">
-            <span style="font-size:13px;color:#606266">答题卡原图</span>
+            <span style="font-size:13px;color:#606266">
+              答题卡原图
+              <el-radio-group v-if="sheetPageCount > 1" v-model="sheetPage" size="small" style="margin-left:8px"
+                              @change="loadSheetImage(currentSubmission?.id, sheetPage)">
+                <el-radio-button v-for="p in sheetPageCount" :key="p" :value="p">第{{ p }}页</el-radio-button>
+              </el-radio-group>
+            </span>
             <div style="display:flex;align-items:center;gap:4px">
               <el-button link size="small" @click="sheetZoom = Math.max(20, sheetZoom - 25)">－</el-button>
               <span style="font-size:12px;color:#909399;width:44px;text-align:center">{{ sheetZoom }}%</span>
@@ -963,7 +969,9 @@ async function openResults(row: any) {
   resultsVisible.value = true
   sheetZoom.value = 100
   sheetRotate.value = 0
-  void loadSheetImage(row.id)
+  sheetPage.value = 1
+  sheetPageCount.value = Number(row.imageCount) || 1
+  void loadSheetImage(row.id, 1)
   resultsLoading.value = true
   try {
     const data = await examApi.getResults(row.id)
@@ -976,15 +984,20 @@ const sheetImageUrl = ref('')
 const sheetImageLoading = ref(false)
 const sheetZoom = ref(100)
 const sheetRotate = ref(0)
+const sheetPage = ref(1)
+const sheetPageCount = ref(1)
 
-async function loadSheetImage(submissionId?: string) {
+async function loadSheetImage(submissionId?: string, page = 1) {
   if (!submissionId) return
   closeSheetImage()
+  sheetPage.value = page
   sheetImageLoading.value = true
   try {
-    const res: any = await examApi.submissionImage(submissionId)
+    const res: any = await examApi.submissionImage(submissionId, page)
     const blob = res?.data instanceof Blob ? res.data : new Blob([res?.data ?? res], { type: 'image/jpeg' })
     sheetImageUrl.value = URL.createObjectURL(blob)
+    // 多页：翻到最后可用的页数（404 会走 catch，这里按请求页为上限记录）
+    sheetPageCount.value = Math.max(sheetPageCount.value, page)
   } catch (e: any) {
     sheetImageUrl.value = ''
     if (e?.response?.status === 404) ElMessage.info('该记录没有扫描原图（早期上传或存图失败）')

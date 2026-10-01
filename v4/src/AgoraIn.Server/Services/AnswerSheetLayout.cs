@@ -21,7 +21,8 @@ public sealed record SheetPageLayout(
     int PageNo,
     int TotalPages,
     IReadOnlyList<OptionMark> Options,
-    IReadOnlyList<IdMark> IdDigits)
+    IReadOnlyList<IdMark> IdDigits,
+    IReadOnlyList<BubbleMark> Frames)
 {
     /// <summary>页面墨迹外框（用于快速判断切卡是否合理）。</summary>
     public double PaperWidthMm => Paper.WidthMm;
@@ -77,8 +78,22 @@ public static class AnswerSheetLayout
     public const double ObjOptW = 6.0, ObjOptH = 4.0, ObjOptMr = 1.5;
     public const double ObjColGap = 3.0;
 
-    public const double SubjHeadH = 6.0, SubjBorder = 0.5, SubjMb = 3.0;
+    public const double SubjHeadH = 6.0, SubjMb = 3.0;
+    /// <summary>CSS 标称 0.5mm 的边框，浏览器实际渲染约 0.265mm/条（实测 DOM）。
+    /// 作答框逐个累计时若用标称值，每个框会漂移约 0.47mm，第 4 个框就偏出 ±1.2mm 的搜索窗。</summary>
+    public const double SubjBorderRendered = 0.265;
     public const double SubjBlankBody = 18.0, SubjShortBody = 35.0, SubjEssayBody = 64.0, SubjDefaultBody = 30.0;
+
+    /// <summary>主观题作答框外框的渲染高度（.answer-box 边框盒，不含下间距）——与 DOM 实测一致。</summary>
+    public static double SubjectiveFrameHeightMm(Question q) => SubjectiveBodyMm(q) + SubjHeadH + 2 * SubjBorderRendered;
+
+    private static double SubjectiveBodyMm(Question q) => q.Type switch
+    {
+        QuestionType.Blank => SubjBlankBody,
+        QuestionType.ShortAnswer => SubjShortBody,
+        QuestionType.Essay => SubjEssayBody,
+        _ => SubjDefaultBody,
+    };
 
     /// <summary>主观题作答框总高（含边框、题头、下间距）——与渲染器 SubjectiveHeightMm 一致。</summary>
     public static double SubjectiveHeightMm(Question q) => q.Type switch
@@ -212,6 +227,7 @@ public static class AnswerSheetLayout
             var (hasHeader, pageObj, pageSub) = pages[p];
             var optMarks = new List<OptionMark>();
             var idMarks = new List<IdMark>();
+            var frames = new List<BubbleMark>();
             var y = PagePadTop;
 
             if (hasHeader)
@@ -255,11 +271,24 @@ public static class AnswerSheetLayout
                 y += BlockChromeMm + RowsOnPage(pageObj.Count, columns) * ObjRowH;
             }
 
-            // 主观题块（无气泡，仅推进 y）
+            // 主观题块：作答框外框也是"这一页"的指纹（纯主观页没有选项气泡，
+            // 页码识别全靠这些外框 + 客观题气泡）
             if (pageSub.Count > 0)
+            {
+                var subTop = y + QBlockTopInset;   // 作答框顶 = 块顶 + 边框/内边距/块标题（实测 7.49mm，与客观题首行同基准）
+                foreach (var q in pageSub)
+                {
+                    var frameH = SubjectiveFrameHeightMm(q);
+                    frames.Add(new BubbleMark(
+                        PagePadSide + QBlockInsetX + QBodyPadX, subTop,
+                        opt.ContentWidthMm - 2 * (QBlockInsetX + QBodyPadX),
+                        frameH));
+                    subTop += frameH + SubjMb;      // 框间距 = 下间距 3mm
+                }
                 y += BlockChromeMm + pageSub.Sum(SubjectiveHeightMm);
+            }
 
-            result.Add(new SheetPageLayout(opt.Paper, p + 1, pages.Count, optMarks, idMarks));
+            result.Add(new SheetPageLayout(opt.Paper, p + 1, pages.Count, optMarks, idMarks, frames));
         }
 
         return result;

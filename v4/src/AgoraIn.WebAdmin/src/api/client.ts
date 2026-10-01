@@ -233,8 +233,8 @@ export const examApi = {
   /** 逐题结果（含题干/标准答案/满分） */
   getResults: (submissionId: string) => client.get<ResultRow[]>(`/exams/submissions/${submissionId}/results`),
   /** 答题卡扫描原图（人工复盘对照用；走鉴权 blob，拿到后用 URL.createObjectURL 显示） */
-  submissionImage: (submissionId: string) =>
-    client.get(`/exams/submissions/${submissionId}/image`, { responseType: 'blob', timeout: 60000 }),
+  submissionImage: (submissionId: string, page = 1) =>
+    client.get(`/exams/submissions/${submissionId}/image?page=${page}`, { responseType: 'blob', timeout: 60000 }),
   /** 教师复判/改分 */
   overrideResult: (submissionId: string, questionId: string, data: { score: number; comment?: string }) =>
     client.put<unknown>(`/exams/submissions/${submissionId}/results/${questionId}`, data),
