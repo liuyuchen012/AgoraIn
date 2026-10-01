@@ -10,4 +10,21 @@
 	     permission: WRITE_EXTERNAL_STORAGE in your AndroidManifest.xml」，相机根本打不开。
 	     API 33+ 改用 MediaStore 无需该权限，故用 maxSdkVersion 限制到 32。 -->
 	<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+
+	<!-- Android 11(API30)+ 包可见性：不声明 <queries> 时，MediaPicker 解析不到系统相机，
+	     会抛「Either there was no camera on the device or 'android.media.action.IMAGE_CAPTURE'
+	     was not added to the <queries> element」（设备其实有相机）。相册同样需要声明取图 intent。 -->
+	<queries>
+		<intent>
+			<action android:name="android.media.action.IMAGE_CAPTURE" />
+		</intent>
+		<intent>
+			<action android:name="android.intent.action.GET_CONTENT" />
+			<data android:mimeType="image/*" />
+		</intent>
+		<intent>
+			<action android:name="android.intent.action.PICK" />
+			<data android:mimeType="image/*" />
+		</intent>
+	</queries>
 </manifest>

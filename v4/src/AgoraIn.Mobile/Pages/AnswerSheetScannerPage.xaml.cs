@@ -190,6 +190,8 @@ public partial class AnswerSheetScannerPage : ContentPage
                     _ => "✅ 识别完成",
                 };
                 var lines = new List<string>();
+                if (!string.IsNullOrEmpty(result.Warning))
+                    lines.Add($"⚠️ {result.Warning}");
                 if (!string.IsNullOrEmpty(result.RecognizedStudent))
                     lines.Add($"识别考号：{result.RecognizedStudent}");
                 if (result.Answers is { Count: > 0 })
@@ -234,5 +236,7 @@ public partial class AnswerSheetScannerPage : ContentPage
         public string? RecognizedStudent { get; set; }
         public List<string>? Answers { get; set; }
         public double? Confidence { get; set; }
+        /// <summary>识别未返回结果时的原因（如上游 AI 欠费 402）。</summary>
+        public string? Warning { get; set; }
     }
 }

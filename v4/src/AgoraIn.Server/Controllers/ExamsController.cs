@@ -639,12 +639,31 @@ public class ExamsController : ControllerBase
             Status = SubmissionStatus.NotGraded,
         };
 
-        // AI 识别考号 + 客观题（配置了 Key 且开启图像外发时可用；否则提交保持"未批"，走手判）
-        var omrResult = await _ai.RecognizeAnswerSheetAsync(imageData);
         var questions = await _db.Questions
             .Where(q => q.PaperId == paperId)
             .OrderBy(q => q.Index)
             .ToListAsync();
+        var optionKeys = BuildOptionKeys(questions);
+
+        // 先本地识别（切卡 + 客观题 + 考号，不调大模型、不外发图像）；
+        // 找不到四角定位标记（没拍全/太模糊）才回退到视觉模型。
+        string recognizeSource = "ai";
+        var local = OmrRecognizer.Recognize(imageData, questions, optionKeys);
+        OmrResult? omrResult;
+        if (local != null)
+        {
+            recognizeSource = "local";
+            omrResult = new OmrResult
+            {
+                StudentRef = local.StudentRef,
+                OverallConfidence = local.Confidence,
+                Answers = local.Answers,
+            };
+        }
+        else
+        {
+            omrResult = await _ai.RecognizeAnswerSheetAsync(imageData);
+        }
         var byIndex = questions.ToDictionary(q => q.Index);
         // 卡面印刷的是「题号」= Index + 1；识别结果按卡面题号回传，故按题号索引（旧代码用 Index 会整体错位一题）
         var byNo = questions.ToDictionary(q => q.Index + 1);
@@ -721,6 +740,21 @@ public class ExamsController : ControllerBase
         _db.AnswerSheetSubmissions.Add(submission);
         await _db.SaveChangesAsync();
 
+        // 识别没返回结果时，把最近的 AI 调用错误带回给 App：
+        // 否则手机上只看到「没有识别结果」，分不清是没涂卡、没配密钥还是上游欠费。
+        string? warning = null;
+        if (omrResult == null)
+        {
+            var lastError = await _db.AiCallLogs
+                .Where(l => !l.Success && l.Endpoint == "recognize")
+                .OrderByDescending(l => l.Id)
+                .Select(l => l.Error)
+                .FirstOrDefaultAsync();
+            warning = string.IsNullOrWhiteSpace(lastError)
+                ? "AI 识别未返回结果：请检查 AI 设置（密钥/地址/模型）后重试"
+                : $"AI 识别失败：{lastError}";
+        }
+
         return Ok(new
         {
             submissionId = submission.Id,
@@ -733,9 +767,33 @@ public class ExamsController : ControllerBase
                 .Select(a => $"{a.Index}:{a.Answer}")
                 .ToList() ?? [],
             confidence = omrResult?.OverallConfidence,
+            warning,
+            /** 识别来源：local=本地切卡识别（不花 token），ai=视觉模型 */
+            recognizeSource,
+            recognizeDebug = local?.Debug,
 
             autoScored,
         });
+    }
+
+    /// <summary>题目选项字母表（本地 OMR 需要知道每题有几个气泡）。</summary>
+    private static Dictionary<string, List<string>> BuildOptionKeys(List<Question> questions)
+    {
+        var map = new Dictionary<string, List<string>>();
+        foreach (var q in questions)
+        {
+            if (string.IsNullOrEmpty(q.OptionsJson)) continue;
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(q.OptionsJson);
+                var keys = doc.RootElement.EnumerateArray()
+                    .Select(o => o.TryGetProperty("key", out var k) ? k.GetString() ?? "" : "")
+                    .Where(s => s.Length > 0).ToList();
+                if (keys.Count > 0) map[q.Id] = keys;
+            }
+            catch { /* 选项 JSON 损坏则按默认 ABCD 处理 */ }
+        }
+        return map;
     }
 
     /// <summary>整卷 AI 批改：对主观题（填空/简答/作文）逐题调用大模型按评分要点给分。</summary>

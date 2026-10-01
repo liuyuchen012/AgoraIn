@@ -42,11 +42,11 @@ public sealed record AnswerSheetOptions
 
     public static AnswerSheetOptions Default { get; } = new();
 
-    /// <summary>物理页容器高度：比纸张矮 8mm，浏览器页盒略小时也不会跨页漂移。</summary>
-    public double PageBoxHeightMm => Paper.HeightMm - 8;
+    /// <summary>物理页容器高度：比纸张矮 6mm，浏览器页盒略小时也不会跨页漂移。</summary>
+    public double PageBoxHeightMm => Paper.HeightMm - 6;
 
     /// <summary>可排内容高度 = 纸张高 - 顶部内边距 14 - 底部内边距 16 - 页脚 18 - 8mm 余量。</summary>
-    public double UsableMm => Paper.HeightMm - 56;
+    public double UsableMm => Paper.HeightMm - 54;
 
     /// <summary>页面内容宽度 = 纸张宽 - 左右内边距 14×2。</summary>
     public double ContentWidthMm => Paper.WidthMm - 28;
@@ -283,19 +283,24 @@ public static class AnswerSheetRenderer
 
   /* 四角定位标记：距纸边 7mm，避开打印机不可打印边距，每页各自一份 */
   .anchor { position: absolute; width: 6mm; height: 6mm; background: #000; z-index: 3; }
+  /* 四个标记都用 top 定位（相对纸面顶边），中心距纸边各 10mm：
+     页容器比纸张矮 8mm，若用 bottom 定位，下方两个标记会落到距纸底 15mm 处，
+     与识别端假定的对称 10mm 不符，切卡后会整体纵向偏移数毫米。 */
   .anchor.tl { top: 7mm; left: 7mm; }
   .anchor.tr { top: 7mm; right: 7mm; }
-  .anchor.bl { bottom: 7mm; left: 7mm; }
-  .anchor.br { bottom: 7mm; right: 7mm; }
+  .anchor.bl { top: {{opt.Paper.HeightMm - 13}}mm; left: 7mm; }
+  .anchor.br { top: {{opt.Paper.HeightMm - 13}}mm; right: 7mm; }
 
   .content { height: {{opt.UsableMm}}mm; overflow: hidden; }
 
-  .title { font-size: 16pt; line-height: 1.2; text-align: center; font-weight: bold; margin: 0 0 2mm; }
-  .subtitle { font-size: 10pt; line-height: 1.2; text-align: center; color: #333; margin: 0 0 4mm; }
+  /* 标题/副标题/注意事项的高度全部钉死：识别端要在毫米空间里定位气泡，
+     字体度量造成的几毫米浮动会让整页气泡错位 */
+  .title { font-size: 16pt; height: 7mm; line-height: 7mm; text-align: center; font-weight: bold; margin: 0 0 2mm; overflow: hidden; }
+  .subtitle { font-size: 10pt; height: 4.5mm; line-height: 4.5mm; text-align: center; color: #333; margin: 0 0 4mm; overflow: hidden; }
 
   /* ── 注意事项 ── */
   .notes { border: 0.5mm solid #000; padding: 1.5mm 2mm; margin: 0 0 3mm;
-           font-size: 8pt; line-height: 4.2mm; }
+           font-size: 8pt; line-height: 4.2mm; height: 18mm; overflow: hidden; }
   .notes b { font-size: 8.5pt; }
 
   /* ── 学生信息区（左：手写姓名等；右：考号区） ── */
@@ -304,10 +309,10 @@ public static class AnswerSheetRenderer
   .write-line { border-bottom: 0.3mm solid #666; display: inline-block; min-width: 40mm; }
 
   /* ── 考号填涂区（黑框包裹：手写行 + 列序号 + 0-9 涂卡列） ── */
-  .id-area { border: 0.5mm solid #000; padding: 2mm; }
-  .id-title { font-size: 8pt; line-height: 1.2; margin: 0 0 1mm; }
+  .id-area { border: 0.5mm solid #000; padding: 2mm; width: 74mm; }
+  .id-title { font-size: 8pt; height: 4.4mm; line-height: 4.4mm; margin: 0 0 1mm; overflow: hidden; }
   .id-write { display: flex; align-items: center; margin: 0 0 1.5mm; }
-  .id-write-label { font-size: 9pt; margin-right: 1mm; white-space: nowrap; }
+  .id-write-label { font-size: 9pt; margin-right: 1mm; white-space: nowrap; width: 12mm; }
   .wbox { width: 6.5mm; height: 7mm; border: 0.4mm solid #000; margin-right: 0.8mm; }
   .wbox.big { width: 9mm; height: 9mm; margin-right: 1mm; }
   .id-grid { display: flex; }
@@ -434,7 +439,9 @@ public static class AnswerSheetRenderer
     private static string BuildInfoArea(IdAreaKind kind, string? studentName, string? studentNo)
     {
         var sb = new StringBuilder();
-        sb.Append("<div class=\"info\">");
+        // 高度必须与 AnswerSheetLayout.InfoHeightMm 一致：填涂区 70mm，其余 31mm
+        var infoH = kind == IdAreaKind.Bubble ? 70.0 : 31.0;
+        sb.Append($"<div class=\"info\" style=\"height:{infoH:0.#}mm\">");
         sb.Append("<div class=\"info-left\">班级：<span class=\"write-line\"></span><br>姓名：<span class=\"write-line\">");
         sb.Append(Escape(studentName ?? ""));
         sb.Append("</span><br>学号：<span class=\"write-line\">");
@@ -475,7 +482,8 @@ public static class AnswerSheetRenderer
         {
             sb.Append("<div class=\"id-col\">");
             sb.Append($"<div class=\"col-no\">{c + 1}</div>");
-            for (var n = 0; n < IdDigitRows; n++) sb.Append("<div class=\"bubble\"></div>");
+            for (var n = 0; n < IdDigitRows; n++)
+                sb.Append($"<div class=\"bubble\" data-col=\"{c + 1}\" data-digit=\"{n}\"></div>");
             sb.Append("</div>");
         }
         sb.Append("</div></div>");
@@ -541,7 +549,8 @@ public static class AnswerSheetRenderer
 
                 sb.Append("<div class=\"omr-item\"><div class=\"omr-row\">");
                 sb.Append($"<div class=\"omr-no\">{q.Index + 1}.</div><div class=\"omr-opts\">");
-                foreach (var k in keys) sb.Append($"<div class=\"omr-opt\">{Escape(k)}</div>");
+                foreach (var k in keys)
+                    sb.Append($"<div class=\"omr-opt\" data-q=\"{q.Index + 1}\" data-opt=\"{Escape(k)}\">{Escape(k)}</div>");
                 sb.Append("</div></div></div>");
             }
             sb.Append("</div>");
