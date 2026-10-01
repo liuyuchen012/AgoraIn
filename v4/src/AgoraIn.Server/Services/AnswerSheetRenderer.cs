@@ -72,7 +72,7 @@ public static class AnswerSheetRenderer
   .id-grid { display: flex; gap: 1.5mm; }
   .id-col { text-align: center; }
   .id-col .col-label { font-size: 7pt; margin-bottom: 0.5mm; }
-  .bubble { width: 4.5mm; height: 4.5mm; border: 0.3mm solid #000; border-radius: 50%; margin: 0.6mm auto; }
+  .bubble { width: 6mm; height: 4mm; border: 0.3mm solid #000; margin: 0.4mm auto; }
 
   /* ── 客观题涂卡区 ── */
   .section-title { font-size: 11pt; font-weight: bold; margin: 3mm 0 2mm; border-left: 1mm solid #000; padding-left: 2mm;
@@ -81,9 +81,9 @@ public static class AnswerSheetRenderer
   .omr-item { break-inside: avoid; margin-bottom: 1.6mm; font-size: 9pt; }
   .omr-row { display: flex; align-items: center; gap: 1mm; }
   .omr-no { width: 7mm; text-align: right; font-weight: bold; }
-  .omr-opts { display: flex; gap: 1mm; }
-  .omr-opt { width: 4.5mm; height: 4.5mm; border: 0.3mm solid #000; border-radius: 50%;
-             font-size: 6pt; text-align: center; line-height: 4.5mm; }
+  .omr-opts { display: flex; gap: 2mm; }
+  .omr-opt { width: 6mm; height: 4mm; border: 0.3mm solid #000;
+             font-size: 7pt; text-align: center; line-height: 4mm; }
 
   /* ── 主观题作答区（边界框供切分）──
      break-inside: avoid 防止作答框被打印分页拦腰切开 */
