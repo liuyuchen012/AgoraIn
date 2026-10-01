@@ -674,8 +674,8 @@ function examNoPayload(apply: boolean) {
     digits: examNoForm.value.digits,
     prefix: examNoForm.value.prefix.trim(),
     start: examNoForm.value.start,
-    // 预览不写库：用 overwrite=true 计算编号，但仅对无号学生展示
-    overwrite: apply ? examNoForm.value.overwrite : false,
+    overwrite: examNoForm.value.overwrite,
+    dryRun: !apply,
   }
 }
 
@@ -685,8 +685,8 @@ async function previewExamNumbers() {
   examNoSaving.value = true
   try {
     const r = await studentApi.generateExamNumbers(examNoPayload(false))
-    examNoResult.value = { ...r, rows: r.rows.map(x => ({ ...x, no: x.no ?? '（待编号）' })) } as ExamNumberResult
-    ElMessage.info(`预览：共 ${r.total} 人，${r.skipped} 人已有考号（预览未写库）`)
+    examNoResult.value = r
+    ElMessage.info(`预览（未写库）：共 ${r.total} 人，本次将编号 ${r.changed} 人，保留原号 ${r.skipped} 人`)
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.error || '预览失败')
   } finally { examNoSaving.value = false }
@@ -708,7 +708,7 @@ async function doGenerateExamNumbers() {
   try {
     const r = await studentApi.generateExamNumbers(examNoPayload(true))
     examNoResult.value = r
-    ElMessage.success(`已生成：新编号 ${r.changed} 人，保留原号 ${r.skipped} 人`)
+    ElMessage.success(`考号已生成：新编号 ${r.changed} 人，保留原号 ${r.skipped} 人`)
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.error || '生成失败')
   } finally { examNoSaving.value = false }

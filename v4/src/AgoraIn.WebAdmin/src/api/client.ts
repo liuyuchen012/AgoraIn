@@ -134,7 +134,7 @@ export const studentApi = {
   update: (id: string, data: unknown) => client.put<StudentRow>(`/students/${id}`, data),
   remove: (id: string) => client.delete<void>(`/students/${id}`),
   /** 批量生成考号（写入学号字段，答题卡识别按此匹配） */
-  generateExamNumbers: (data: { classId: string; digits: number; prefix?: string; start: number; overwrite: boolean }) =>
+  generateExamNumbers: (data: { classId: string; digits: number; prefix?: string; start: number; overwrite: boolean; dryRun?: boolean }) =>
     client.post<ExamNumberResult>('/students/exam-numbers', data),
 }
 
@@ -145,7 +145,8 @@ export interface ExamNumberResult {
   changed: number
   skipped: number
   total: number
-  rows: { id: string; name: string; no: string | null; seq: number | null; changed: boolean }[]
+  dryRun?: boolean
+  rows: { id: string; name: string; no: string | null; willChange?: boolean; changed: boolean }[]
 }
 
 // ── 设备 ──

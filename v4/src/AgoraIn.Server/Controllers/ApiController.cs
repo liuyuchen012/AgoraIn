@@ -141,36 +141,48 @@ public class StudentsController : ControllerBase
         var start = Math.Max(1, req.Start);
         var overwrite = req.Overwrite;
 
-        var changed = 0;
-        var skipped = 0;
-        var rows = new List<object>();
+        // 先算编号计划，再决定是否落库：dryRun 只回传「将会生成什么」，绝不写库
+        var plan = new List<(AgoraIn.Core.Entities.Student Stu, string? NewNo)>();
         var seq = start;
         foreach (var stu in students)
         {
             if (!overwrite && !string.IsNullOrWhiteSpace(stu.StudentNo))
             {
-                skipped++;
-                rows.Add(new { stu.Id, stu.Name, no = stu.StudentNo, seq = (int?)null, changed = false });
+                plan.Add((stu, null));
                 continue;
             }
             if (seq > Math.Pow(10, seqDigits) - 1)
                 return BadRequest(new { error = $"序号超出 {seqDigits} 位可表示范围（最多 {Math.Pow(10, seqDigits) - 1}）；请增大位数或改小起始号" });
 
-            var no = prefix + seq.ToString().PadLeft(seqDigits, '0');
-            stu.StudentNo = no;
-            changed++;
-            rows.Add(new { stu.Id, stu.Name, no, seq, changed = true });
+            plan.Add((stu, prefix + seq.ToString().PadLeft(seqDigits, '0')));
             seq++;
         }
 
-        await _db.SaveChangesAsync();
+        if (!req.DryRun)
+        {
+            foreach (var (stu, newNo) in plan)
+                if (newNo != null) stu.StudentNo = newNo;
+            await _db.SaveChangesAsync();
+        }
+
+        var changed = plan.Count(p => p.NewNo != null);
+        var rows = plan.Select(p => new
+        {
+            p.Stu.Id,
+            p.Stu.Name,
+            no = p.NewNo ?? p.Stu.StudentNo,
+            willChange = p.NewNo != null,
+            changed = p.NewNo != null && !req.DryRun,
+        }).ToList();
+
         return Ok(new
         {
             classId = req.ClassId,
             digits,
             prefix,
+            dryRun = req.DryRun,
             changed,
-            skipped,
+            skipped = plan.Count - changed,
             total = students.Count,
             rows,
         });
@@ -192,6 +204,9 @@ public class StudentsController : ControllerBase
 
         /// <summary>是否覆盖已有考号（默认否：只补空白，避免打乱已印好的答题卡）。</summary>
         public bool Overwrite { get; set; }
+
+        /// <summary>只预览编号不写库。</summary>
+        public bool DryRun { get; set; }
     }
 }
 
