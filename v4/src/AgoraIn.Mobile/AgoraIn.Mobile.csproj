@@ -56,8 +56,13 @@
 
 	<!-- Release 签名：密码不写入本文件，构建时通过
 	     -p:AndroidSigningStorePassword / -p:AndroidSigningKeyPassword 传入
-	     （或环境变量，CI 用 GitHub Secrets）；凭据见 signing/credentials.txt（已 gitignore） -->
-	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
+	     （或环境变量，CI 用 GitHub Secrets）；凭据见 signing/credentials.txt（已 gitignore）。
+
+	     条件 Exists(...)：正式证书 *.keystore 已 gitignore（公开仓库不能放签名私钥），
+	     CI 上没有该文件。若无条件设 AndroidKeyStore=true，缺少证书会直接
+	     XA4310 中断构建、连产物都拿不到；故证书缺失时回退到 SDK 的 debug 证书
+	     （产物仅供测试，正式分发须用本地带证书的构建）。 -->
+	<PropertyGroup Condition="'$(Configuration)' == 'Release' And Exists('signing/agorain-release.keystore')">
 		<!-- AndroidKeyStore=true 是启用自定义证书的开关：缺省时 .NET Android SDK 会
 		     回退到自动 debug 证书（targets 里 AndroidKeyStore!='True' 走 _ApkDebugKeyStore），
 		     产出的 -Signed.apk 证书与发布证书不一致，App 备案/商店签名核验会失败 -->

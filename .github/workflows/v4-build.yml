@@ -247,6 +247,12 @@ jobs:
     name: 移动端 Android
     needs: test
     runs-on: ubuntu-latest
+    # 正式签名证书（*.keystore）已 gitignore：公开仓库不能放签名私钥，故 CI 上没有。
+    # 配置下面两个 Secrets 后，CI 会用正式证书签名（与 App 备案的签名一致）；
+    # 未配置时 csproj 的条件不成立 → 回退 SDK 调试证书，产物仅供测试安装。
+    env:
+      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
     steps:
       - uses: actions/checkout@v5
 
@@ -262,6 +268,15 @@ jobs:
       - name: 安装 MAUI Android 工作负载
         run: dotnet workload install maui-android
 
+      # step 级 if 读不到 secrets，故通过 job 级 env 中转
+      - name: 写入正式签名证书（配置了 Secrets 时）
+        if: env.KEYSTORE_B64 != ''
+        shell: bash
+        run: |
+          mkdir -p v4/src/AgoraIn.Mobile/signing
+          printf '%s' "$KEYSTORE_B64" | base64 -d > v4/src/AgoraIn.Mobile/signing/agorain-release.keystore
+          ls -l v4/src/AgoraIn.Mobile/signing/agorain-release.keystore
+
       # MAUI 多目标项目必须按「单一 TFM + 单一 RID」单独还原，
       # 否则 assets 文件缺少 net10.0-android/android-* 目标而报 NETSDK1047
       - name: 还原（仅 Android / android-arm64）
@@ -275,6 +290,8 @@ jobs:
           dotnet publish v4/src/AgoraIn.Mobile/AgoraIn.Mobile.csproj \
             -f net10.0-android -c Release -r android-arm64 --no-restore \
             -p:AndroidPackageFormat=apk \
+            -p:AndroidSigningStorePassword="$KEYSTORE_PASS" \
+            -p:AndroidSigningKeyPassword="$KEYSTORE_PASS" \
             -p:DebugType=none -p:DebugSymbols=false \
             -o publish/android
 
@@ -364,7 +381,7 @@ jobs:
             | Windows 服务端 | `AgoraIn-Server-win-x64.zip`（内置 Web 管理面板） |
             | Linux 服务端 | `AgoraIn-Server-linux-x64.zip` |
             | macOS 服务端 | `AgoraIn-Server-osx-arm64.zip` |
-            | Android | `AgoraIn-Android.apk`（未签名，需自行签名后安装） |
+            | Android | `AgoraIn-Android.apk`（配置了签名 Secrets 时为正式签名，否则为调试签名，仅供测试） |
             | iOS | `AgoraIn-iOS-simulator.zip`（仅模拟器，真机需签名） |
 
             > 客户端统一连接 `https://agorain.615mc.cn`（服务器地址已锁定，不可配置）。
