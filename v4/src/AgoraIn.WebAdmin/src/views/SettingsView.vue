@@ -21,8 +21,8 @@
       </el-form>
     </el-card>
 
-    <!-- SMTP 邮件服务 -->
-    <el-card shadow="never" class="page-card">
+    <!-- SMTP 邮件服务（仅系统管理员） -->
+    <el-card v-if="canManageSystem" shadow="never" class="page-card">
       <template #header>
         <div class="card-header">
           <span class="card-title">SMTP 邮件服务</span>
@@ -61,8 +61,8 @@
       </el-form>
     </el-card>
 
-    <!-- 家长端隐私设置 -->
-    <el-card shadow="never" class="page-card">
+    <!-- 家长端隐私设置（仅系统管理员） -->
+    <el-card v-if="canManageSystem" shadow="never" class="page-card">
       <template #header>
         <span class="card-title">家长端隐私设置</span>
       </template>
@@ -108,6 +108,10 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { authApi, smtpApi } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
+
+const auth = useAuthStore()
+const canManageSystem = auth.hasPermission('system.settings')
 
 // ── 修改密码 ──
 const pwdSaving = ref(false)
@@ -193,7 +197,7 @@ async function onTestSend() {
 // ── 家长端隐私 ──
 const showScores = ref(false)
 
-onMounted(loadSmtp)
+onMounted(() => { if (canManageSystem) loadSmtp() })
 </script>
 
 <style scoped>

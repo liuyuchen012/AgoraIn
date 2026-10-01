@@ -1,5 +1,16 @@
 <template>
   <div class="dashboard">
+    <!-- 租户：区域授权状态卡 -->
+    <el-alert v-if="!isManager && regionInfo" :closable="false" style="margin-bottom:16px"
+              :type="regionInfo.isActive ? 'success' : regionInfo.activated ? 'error' : 'warning'" show-icon>
+      <template #title>
+        区域「{{ regionInfo.name }}」{{ regionInfo.isActive ? '授权有效' : regionInfo.activated ? '授权已到期，请联系平台续期' : '尚未激活，请联系平台获取激活码' }}
+        <el-tag v-if="regionInfo.isActive && regionInfo.remainingDays <= 30" size="small" type="warning" style="margin-left:8px">
+          剩余 {{ regionInfo.remainingDays }} 天
+        </el-tag>
+      </template>
+    </el-alert>
+
     <el-row :gutter="16">
       <el-col :span="6">
         <el-card shadow="hover" class="stat-card">
@@ -13,16 +24,28 @@
           <div class="stat-value">{{ stats.studentCount }}</div>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col v-if="isManager" :span="6">
         <el-card shadow="hover" class="stat-card">
           <div class="stat-label">设备总数</div>
           <div class="stat-value">{{ stats.deviceCount }}</div>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col v-if="isManager" :span="6">
         <el-card shadow="hover" class="stat-card">
           <div class="stat-label">在线设备</div>
           <div class="stat-value online">{{ stats.onlineDevices }}</div>
+        </el-card>
+      </el-col>
+      <el-col v-if="!isManager" :span="6">
+        <el-card shadow="hover" class="stat-card">
+          <div class="stat-label">通知公告</div>
+          <div class="stat-value">{{ stats.noticeCount }}</div>
+        </el-card>
+      </el-col>
+      <el-col v-if="!isManager" :span="6">
+        <el-card shadow="hover" class="stat-card">
+          <div class="stat-label">资源文件</div>
+          <div class="stat-value">{{ stats.resourceCount }}</div>
         </el-card>
       </el-col>
     </el-row>
@@ -34,10 +57,16 @@
           <div class="stat-value accent">{{ stats.todayCheckins }}</div>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col v-if="isManager" :span="6">
         <el-card shadow="hover" class="stat-card mini">
           <div class="stat-label">用户数</div>
           <div class="stat-value">{{ stats.userCount }}</div>
+        </el-card>
+      </el-col>
+      <el-col v-if="!isManager" :span="6">
+        <el-card shadow="hover" class="stat-card mini">
+          <div class="stat-label">学生签到率(今日)</div>
+          <div class="stat-value accent">{{ checkinRate }}%</div>
         </el-card>
       </el-col>
       <el-col :span="6">
@@ -73,7 +102,7 @@
           </el-table>
         </el-card>
       </el-col>
-      <el-col :span="12">
+      <el-col v-if="isManager" :span="12">
         <el-card shadow="never" class="page-card">
           <template #header><span>设备状态</span></template>
           <el-table :data="devices" size="small" stripe empty-text="暂无设备">
@@ -96,8 +125,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { dashboardApi } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
+
+const auth = useAuthStore()
+const isManager = computed(() => auth.isManager)
+const regionInfo = ref<any>(null)
+const checkinRate = computed(() =>
+  stats.studentCount ? Math.min(100, Math.round(stats.todayCheckins * 100 / stats.studentCount)) : 0)
 
 const loading = ref(false)
 const devices = ref<any[]>([])
@@ -116,6 +152,7 @@ async function loadData() {
     Object.assign(stats, data.stats)
     recentCheckins.value = data.recentCheckins || []
     devices.value = data.devices || []
+    regionInfo.value = data.region || null
   } finally {
     loading.value = false
   }

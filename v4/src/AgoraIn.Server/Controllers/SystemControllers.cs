@@ -13,7 +13,7 @@ namespace AgoraIn.Server.Controllers;
 [ApiController]
 [Route("api/v4/settings/ai")]
 [Authorize]
-[RequirePermission(Permissions.SystemSettings)]
+[RequirePermission(Permissions.AiSettings)]
 public class AiSettingsController : ControllerBase
 {
     private readonly ServerDbContext _db;

@@ -81,6 +81,12 @@ export const regionApi = {
   /** 保存指定区域自定义隐私协议（仅主区域） */
   saveAgreement: (regionId: string, content: string) =>
     client.put<{ regionId: string; hasCustom: boolean; updatedAt?: string }>(`/regions/${regionId}/agreement`, { content }),
+  /** 当前区域状态（租户激活页用） */
+  me: () =>
+    client.get<{ regionId: string; name?: string; isManager?: boolean; activated?: boolean; isActive?: boolean; expireAt?: string | null; maxDevices?: number; remainingDays?: number }>('/regions/me'),
+  /** 区域激活（输入主区域颁发的激活码） */
+  activateRegion: (activationCode: string) =>
+    client.post<{ regionId: string; expireAt?: string; maxDevices?: number }>('/regions/activate', { activationCode }),
   create: (data: { regionId?: string; name: string; ownerUsername: string; ownerPassword: string; ownerDisplayName?: string }) =>
     client.post<RegionRow>('/regions', data),
   issueCode: (regionId: string, months: number, maxDevices: number) =>
@@ -152,7 +158,7 @@ export const classhourApi = {
 
 // ── 仪表盘 ──
 export const dashboardApi = {
-  overview: () => client.get<{ stats: Record<string, number>; recentCheckins: unknown[]; devices: unknown[] }>('/dashboard'),
+  overview: () => client.get<{ isManager?: boolean; region?: any; stats: Record<string, number>; recentCheckins: unknown[]; devices: unknown[] }>('/dashboard'),
 }
 
 // ── 通知公告 ──

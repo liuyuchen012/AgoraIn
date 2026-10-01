@@ -1,8 +1,47 @@
 <template>
   <div class="license">
-    <el-card shadow="never" class="page-card">
+    <!-- 租户模式：区域状态与激活 -->
+    <el-card v-if="!auth.isManager" shadow="never" class="page-card">
       <template #header>
-        <span class="card-title">授权管理</span>
+        <span class="card-title">区域授权状态</span>
+      </template>
+      <el-descriptions :column="2" border v-loading="regionLoading">
+        <el-descriptions-item label="区域代号">{{ regionMe.regionId || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="区域名称">{{ regionMe.name || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="授权状态">
+          <el-tag :type="regionMe.isActive ? 'success' : regionMe.activated ? 'danger' : 'warning'">
+            {{ regionMe.isActive ? '使用中' : regionMe.activated ? '已到期' : '未激活' }}
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="到期时间">{{ regionMe.expireAt ? new Date(regionMe.expireAt).toLocaleString() : '—' }}</el-descriptions-item>
+        <el-descriptions-item label="设备上限">{{ regionMe.maxDevices || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="剩余天数">
+          <span :style="{ color: (regionMe.remainingDays ?? 999) <= 30 ? '#e6a23c' : '#67c23a', fontWeight: 600 }">
+            {{ regionMe.remainingDays != null ? `${regionMe.remainingDays} 天` : '—' }}
+          </span>
+        </el-descriptions-item>
+      </el-descriptions>
+      <el-alert v-if="regionMe.isActive" type="success" :closable="false" show-icon style="margin-top:14px"
+                title="区域授权有效，区域成员可正常登录使用。" />
+    </el-card>
+
+    <!-- 租户模式：输入主区域颁发的激活码 -->
+    <el-card v-if="!auth.isManager" shadow="never" class="page-card">
+      <template #header>
+        <span class="card-title">激活区域</span>
+      </template>
+      <p class="hint">请向平台运营方（主区域）索取本区域的激活码（AGRR- 开头），粘贴到下方完成激活或续期。激活后区域成员方可登录使用。</p>
+      <el-input v-model="regionCode" type="textarea" :rows="3" placeholder="请粘贴完整的区域激活码（AGRR-…）" style="max-width:600px" />
+      <div style="margin-top:12px">
+        <el-button type="primary" :loading="regionActivating" @click="onRegionActivate">激活区域</el-button>
+      </div>
+      <el-alert v-if="regionResult" :title="regionResult" :type="regionOk ? 'success' : 'error'" show-icon :closable="true" style="margin-top:12px" />
+    </el-card>
+
+    <!-- 管理员模式：服务器整体授权 -->
+    <el-card v-if="auth.isManager" shadow="never" class="page-card">
+      <template #header>
+        <span class="card-title">服务器授权（主区域）</span>
       </template>
 
       <el-descriptions :column="2" border>
@@ -46,13 +85,103 @@
 
       <el-alert v-if="activateResult" :title="activateResult" :type="activateOk ? 'success' : 'error'" show-icon :closable="true" style="margin-top:12px" />
     </el-card>
+
+    <!-- 租户激活码签发（仅主区域） -->
+    <el-card v-if="auth.isManager" shadow="never" class="page-card">
+      <template #header>
+        <span class="card-title">租户激活码签发</span>
+      </template>
+      <p class="hint">为子区域（租户）生成区域激活码（AGRR- 开头，仅对该区域有效）。区域主账号在上方"区域授权状态"页输入激活码完成激活；未激活区域的成员将无法登录（区域主账号除外）。</p>
+      <el-form label-width="120px" style="max-width:520px">
+        <el-form-item label="目标区域" required>
+          <el-select v-model="issueRegionId" placeholder="选择子区域" style="width:100%" filterable>
+            <el-option v-for="r in regions" :key="r.regionId" :label="`${r.name}（${r.regionId}）`" :value="r.regionId" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="时长（月）" required>
+          <el-input-number v-model="issueMonths" :min="1" :max="600" />
+        </el-form-item>
+        <el-form-item label="设备上限" required>
+          <el-input-number v-model="issueDevices" :min="1" :max="65535" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="issuing" @click="issueTenantCode">生成激活码</el-button>
+        </el-form-item>
+      </el-form>
+      <el-input v-if="issuedTenantCode" :model-value="issuedTenantCode" readonly type="textarea" :rows="3" />
+      <p v-if="issuedTenantCode" style="color:#909399;font-size:12px">
+        请把激活码交给该区域主账号；激活码仅对所选区域有效，激活即开始计时（到期可再次签发续期叠加）。
+      </p>
+    </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { licenseApi } from '@/api/client'
+import { licenseApi, regionApi } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
+
+const auth = useAuthStore()
+
+// ── 租户模式：区域状态与激活 ──
+const regionLoading = ref(false)
+const regionMe = ref<any>({})
+const regionCode = ref('')
+const regionActivating = ref(false)
+const regionResult = ref('')
+const regionOk = ref(false)
+
+async function loadRegionMe() {
+  regionLoading.value = true
+  try {
+    regionMe.value = await regionApi.me()
+  } catch { /* 拦截器已处理 */ }
+  finally { regionLoading.value = false }
+}
+
+async function onRegionActivate() {
+  if (!regionCode.value.trim()) {
+    ElMessage.warning('请输入激活码')
+    return
+  }
+  regionActivating.value = true
+  regionResult.value = ''
+  try {
+    const r = await regionApi.activateRegion(regionCode.value.trim())
+    regionOk.value = true
+    regionResult.value = `激活成功：设备上限 ${r.maxDevices}，到期 ${r.expireAt ? new Date(r.expireAt).toLocaleString() : '—'}`
+    await loadRegionMe()
+  } catch (err: any) {
+    regionOk.value = false
+    regionResult.value = err.response?.data?.error || '激活失败'
+  } finally {
+    regionActivating.value = false
+  }
+}
+
+// ── 管理员模式：租户激活码签发 ──
+const regions = ref<any[]>([])
+const issueRegionId = ref('')
+const issueMonths = ref(12)
+const issueDevices = ref(5)
+const issuing = ref(false)
+const issuedTenantCode = ref('')
+
+async function loadRegions() {
+  try { regions.value = await regionApi.list() } catch { /* 无权限时静默 */ }
+}
+
+async function issueTenantCode() {
+  if (!issueRegionId.value) { ElMessage.warning('请选择子区域'); return }
+  issuing.value = true
+  try {
+    const r = await regionApi.issueCode(issueRegionId.value, issueMonths.value, issueDevices.value)
+    issuedTenantCode.value = r.activationCode
+    ElMessage.success('激活码已生成，请复制交给该区域主账号')
+  } catch { /* 拦截器已处理 */ }
+  finally { issuing.value = false }
+}
 
 interface LicenseState {
   fingerprint: string
@@ -116,7 +245,14 @@ async function onActivate() {
   }
 }
 
-onMounted(loadState)
+onMounted(async () => {
+  if (auth.isManager) {
+    await loadState()
+    await loadRegions()
+  } else {
+    await loadRegionMe()
+  }
+})
 </script>
 
 <style scoped>

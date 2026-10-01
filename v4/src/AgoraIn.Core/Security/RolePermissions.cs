@@ -57,6 +57,8 @@ public static class Permissions
     public const string DevicesManage = "devices.manage";
     /// <summary>修改系统设置（邮件服务、隐私开关、JWT 等）。</summary>
     public const string SystemSettings = "system.settings";
+    /// <summary>AI 批改设置（模型/密钥/温度/提示词模板；主区域与区域主账号）。</summary>
+    public const string AiSettings = "ai.settings";
     /// <summary>查看与激活授权。</summary>
     public const string LicenseManage = "system.license";
 
@@ -82,6 +84,7 @@ public static class RolePermissions
         Permissions.ResourcesManage, Permissions.NoticesManage, Permissions.MessagesHandle,
         Permissions.DevicesView, Permissions.DevicesManage,
         Permissions.SystemSettings, Permissions.LicenseManage,
+        Permissions.AiSettings,
         Permissions.SelfDataView,
     ];
 
@@ -90,7 +93,8 @@ public static class RolePermissions
         // 系统管理员：全部权限
         [AppRoles.Admin] = AllPermissions,
 
-        // 机构管理员：除「系统设置」与「授权」外的全部（授权由系统管理员统一管理）
+        // 机构管理员：除「系统设置」与「授权」外的全部（授权由系统管理员统一管理）；
+        // AI 批改设置对区域主账号开放（服务器全局配置，修改影响整个服务器）
         [AppRoles.Owner] = AllPermissions
             .Where(p => p is not (Permissions.SystemSettings or Permissions.LicenseManage))
             .ToHashSet(),

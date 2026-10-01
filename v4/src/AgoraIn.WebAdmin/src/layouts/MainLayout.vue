@@ -56,21 +56,21 @@
           <el-icon><UserFilled /></el-icon>
           <span>用户管理</span>
         </el-menu-item>
+        <el-menu-item v-if="auth.hasPermission('system.settings')" index="/settings">
+          <el-icon><Setting /></el-icon>
+          <span>系统设置</span>
+        </el-menu-item>
+        <el-menu-item v-if="auth.hasPermission('ai.settings')" index="/ai-settings">
+          <el-icon><MagicStick /></el-icon>
+          <span>AI 批改设置</span>
+        </el-menu-item>
         <el-menu-item v-if="auth.isManager" index="/regions">
           <el-icon><OfficeBuilding /></el-icon>
           <span>区域管理</span>
         </el-menu-item>
-        <el-menu-item index="/license">
+        <el-menu-item v-if="auth.isManager || auth.user?.role === 'owner'" index="/license">
           <el-icon><Key /></el-icon>
           <span>授权管理</span>
-        </el-menu-item>
-        <el-menu-item index="/settings">
-          <el-icon><Setting /></el-icon>
-          <span>系统设置</span>
-        </el-menu-item>
-        <el-menu-item index="/ai-settings">
-          <el-icon><MagicStick /></el-icon>
-          <span>AI 批改设置</span>
         </el-menu-item>
       </el-menu>
     </el-aside>
