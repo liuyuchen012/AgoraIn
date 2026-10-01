@@ -69,6 +69,10 @@ public sealed class ApiClient
     public Task<ScanResult?> SubmitScanAsync(string code, string name, string password)
         => PostAsync<ScanResult>("/api/v4/checkin/scan", new { code, name, password });
 
+    /// <summary>邀请码 → 所属区域与机构自定义隐私协议（注册页展示，匿名接口）。</summary>
+    public Task<InviteRegionResult?> GetInviteRegionAsync(string inviteCode)
+        => GetAsync<InviteRegionResult?>($"/api/v4/parent/invite/{Uri.EscapeDataString(inviteCode)}/region");
+
     /// <summary>发送注册邮箱验证码。</summary>
     public Task<SendCodeResult?> SendRegisterCodeAsync(string email)
         => PostAsync<SendCodeResult>("/api/v4/account/send-code", new { email, purpose = "register" });
@@ -79,11 +83,12 @@ public sealed class ApiClient
     /// </summary>
     public Task<RegisterResult?> RegisterAsync(
         string email, string code, string username, string password,
-        string mode, string? regionId, string? regionName, string? inviteCode = null, bool agreeTerms = true)
+        string mode, string? regionId, string? regionName, string? inviteCode = null,
+        bool agreeTerms = true, bool agreeRegionTerms = false)
         => PostAsync<RegisterResult>("/api/v4/account/register", new
         {
             email, code, username, password, mode, regionId, regionName, inviteCode,
-            displayName = username, agreeTerms,
+            displayName = username, agreeTerms, agreeRegionTerms,
         });
 
     /// <summary>个人历史记录。</summary>
@@ -255,6 +260,15 @@ public sealed class ConfirmResult
 {
     public double TotalScore { get; set; }
     public string? Status { get; set; }
+}
+
+public sealed class InviteRegionResult
+{
+    public string RegionId { get; set; } = "";
+    public string RegionName { get; set; } = "";
+    public bool HasCustom { get; set; }
+    public string? CustomPrivacy { get; set; }
+    public string? CustomPrivacyUpdatedAt { get; set; }
 }
 
 public sealed class SendCodeResult

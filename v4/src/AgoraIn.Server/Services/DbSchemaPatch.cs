@@ -164,5 +164,17 @@ public static class DbSchemaPatch
         await db.Database.ExecuteSqlRawAsync("DROP INDEX IF EXISTS \"IX_Users_Username\"", ct);
         await db.Database.ExecuteSqlRawAsync(
             "CREATE UNIQUE INDEX IF NOT EXISTS \"IX_Users_Username_RegionId\" ON \"Users\" (\"Username\", \"RegionId\")", ct);
+
+        // Regions 自定义隐私政策列（第三方机构协议制作）
+        foreach (var (col, ddlType) in new[] { ("CustomPrivacyContent", "TEXT"), ("CustomPrivacyUpdatedAt", "TEXT") })
+        {
+            var has = await db.Database
+                .SqlQuery<int>($"SELECT COUNT(*) AS Value FROM pragma_table_info('Regions') WHERE name = {col}")
+                .SingleAsync(ct);
+            if (has == 0)
+            {
+                await db.Database.ExecuteSqlRawAsync($"ALTER TABLE \"Regions\" ADD COLUMN \"{col}\" {ddlType} NULL", ct);
+            }
+        }
     }
 }

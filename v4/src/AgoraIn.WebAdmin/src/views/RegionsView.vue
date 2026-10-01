@@ -32,9 +32,10 @@
         </template>
       </el-table-column>
       <el-table-column prop="maxDevices" label="设备上限" width="90" />
-      <el-table-column label="操作" width="240" fixed="right">
+      <el-table-column label="操作" width="310" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="showIssue(row)">颁发激活码</el-button>
+          <el-button link type="success" size="small" @click="showAgreement(row)">协议制作</el-button>
           <el-button link size="small" @click="showDevicePwd(row)">设备密码</el-button>
           <el-popconfirm title="删除该区域？区域内数据将不可见。" @confirm="removeRegion(row)">
             <template #reference><el-button link type="danger" size="small">删除</el-button></template>
@@ -85,6 +86,21 @@
       </template>
     </el-dialog>
   </el-card>
+
+  <!-- 协议制作对话框 -->
+  <el-dialog v-model="agreementVisible" :title="`协议制作 — ${agreementRegion?.name || ''}`" width="640px">
+    <el-alert type="info" :closable="false" style="margin-bottom:10px"
+              title="该区域家长/学生注册时，除 AgoraIn《服务条款》《隐私政策》外，还须勾选同意下方机构自行制作的隐私政策方可完成注册。留空表示不启用。" />
+    <el-input v-model="agreementContent" type="textarea" :rows="12"
+              placeholder="请输入该机构的隐私政策全文（纯文本，自动换行展示给注册用户）…" />
+    <p v-if="agreementUpdatedAt" style="color:#909399;font-size:12px;margin:6px 0 0">
+      最近更新：{{ agreementUpdatedAt }}
+    </p>
+    <template #footer>
+      <el-button @click="agreementVisible = false">取消</el-button>
+      <el-button type="primary" :loading="savingAgreement" @click="saveAgreement">保存</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
@@ -97,6 +113,36 @@ const regions = ref<RegionRow[]>([])
 
 const createVisible = ref(false)
 const createForm = ref({ name: '', regionId: '', ownerUsername: '', ownerPassword: '' })
+
+// 协议制作
+const agreementVisible = ref(false)
+const agreementRegion = ref<RegionRow | null>(null)
+const agreementContent = ref('')
+const agreementUpdatedAt = ref('')
+const savingAgreement = ref(false)
+
+async function showAgreement(row: RegionRow) {
+  agreementRegion.value = row
+  agreementContent.value = ''
+  agreementUpdatedAt.value = ''
+  try {
+    const r = await regionApi.getAgreement(row.regionId)
+    agreementContent.value = r.content || ''
+    agreementUpdatedAt.value = r.updatedAt ? formatTime(r.updatedAt) : ''
+  } catch {}
+  agreementVisible.value = true
+}
+
+async function saveAgreement() {
+  if (!agreementRegion.value) return
+  savingAgreement.value = true
+  try {
+    const r = await regionApi.saveAgreement(agreementRegion.value.regionId, agreementContent.value)
+    ElMessage.success(r.hasCustom ? '机构隐私协议已保存，注册时将强制家长/学生勾选同意' : '已清空协议（该区域注册恢复为仅同意平台条款）')
+    agreementVisible.value = false
+    await load()
+  } finally { savingAgreement.value = false }
+}
 
 const issueVisible = ref(false)
 const issueRegion = ref<RegionRow | null>(null)

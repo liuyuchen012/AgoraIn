@@ -81,3 +81,4 @@ v4/tools/AgoraIn.LicenseTool/license_public_key.xml
 *.keystore
 *.jks
 v4/src/AgoraIn.Mobile/signing/credentials.txt
+v4/src/AgoraIn.Mobile/signing/linux-release-private.pem

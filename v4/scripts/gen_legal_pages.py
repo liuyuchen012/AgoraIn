@@ -130,7 +130,8 @@ PAGE_TMPL = '''<!DOCTYPE html>
 </div>
 <div class="wrap">
 {body}
-<div class="foot">运营主体：天津自贸试验区创晨平台网络科技工作室（个体工商户）<br>AgoraIn v4.0 · 闭源商业软件</div>
+<div class="foot">运营主体：天津自贸试验区创晨平台网络科技工作室（个体工商户）<br>
+<a href="https://beian.miit.gov.cn" target="_blank" rel="noopener" style="color:inherit">津ICP备2026010061号</a><br>AgoraIn v4.0 · 闭源商业软件</div>
 </div>
 </body>
 </html>

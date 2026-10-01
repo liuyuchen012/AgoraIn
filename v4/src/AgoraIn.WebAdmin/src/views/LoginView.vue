@@ -55,7 +55,10 @@
         没有账户？<router-link to="/register" class="link">注册区域 / 家长注册</router-link>
       </div>
 
-      <div class="footer">AgoraIn v4.0 · 闭源商业软件</div>
+      <div class="footer">
+        AgoraIn v4.0 · 闭源商业软件<br>
+        <a href="https://beian.miit.gov.cn" target="_blank" rel="noopener" class="icp">津ICP备2026010061号</a>
+      </div>
     </el-card>
   </div>
 </template>
@@ -166,7 +169,10 @@ h1 {
   font-size: 12px;
   color: #c0c4cc;
   margin-top: 24px;
+  line-height: 1.8;
 }
+
+.footer .icp { color: inherit; text-decoration: none; }
 
 .register-hint {
   text-align: center;

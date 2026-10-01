@@ -33,8 +33,17 @@
 
         <template v-if="mode === 'join'">
           <el-form-item label="绑定邀请码" required>
-            <el-input v-model="form.inviteCode" placeholder="向老师索取 6 位邀请码，注册即自动绑定孩子" />
+            <el-input v-model="form.inviteCode" placeholder="向老师索取 6 位邀请码，注册即自动绑定孩子"
+                      @change="loadRegionAgreement" />
           </el-form-item>
+          <el-alert v-if="regionAgreement.hasCustom" type="warning" :closable="false" style="margin-bottom:12px"
+                    :title="`「${regionAgreement.regionName}」已发布机构隐私政策，注册须额外同意`" />
+          <div v-if="regionAgreement.hasCustom" class="region-agreement">
+            <div class="ra-title">「{{ regionAgreement.regionName }}」机构隐私政策
+              <span v-if="regionAgreement.updatedAt" class="ra-time">更新于 {{ formatTime(regionAgreement.updatedAt) }}</span>
+            </div>
+            <div class="ra-body">{{ regionAgreement.content }}</div>
+          </div>
         </template>
         <template v-else>
           <el-form-item label="区域名称" required>
@@ -48,6 +57,9 @@
         <el-form-item label="">
           <el-checkbox v-model="form.agreeTerms">
             我已阅读并同意<a href="/terms.html" target="_blank" @click.stop>《服务条款》</a>与<a href="/privacy.html" target="_blank" @click.stop>《隐私政策》</a>
+          </el-checkbox>
+          <el-checkbox v-if="regionAgreement.hasCustom" v-model="agreeRegionTerms">
+            我已阅读并同意「{{ regionAgreement.regionName }}」的<b>机构隐私政策</b>
           </el-checkbox>
         </el-form-item>
 
@@ -69,17 +81,34 @@
 import { reactive, ref, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { registerApi } from '@/api/client'
+import { registerApi, parentApi } from '@/api/client'
 
 const router = useRouter()
 
 const mode = ref<'join' | 'region'>('join')
 const form = reactive({
   email: '', code: '', username: '', password: '',
-  regionId: '', regionName: '', inviteCode: '', agreeTerms: false,
+  regionId: '', regionName: '', inviteCode: '', agreeTerms: false, agreeRegionTerms: false,
 })
+// 机构自定义隐私协议（随邀请码自动加载）
+const regionAgreement = ref<{ regionId: string; regionName: string; hasCustom: boolean; content?: string; updatedAt?: string }>(
+  { regionId: '', regionName: '', hasCustom: false, content: '', updatedAt: '' })
+
+async function loadRegionAgreement() {
+  const code = (form.inviteCode || '').trim().toUpperCase()
+  if (!code) { regionAgreement.value = { regionId: '', regionName: '', hasCustom: false, content: '', updatedAt: '' }; return }
+  try {
+    regionAgreement.value = await parentApi.inviteRegion(code)
+    agreeRegionTerms.value = false
+  } catch {
+    regionAgreement.value = { regionId: '', regionName: '', hasCustom: false, content: '', updatedAt: '' }
+  }
+}
+
+function formatTime(t?: string) { return t ? String(t).replace('T', ' ').substring(0, 16) : '' }
 const loading = ref(false)
 const error = ref('')
+const agreeRegionTerms = ref(false)
 const codeCooldown = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
 
@@ -105,6 +134,9 @@ async function onSubmit() {
   }
   if (!form.agreeTerms) { error.value = '请先同意服务条款与隐私政策'; return }
   if (mode.value === 'join' && !form.inviteCode) { error.value = '请填写绑定邀请码'; return }
+  if (mode.value === 'join' && regionAgreement.value.hasCustom && !agreeRegionTerms.value) {
+    error.value = '请先阅读并同意该机构的隐私政策'; return
+  }
   if (mode.value === 'region' && !form.regionName) { error.value = '请填写区域名称'; return }
 
   loading.value = true
@@ -116,6 +148,7 @@ async function onSubmit() {
       regionId: form.regionId || undefined,
       regionName: form.regionName || undefined,
       inviteCode: form.inviteCode || undefined,
+      agreeRegionTerms: agreeRegionTerms.value,
       ...(mode.value === 'region' ? { email: form.email, code: form.code } : {}),
     })
     ElMessage.success(res.message || '注册成功')
@@ -127,6 +160,18 @@ async function onSubmit() {
 </script>
 
 <style scoped>
+.region-agreement {
+  border: 1px solid #e4e7ed; border-radius: 8px; background: #fafbfc;
+  margin-bottom: 14px; overflow: hidden;
+}
+.ra-title {
+  padding: 8px 12px; background: #f1f5fe; font-weight: 600; font-size: 13px; color: #174ea6;
+}
+.ra-time { font-weight: 400; color: #909399; font-size: 11px; margin-left: 8px; }
+.ra-body {
+  padding: 12px; max-height: 180px; overflow-y: auto; white-space: pre-wrap;
+  font-size: 13px; color: #333; line-height: 1.7;
+}
 .register-page {
   min-height: 100vh;
   display: flex;

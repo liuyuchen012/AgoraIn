@@ -65,13 +65,22 @@ export const registerApi = {
   register: (data: {
     email?: string; code?: string; username: string; password: string;
     displayName?: string; agreeTerms: boolean;
-    mode: 'region' | 'join'; regionName?: string; regionId?: string; inviteCode?: string;
+    mode: 'region' | 'join'; regionName?: string; regionId?: string; inviteCode?: string; agreeRegionTerms?: boolean;
   }) => client.post<{ message: string; loginName?: string; regionId?: string; studentName?: string }>('/account/register', data),
 }
 
 // ── 区域（租户）管理：仅主区域 manager 可用 ──
 export const regionApi = {
   list: () => client.get<RegionRow[]>('/regions'),
+  /** 区域自定义隐私协议（匿名读取，注册页展示） */
+  getAgreement: (regionId: string) =>
+    client.get<{ regionId: string; regionName: string; hasCustom: boolean; content?: string; updatedAt?: string }>(`/regions/${regionId}/agreement`),
+  /** 保存本区域自定义隐私协议（区域主账号） */
+  saveOwnAgreement: (content: string) =>
+    client.put<{ regionId: string; hasCustom: boolean; updatedAt?: string }>('/regions/me/agreement', { content }),
+  /** 保存指定区域自定义隐私协议（仅主区域） */
+  saveAgreement: (regionId: string, content: string) =>
+    client.put<{ regionId: string; hasCustom: boolean; updatedAt?: string }>(`/regions/${regionId}/agreement`, { content }),
   create: (data: { regionId?: string; name: string; ownerUsername: string; ownerPassword: string; ownerDisplayName?: string }) =>
     client.post<RegionRow>('/regions', data),
   issueCode: (regionId: string, months: number, maxDevices: number) =>
@@ -360,6 +369,10 @@ export const parentApi = {
     client.get<{ studentId: string; studentNo?: string; studentName: string; inviteCode: string }[]>('/parent/invite/batch', { params: { classId } }),
   /** 全班邀请码 CSV 导出地址 */
   batchInviteCsvUrl: (classId: string) => `/api/v4/parent/invite/batch/export?classId=${encodeURIComponent(classId)}`,
+  /** 邀请码 → 所属区域与自定义协议（匿名，注册页展示用） */
+  inviteRegion: (inviteCode: string) =>
+    client.get<{ regionId: string; regionName: string; hasCustom: boolean; customPrivacy?: string; customPrivacyUpdatedAt?: string }>(
+      `/parent/invite/${encodeURIComponent(inviteCode)}/region`),
 }
 
 // ── 数据类型 ──

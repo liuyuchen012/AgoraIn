@@ -33,7 +33,23 @@
             <Entry x:Name="PasswordEntry" Placeholder="密码（至少 6 位）" IsPassword="True" />
 
             <!-- 家长模式：区域代号 -->
-            <Entry x:Name="RegionIdEntry" Placeholder="绑定邀请码（向老师索取 6 位码，注册即绑定孩子）" />
+            <Entry x:Name="RegionIdEntry" Placeholder="绑定邀请码（向老师索取 6 位码，注册即绑定孩子）" Unfocused="OnInviteCodeUnfocused" />
+
+            <!-- 机构自定义隐私政策（区域管理员制作时展示） -->
+            <Border x:Name="RegionAgreementCard" IsVisible="False" BackgroundColor="White"
+                    StrokeThickness="0" StrokeShape="RoundRectangle 12" Padding="14">
+                <VerticalStackLayout Spacing="6">
+                    <Label x:Name="RegionAgreementTitle" FontSize="14" FontAttributes="Bold" TextColor="#174ea6" />
+                    <ScrollView MaximumHeightRequest="180">
+                        <Label x:Name="RegionAgreementBody" FontSize="13" LineBreakMode="WordWrap" />
+                    </ScrollView>
+                    <HorizontalStackLayout Spacing="6" VerticalOptions="Center">
+                        <CheckBox x:Name="AgreeRegionCheck" IsChecked="False" />
+                        <Label x:Name="AgreeRegionLabel" Text="我已阅读并同意该机构的隐私政策" FontSize="13"
+                               TextColor="#333333" VerticalOptions="Center" />
+                    </HorizontalStackLayout>
+                </VerticalStackLayout>
+            </Border>
             <!-- 机构模式：区域名称 -->
             <Entry x:Name="RegionNameEntry" Placeholder="区域名称（机构/学校名称，不可重复）" IsVisible="False" />
 

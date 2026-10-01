@@ -156,6 +156,64 @@ public class RegionsController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// 读取区域自定义隐私协议（匿名，注册页展示用）。
+    /// 仅当区域管理员制作了协议时返回内容。
+    /// </summary>
+    [HttpGet("{regionId}/agreement")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetAgreement(string regionId, CancellationToken ct)
+    {
+        var region = await _db.Regions.FirstOrDefaultAsync(r => r.RegionId == regionId, ct);
+        if (region == null) return NotFound(new { error = "区域不存在" });
+        var hasCustom = !string.IsNullOrWhiteSpace(region.CustomPrivacyContent);
+        return Ok(new
+        {
+            regionId = region.RegionId,
+            regionName = region.Name,
+            hasCustom,
+            content = hasCustom ? region.CustomPrivacyContent : null,
+            updatedAt = region.CustomPrivacyUpdatedAt,
+        });
+    }
+
+    /// <summary>保存本区域的自定义隐私协议（区域主账号自助维护）。</summary>
+    [HttpPut("me/agreement")]
+    public async Task<IActionResult> SaveOwnAgreement([FromBody] RegionAgreementRequest req, CancellationToken ct)
+    {
+        var username = User.Identity?.Name ?? "";
+        var regionId = RegionContext.Current;
+        if (regionId == RegionContext.ManagerRegion)
+            return BadRequest(new { error = "主区域使用平台统一协议，无需自制协议" });
+
+        var user = await FindUserAsync(username, regionId, ct);
+        if (user == null) return NotFound();
+        if (user.Role is not (AppRoles.Owner or AppRoles.Admin))
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = "仅区域主账号可维护协议" });
+
+        var region = await _db.Regions.FirstOrDefaultAsync(r => r.RegionId == regionId, ct);
+        if (region == null) return NotFound();
+
+        region.CustomPrivacyContent = string.IsNullOrWhiteSpace(req.Content) ? null : req.Content;
+        region.CustomPrivacyUpdatedAt = string.IsNullOrWhiteSpace(req.Content) ? null : DateTime.Now;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { regionId = region.RegionId, hasCustom = region.CustomPrivacyContent != null, updatedAt = region.CustomPrivacyUpdatedAt });
+    }
+
+    /// <summary>保存指定区域的自定义隐私协议（仅主区域，代机构维护）。</summary>
+    [HttpPut("{regionId}/agreement")]
+    public async Task<IActionResult> SaveAgreement(string regionId, [FromBody] RegionAgreementRequest req, CancellationToken ct)
+    {
+        if (!await IsManagerAsync(ct)) return Forbid();
+        var region = await _db.Regions.FirstOrDefaultAsync(r => r.RegionId == regionId, ct);
+        if (region == null) return NotFound(new { error = "区域不存在" });
+
+        region.CustomPrivacyContent = string.IsNullOrWhiteSpace(req.Content) ? null : req.Content;
+        region.CustomPrivacyUpdatedAt = string.IsNullOrWhiteSpace(req.Content) ? null : DateTime.Now;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { regionId = region.RegionId, hasCustom = region.CustomPrivacyContent != null, updatedAt = region.CustomPrivacyUpdatedAt });
+    }
+
     /// <summary>删除子区域（仅主区域；区域内数据将不可见但保留，误删可联系运维恢复）。</summary>
     [HttpDelete("{regionId}")]
     public async Task<IActionResult> Delete(string regionId, CancellationToken ct)
@@ -213,3 +271,4 @@ public class RegionsController : ControllerBase
 public record CreateRegionRequest(string? RegionId, string Name, string OwnerUsername, string OwnerPassword, string? OwnerDisplayName);
 public record IssueRegionCodeRequest(int Months, int MaxDevices);
 public record ActivateRegionRequest(string? ActivationCode);
+public record RegionAgreementRequest(string? Content);

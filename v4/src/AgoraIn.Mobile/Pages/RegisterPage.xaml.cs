@@ -18,6 +18,41 @@ public partial class RegisterPage : ContentPage
         RegionNameEntry.IsVisible = !JoinMode;
     }
 
+    /// <summary>邀请码失焦：拉取所属区域与机构自定义隐私协议。</summary>
+    private async void OnInviteCodeUnfocused(object? sender, FocusEventArgs e)
+    {
+        var code = RegionIdEntry.Text?.Trim().ToUpperInvariant() ?? "";
+        if (string.IsNullOrEmpty(code) || !JoinMode)
+        {
+            RegionAgreementCard.IsVisible = false;
+            return;
+        }
+        try
+        {
+            var res = await App.Api.GetInviteRegionAsync(code);
+            if (res == null) { RegionAgreementCard.IsVisible = false; return; }
+
+            if (res.HasCustom && !string.IsNullOrWhiteSpace(res.CustomPrivacy))
+            {
+                RegionAgreementTitle.Text = $"「{res.RegionName}」机构隐私政策";
+                RegionAgreementBody.Text = res.CustomPrivacy;
+                AgreeRegionLabel.Text = "我已阅读并同意该机构的隐私政策";
+                RegionAgreementCard.IsVisible = true;
+            }
+            else
+            {
+                RegionAgreementCard.IsVisible = false;
+            }
+        }
+        catch
+        {
+            RegionAgreementCard.IsVisible = false;
+        }
+    }
+
+    private bool RegionAgreementRequired =>
+        JoinMode && RegionAgreementCard.IsVisible;
+
     private async void OnSendCodeClicked(object? sender, EventArgs e)
     {
         var email = EmailEntry.Text?.Trim() ?? "";
@@ -81,6 +116,12 @@ public partial class RegisterPage : ContentPage
             await DisplayAlertAsync("提示", "请填写老师颁发的绑定邀请码", "知道了");
             return;
         }
+        if (RegionAgreementRequired && AgreeCheck.IsChecked != true && RegionAgreementCard.IsVisible &&
+            AgreeRegionCheck.IsChecked != true)
+        {
+            await DisplayAlertAsync("提示", "请先阅读并勾选同意该机构的隐私政策", "知道了");
+            return;
+        }
         if (!JoinMode && string.IsNullOrEmpty(regionName))
         {
             await DisplayAlertAsync("提示", "请填写区域名称", "知道了");
@@ -101,7 +142,8 @@ public partial class RegisterPage : ContentPage
                 regionId: null,
                 regionName: JoinMode ? null : regionName,
                 inviteCode: JoinMode ? regionId.ToUpperInvariant() : null,
-                agreeTerms: true);
+                agreeTerms: true,
+                agreeRegionTerms: RegionAgreementRequired && AgreeRegionCheck.IsChecked == true);
 
             await DisplayAlertAsync("注册成功",
                 $"{res?.Message}{(string.IsNullOrEmpty(res?.RegionId) ? "" : $"\n区域代号：{res.RegionId}\n登录名：{res.LoginName}")}",

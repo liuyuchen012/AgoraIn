@@ -317,6 +317,15 @@ public sealed class Region
 
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 
+    /// <summary>
+    /// 区域自定义隐私政策（第三方机构自行制作）。非空时，该区域家长/学生注册
+    /// 必须额外勾选同意该政策后方可完成注册；内容由区域管理员在 Web 管理面板维护。
+    /// </summary>
+    public string? CustomPrivacyContent { get; set; }
+
+    /// <summary>自定义隐私政策最近更新时间（展示给注册用户）。</summary>
+    public DateTime? CustomPrivacyUpdatedAt { get; set; }
+
     /// <summary>区域是否可用（已激活且未到期）。</summary>
     public bool IsActive => Activated && (ExpireAt == null || ExpireAt > DateTime.Now);
 }

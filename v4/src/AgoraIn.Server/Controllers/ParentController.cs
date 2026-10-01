@@ -384,6 +384,39 @@ public class ParentInviteController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>
+    /// 邀请码 → 所属区域与自定义协议（匿名；注册页据此展示机构隐私政策）。
+    /// 仅对"待绑定"邀请码返回最小信息（区域代号/名称/自定义协议）。
+    /// </summary>
+    [HttpGet("{inviteCode}/region")]
+    [AllowAnonymous]
+    public async Task<IActionResult> InviteRegion(string inviteCode, CancellationToken ct)
+    {
+        var code = inviteCode.Trim().ToUpperInvariant();
+        var binding = await _db.ParentBindings
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(b => b.InviteCode == code && b.Status == Core.Entities.ParentBindingStatus.Pending, ct);
+        if (binding == null) return NotFound(new { error = "邀请码无效或已被使用" });
+
+        var student = await _db.Students
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(s => s.Id == binding.StudentId, ct);
+        if (student == null) return NotFound(new { error = "邀请码对应的学生不存在" });
+
+        var regionId = Microsoft.EntityFrameworkCore.EF.Property<string>(student, "RegionId") ?? "";
+        var region = await _db.Regions.FirstOrDefaultAsync(r => r.RegionId == regionId, ct);
+        if (region == null) return NotFound(new { error = "区域不存在" });
+
+        return Ok(new
+        {
+            regionId = region.RegionId,
+            regionName = region.Name,
+            hasCustom = !string.IsNullOrWhiteSpace(region.CustomPrivacyContent),
+            customPrivacy = region.CustomPrivacyContent,
+            customPrivacyUpdatedAt = region.CustomPrivacyUpdatedAt,
+        });
+    }
+
     /// <summary>全班邀请码导出 CSV（UTF-8 BOM，Excel 可直接打开；教师打印/发放用）。</summary>
     [HttpGet("batch/export")]
     public async Task<IActionResult> BatchExport([FromQuery] string classId, CancellationToken ct)

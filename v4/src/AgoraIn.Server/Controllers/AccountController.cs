@@ -160,6 +160,11 @@ public class AccountController : ControllerBase
             var parentRegion = Microsoft.EntityFrameworkCore.EF.Property<string>(student, "RegionId");
             if (string.IsNullOrEmpty(parentRegion)) parentRegion = AgoraIn.Server.Security.RegionContext.ManagerRegion;
 
+            // 双同意：区域管理员制作了自定义隐私政策时，家长还须额外勾选同意该机构协议
+            var region = await _db.Regions.FirstOrDefaultAsync(r => r.RegionId == parentRegion, ct);
+            if (region != null && !string.IsNullOrWhiteSpace(region.CustomPrivacyContent) && !req.AgreeRegionTerms)
+                return BadRequest(new { error = "请先阅读并同意该机构的隐私政策后方可注册。" });
+
             if (await _db.Users.AnyAsync(u => u.Username == username && u.RegionId == parentRegion, ct))
                 return BadRequest(new { error = "该用户名在当前区域已被占用。" });
 
@@ -343,6 +348,7 @@ public record RegisterRequest(
     string? Email, string? Code, string? Username, string? Password,
     string? DisplayName, bool AgreeTerms,
     // region = 创建新区域（默认，v3.2 语义，需邮箱验证码）；join = 家长凭绑定邀请码注册（需 inviteCode）
-    string? Mode, string? RegionName, string? RegionId, string? InviteCode);
+    // AgreeRegionTerms：区域管理员制作了自定义隐私政策时，家长须额外勾选同意
+    string? Mode, string? RegionName, string? RegionId, string? InviteCode, bool AgreeRegionTerms = false);
 
 public record ResetPasswordRequest(string? Email, string? Code, string? NewPassword);
