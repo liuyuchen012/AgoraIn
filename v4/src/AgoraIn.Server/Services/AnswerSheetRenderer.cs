@@ -43,7 +43,7 @@ public static class AnswerSheetRenderer
 <meta charset="utf-8">
 <title>{{Escape(paper.Title)}} - 答题卡</title>
 <style>
-  @page { size: A4; margin: 10mm; }
+  @page { size: A4; margin: 10mm; margin-bottom: 20mm; }
   * { box-sizing: border-box; }
   body { font-family: "SimSun", "Songti SC", serif; margin: 0; color: #000; }
 
@@ -99,6 +99,10 @@ public static class AnswerSheetRenderer
   .footer { position: absolute; bottom: 0; left: 0; right: 0; padding: 0 10mm;
             display: flex; justify-content: space-between; align-items: center;
             font-size: 8pt; color: #444; border-top: 0.3mm solid #999; padding-top: 2mm; }
+  /* 固定位置 QR 标识：position:fixed 在打印时每页重复；放在 @page 右下角 margin 区域，不遮挡题目 */
+  .qr-badge { position: fixed; bottom: 4mm; right: 4mm; width: 16mm; height: 16mm;
+    border: 0.3mm solid #000; display: flex; align-items: center; justify-content: center;
+    font-size: 5pt; text-align: center; z-index: 1; background: white; }
   .qr { width: 18mm; height: 18mm; border: 0.3mm solid #000; display: flex;
         align-items: center; justify-content: center; font-size: 6pt; text-align: center; }
   .barcode { height: 12mm; width: 45mm; border: 0.3mm solid #000; display: flex;
