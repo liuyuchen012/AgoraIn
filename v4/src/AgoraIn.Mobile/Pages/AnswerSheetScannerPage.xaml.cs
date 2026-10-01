@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Net.Http.Headers;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Graphics.Platform;
@@ -9,6 +10,7 @@ public partial class AnswerSheetScannerPage : ContentPage
     private readonly Services.ApiClient _api;
     private byte[]? _imageBytes;
     private string? _selectedPaperId;
+    private bool _loading;
 
     public AnswerSheetScannerPage() : this(App.Api) { }
 
@@ -17,24 +19,46 @@ public partial class AnswerSheetScannerPage : ContentPage
         InitializeComponent();
         _api = api;
         BindingContext = this;
-        LoadPapers();
     }
 
-    public List<PaperOption> Papers { get; } = new();
+    /// <summary>必须用 ObservableCollection：试卷是进页面后异步取回的，
+    /// 普通 List 不触发集合变更通知，Picker 绑定后不会再刷新（表现为下拉框一直空白）。</summary>
+    public ObservableCollection<PaperOption> Papers { get; } = new();
     public bool ShowPlaceholder => _imageBytes == null;
 
-    private async void LoadPapers()
+    protected override async void OnAppearing()
     {
+        base.OnAppearing();
+        await LoadPapersAsync();
+    }
+
+    private async Task LoadPapersAsync()
+    {
+        if (_loading) return;
+        _loading = true;
         try
         {
             var papers = await _api.GetAsync<List<PaperInfo>>("/api/v4/exams/papers");
             Papers.Clear();
-            foreach (var p in papers ?? new())
+            if (papers == null)
+            {
+                // 4xx/5xx 都被 GetAsync 吞成 null（无权限 403 / 未登录 401 / 网络异常）
+                StatusLabel.Text = "加载试卷列表失败：请确认已登录，且账号有「试卷管理」权限";
+                return;
+            }
+            foreach (var p in papers)
                 Papers.Add(new PaperOption { Id = p.Id, Title = p.Title });
+            StatusLabel.Text = Papers.Count > 0
+                ? $"请选择试卷后拍照（共 {Papers.Count} 份）"
+                : "账号下暂无试卷：请先在电脑端「试卷管理」创建试卷";
         }
-        catch
+        catch (Exception ex)
         {
-            StatusLabel.Text = "加载试卷列表失败";
+            StatusLabel.Text = $"加载试卷列表失败：{ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
         }
     }
 
@@ -48,12 +72,30 @@ public partial class AnswerSheetScannerPage : ContentPage
     {
         if (!MediaPicker.Default.IsCaptureSupported)
         {
-            await DisplayAlert("提示", "当前设备不支持拍照", "确定");
+            await DisplayAlertAsync("提示", "当前设备不支持拍照", "确定");
             return;
         }
 
         try
         {
+            // 先要权限再拍照：相机权限是必需的；存储写入权限只有 Android 13 以下才需要
+            //（MediaPicker.CapturePhotoAsync 内部会校验，缺清单声明会直接抛英文异常）
+            if (await Permissions.RequestAsync<Permissions.Camera>() != PermissionStatus.Granted)
+            {
+                StatusLabel.Text = "未授予相机权限，无法拍照";
+                return;
+            }
+            if (!OperatingSystem.IsAndroidVersionAtLeast(33))
+            {
+                var storage = await Permissions.RequestAsync<Permissions.StorageWrite>();
+                if (storage != PermissionStatus.Granted)
+                {
+                    StatusLabel.Text = "未授予存储权限，无法保存照片（Android 13 以下必需）";
+                    return;
+                }
+            }
+
+            StatusLabel.Text = "正在打开相机…";
             var photo = await MediaPicker.Default.CapturePhotoAsync();
             if (photo != null) await LoadImage(photo);
         }
@@ -121,7 +163,7 @@ public partial class AnswerSheetScannerPage : ContentPage
     {
         if (_imageBytes == null || _selectedPaperId == null)
         {
-            await DisplayAlert("提示", "请先选择试卷并拍照/选择图片", "确定");
+            await DisplayAlertAsync("提示", "请先选择试卷并拍照/选择图片", "确定");
             return;
         }
 

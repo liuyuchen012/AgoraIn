@@ -5,4 +5,9 @@
 	<uses-permission android:name="android.permission.INTERNET" />
 	<!-- 扫码签到需要相机权限（ScanPage 请求 Permissions.Camera） -->
 	<uses-permission android:name="android.permission.CAMERA" />
+	<!-- 答题卡拍照：MediaPicker.CapturePhotoAsync 在 Android 13(API33) 以下会校验
+	     Permissions.StorageWrite，清单里没声明就直接抛「You need to declare using the
+	     permission: WRITE_EXTERNAL_STORAGE in your AndroidManifest.xml」，相机根本打不开。
+	     API 33+ 改用 MediaStore 无需该权限，故用 maxSdkVersion 限制到 32。 -->
+	<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 </manifest>
