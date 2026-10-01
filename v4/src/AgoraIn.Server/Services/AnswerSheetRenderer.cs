@@ -50,13 +50,15 @@ public static class AnswerSheetRenderer
   /* ── 四角定位标记（黑色实心方块，用于透视校正）──
      position: fixed 在打印时每页重复绘制——多页答题卡每一页都有完整四角标记；
      标记本身不含页码信息，每页相同即可满足透视校正 */
-  .anchor { position: fixed; width: 6mm; height: 6mm; background: #000; }
+  .anchor { position: absolute; width: 6mm; height: 6mm; background: #000; }
   .anchor.tl { top: 4mm; left: 4mm; }
   .anchor.tr { top: 4mm; right: 4mm; }
   .anchor.bl { bottom: 4mm; left: 4mm; }
   .anchor.br { bottom: 4mm; right: 4mm; }
 
-  .sheet { position: relative; width: 190mm; min-height: 277mm; padding: 14mm 10mm 10mm; }
+  .sheet { width: 190mm; padding: 10mm; }
+  .page { position: relative; min-height: 267mm; padding: 10mm 0; }
+  .page + .page { page-break-before: always; }
 
   .title { text-align: center; font-size: 16pt; font-weight: bold; margin-bottom: 2mm; }
   .subtitle { text-align: center; font-size: 10pt; color: #333; margin-bottom: 4mm; }
@@ -94,7 +96,7 @@ public static class AnswerSheetRenderer
   .answer-lines { background-image: repeating-linear-gradient(transparent, transparent 7mm, #ccc 7mm, #ccc 7.2mm); }
 
   /* ── 页脚（fixed：多页打印时每页重复，QR 为整卷标识） ── */
-  .footer { position: fixed; bottom: 12mm; left: 10mm; right: 10mm;
+  .footer { position: absolute; bottom: 0; left: 0; right: 0; padding: 0 10mm;
             display: flex; justify-content: space-between; align-items: center;
             font-size: 8pt; color: #444; border-top: 0.3mm solid #999; padding-top: 2mm; }
   .qr { width: 18mm; height: 18mm; border: 0.3mm solid #000; display: flex;
@@ -105,10 +107,12 @@ public static class AnswerSheetRenderer
 </head>
 <body>
 <div class="sheet">
-  <div class="anchor tl"></div><div class="anchor tr"></div>
-  <div class="anchor bl"></div><div class="anchor br"></div>
+  <!-- 第一页：学生信息 + 考号 + 客观题 -->
+  <div class="page">
+    <div class="anchor tl"></div><div class="anchor tr"></div>
+    <div class="anchor bl"></div><div class="anchor br"></div>
 
-  <div class="title">{{Escape(paper.Title)}}</div>
+    <div class="title">{{Escape(paper.Title)}}</div>
   <div class="subtitle">
     科目：{{Escape(paper.Subject ?? "—")}}　总分：{{paper.TotalScore:0.#}}　
     第 {{pageIndex}} / {{pageCount}} 页
@@ -131,16 +135,17 @@ public static class AnswerSheetRenderer
 
   {{(objective.Count > 0 ? BuildObjectiveSection(objective, options) : "")}}
 
-  {{(subjective.Count > 0 ? BuildSubjectiveSection(subjective) : "")}}
-
-  <div class="footer">
-    <div>
-      试卷编号：{{Escape(paper.Id)}}<br>
-      <span style="font-size:7pt">请用 2B 铅笔填涂，保持卡面整洁</span>
+    <div class="footer">
+      <div><span style="font-size:7pt">请用 2B 铅笔填涂，保持卡面整洁</span></div>
+      {{(string.IsNullOrEmpty(studentNo) ? "" : $"<div class=\"barcode\">{Escape(studentNo)}</div>")}}
+      <div class="qr">{{BuildQrCode(paper.Id, 1)}}</div>
     </div>
-    {{(string.IsNullOrEmpty(studentNo) ? "" : $"<div class=\"barcode\">{Escape(studentNo)}</div>")}}
-    <div class="qr">{{BuildQrCode(paper.Id, pageCount > 1 ? 0 : pageIndex)}}</div>
   </div>
+
+  <!-- 主观题页（page-break-before自动另起一页） -->
+  {{(subjective.Count > 0 ? BuildSubjectivePage(subjective, paper, studentNo, 2) : "")}}
+
+    <div>
 </div>
 </body>
 </html>
@@ -210,6 +215,21 @@ public static class AnswerSheetRenderer
             sb.Append("</div></div></div>");
         }
 
+        sb.Append("</div>");
+        return sb.ToString();
+    }
+
+    /// <summary>主观题独立页：.page 容器，自带四角标记 + 页码 QR + 学号条码。</summary>
+    private static string BuildSubjectivePage(IReadOnlyList<Question> questions, ExamPaper paper, string? studentNo, int pageIdx)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<div class=\"page\" style=\"page-break-before:always\">");
+        sb.Append("<div class=\"anchor tl\"></div><div class=\"anchor tr\"></div>");
+        sb.Append("<div class=\"anchor bl\"></div><div class=\"anchor br\"></div>");
+        sb.Append(BuildSubjectiveSection(questions));
+        sb.Append("<div class=\"footer\"><div><span style=\"font-size:7pt\">主观题作答区</span></div>");
+        sb.Append(string.IsNullOrEmpty(studentNo) ? "" : $"<div class=\"barcode\">{Escape(studentNo)}</div>");
+        sb.Append($"<div class=\"qr\">{BuildQrCode(paper.Id, pageIdx)}</div></div>");
         sb.Append("</div>");
         return sb.ToString();
     }
