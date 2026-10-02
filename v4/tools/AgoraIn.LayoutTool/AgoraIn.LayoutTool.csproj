@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 答题卡版面校验工具：导出「渲染 HTML + 版面模型 JSON」，再用 tools/verify_layout.py
+       做「模型 vs 浏览器实测」的逐气泡比对。改动答题卡 CSS / AnswerSheetLayout 后必须跑。 -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>agorain-layout</AssemblyName>
+    <RootNamespace>AgoraIn.LayoutTool</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AgoraIn.Core\AgoraIn.Core.csproj" />
+    <ProjectReference Include="..\..\src\AgoraIn.Server\AgoraIn.Server.csproj" />
+  </ItemGroup>
+
+</Project>

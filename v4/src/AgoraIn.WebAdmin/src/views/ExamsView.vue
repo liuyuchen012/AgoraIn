@@ -170,7 +170,9 @@
                   <el-option v-for="p in paperOptions" :key="p.value" :label="p.label" :value="p.value" />
                 </el-select>
                 <div style="font-size:11px;color:#909399;line-height:1.6">
-                  速印机常用 8 开（8K）；普通打印机选 A4。改动后请重新预览确认分页。
+                  速印机常用 8 开（8K）；普通打印机选 A4。改动后请重新预览确认分页。<br>
+                  <b>双栏</b>：8K / A3 / B4 等大纸自动排成左右两栏（左栏排满接右栏），
+                  页数约为 A4 的一半；A4 / 16K 仍是单栏。
                 </div>
               </el-form-item>
             </el-form>

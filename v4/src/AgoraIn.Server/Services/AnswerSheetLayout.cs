@@ -189,67 +189,76 @@ public static class AnswerSheetLayout
         var subjective = questions.Where(q => !IsObjective(q.Type)).ToList();
         var columns = opt.ObjColumns;
 
-        // ── 与渲染器相同的顺序装箱，得到每页的内容构成 ──
-        var pages = new List<(bool HasHeader, List<Question> Obj, List<Question> Sub)>();
+        // ── 与渲染器相同的顺序装箱（槽位 = 页 × 栏），得到每页各栏的内容 ──
+        // 单栏时每页 1 个槽位，与旧算法等价；双栏时左栏排满接右栏。
+        var pages = new List<(bool HasHeader, List<(List<Question> Obj, List<Question> Sub)> Cols)>();
         var objIdx = 0;
         var subIdx = 0;
         while (objIdx < objective.Count || subIdx < subjective.Count)
         {
             var capacity = opt.CapacityMm(pages.Count);
-            var used = 0.0;
-            var pageObj = new List<Question>();
-            var pageSub = new List<Question>();
+            var cols = new List<(List<Question>, List<Question>)>();
 
-            if (objIdx < objective.Count)
+            for (var c = 0; c < opt.Columns; c++)
             {
-                var rows = (int)Math.Floor((capacity - used - BlockChromeMm) / ObjRowH);
-                var take = Math.Min(objective.Count - objIdx, Math.Max(0, rows) * columns);
-                if (take > 0)
-                {
-                    pageObj = objective.Skip(objIdx).Take(take).ToList();
-                    objIdx += take;
-                    used += BlockChromeMm + RowsOnPage(take, columns) * ObjRowH;
-                }
-            }
+                if (objIdx >= objective.Count && subIdx >= subjective.Count) break;   // 排完了不占空栏
+                var used = 0.0;
+                var pageObj = new List<Question>();
+                var pageSub = new List<Question>();
 
-            if (objIdx >= objective.Count && subIdx < subjective.Count)
-            {
-                var availSub = capacity - used - BlockChromeMm;
-                var subUsed = 0.0;
-                while (subIdx < subjective.Count)
-                {
-                    var h = SubjectiveHeightMm(subjective[subIdx]);
-                    if (pageSub.Count > 0 && subUsed + h > availSub) break;
-                    pageSub.Add(subjective[subIdx]);
-                    subUsed += h;
-                    subIdx++;
-                }
-            }
-
-            if (pageObj.Count == 0 && pageSub.Count == 0)
-            {
                 if (objIdx < objective.Count)
                 {
-                    pageObj = objective.Skip(objIdx).Take(columns).ToList();
-                    objIdx += pageObj.Count;
+                    var rows = (int)Math.Floor((capacity - used - BlockChromeMm) / ObjRowH);
+                    var take = Math.Min(objective.Count - objIdx, Math.Max(0, rows) * columns);
+                    if (take > 0)
+                    {
+                        pageObj = objective.Skip(objIdx).Take(take).ToList();
+                        objIdx += take;
+                        used += BlockChromeMm + RowsOnPage(take, columns) * ObjRowH;
+                    }
                 }
-                else
+
+                if (objIdx >= objective.Count && subIdx < subjective.Count)
                 {
-                    pageSub = subjective.Skip(subIdx).Take(1).ToList();
-                    subIdx += pageSub.Count;
+                    var availSub = capacity - used - BlockChromeMm;
+                    var subUsed = 0.0;
+                    while (subIdx < subjective.Count)
+                    {
+                        var h = SubjectiveHeightMm(subjective[subIdx]);
+                        if (pageSub.Count > 0 && subUsed + h > availSub) break;
+                        pageSub.Add(subjective[subIdx]);
+                        subUsed += h;
+                        subIdx++;
+                    }
                 }
+
+                if (pageObj.Count == 0 && pageSub.Count == 0)
+                {
+                    if (objIdx < objective.Count)
+                    {
+                        pageObj = objective.Skip(objIdx).Take(columns).ToList();
+                        objIdx += pageObj.Count;
+                    }
+                    else
+                    {
+                        pageSub = subjective.Skip(subIdx).Take(1).ToList();
+                        subIdx += pageSub.Count;
+                    }
+                }
+
+                cols.Add((pageObj, pageSub));
             }
 
-            pages.Add((pages.Count == 0, pageObj, pageSub));
+            pages.Add((pages.Count == 0, cols));
         }
 
-        if (pages.Count == 0) pages.Add((true, [], []));
+        if (pages.Count == 0) pages.Add((true, [([], [])]));
 
-        // ── 逐页算坐标 ──
+        // ── 逐页逐栏算坐标 ──
         var result = new List<SheetPageLayout>();
         for (var p = 0; p < pages.Count; p++)
         {
-            var (hasHeader, pageObj, pageSub) = pages[p];
+            var (hasHeader, pageCols) = pages[p];
             var optMarks = new List<OptionMark>();
             var idMarks = new List<IdMark>();
             var frames = new List<SubjectiveFrame>();
@@ -267,50 +276,61 @@ public static class AnswerSheetLayout
                 y += SubtitleH + 2.0;                                            // 页眉"第 N / M 页"（margin 2mm）
             }
 
-            // 客观题块
-            if (pageObj.Count > 0)
+            // 表头通栏；其下每栏各自从列区顶部开始往下排（与 .cols/.col 的 flex 起点一致）
+            var colsTop = y;
+            for (var c = 0; c < pageCols.Count; c++)
             {
-                var bodyTop = y + QBlockTopInset;   // 已含 .block-title 高度与 margin
-                var colW = (opt.ContentWidthMm - 2 * QBlockInsetX - 2 * QBodyPadX
-                            - (columns - 1) * ObjColGap) / columns;
-                var perCol = RowsOnPage(pageObj.Count, columns);
-                for (var c = 0; c < columns; c++)
+                var (pageObj, pageSub) = pageCols[c];
+                var colLeft = PagePadSide + c * (opt.BlockWidthMm + AnswerSheetOptions.ColumnGapMm);
+                var blockW = opt.BlockWidthMm;
+                // 每栏的纵向游标都从列区顶部重新开始：右栏不受左栏排到哪儿的影响
+                // （这条曾经写错过——复用同一个 y——右栏作答框整体上移了 84mm，靠 DOM 实测比对才发现）
+                var colY = colsTop;
+
+                // 客观题块
+                if (pageObj.Count > 0)
                 {
-                    var colX = PagePadSide + QBlockInsetX + QBodyPadX + c * (colW + ObjColGap);
-                    for (var r = 0; r < perCol; r++)
+                    var bodyTop = colY + QBlockTopInset;   // 已含 .block-title 高度与 margin
+                    var colW = (blockW - 2 * QBlockInsetX - 2 * QBodyPadX
+                                - (columns - 1) * ObjColGap) / columns;
+                    var perCol = RowsOnPage(pageObj.Count, columns);
+                    for (var bc = 0; bc < columns; bc++)
                     {
-                        var idx = c * perCol + r;
-                        if (idx >= pageObj.Count) break;
-                        var q = pageObj[idx];
-                        var rowY = bodyTop + r * ObjRowH;
-                        var keys = OptionsOf(q, options);
-                        for (var k = 0; k < keys.Count; k++)
+                        var colX = colLeft + QBlockInsetX + QBodyPadX + bc * (colW + ObjColGap);
+                        for (var r = 0; r < perCol; r++)
                         {
-                            var optX = colX + ObjNoW + ObjNoGap + k * (ObjOptW + ObjOptMr);
-                            var optY = rowY + (ObjRowH - ObjOptH) / 2;
-                            optMarks.Add(new OptionMark(q.Index, keys[k],
-                                new BubbleMark(optX, optY, ObjOptW, ObjOptH)));
+                            var idx = bc * perCol + r;
+                            if (idx >= pageObj.Count) break;
+                            var q = pageObj[idx];
+                            var rowY = bodyTop + r * ObjRowH;
+                            var keys = OptionsOf(q, options);
+                            for (var k = 0; k < keys.Count; k++)
+                            {
+                                var optX = colX + ObjNoW + ObjNoGap + k * (ObjOptW + ObjOptMr);
+                                var optY = rowY + (ObjRowH - ObjOptH) / 2;
+                                optMarks.Add(new OptionMark(q.Index, keys[k],
+                                    new BubbleMark(optX, optY, ObjOptW, ObjOptH)));
+                            }
                         }
                     }
+                    colY = colsTop + BlockChromeMm + RowsOnPage(pageObj.Count, columns) * ObjRowH;
                 }
-                y += BlockChromeMm + RowsOnPage(pageObj.Count, columns) * ObjRowH;
-            }
 
-            // 主观题块：作答框外框也是"这一页"的指纹（纯主观页没有选项气泡，
-            // 页码识别全靠这些外框 + 客观题气泡）
-            if (pageSub.Count > 0)
-            {
-                var subTop = y + QBlockTopInset;   // 作答框顶 = 块顶 + 边框/内边距/块标题（实测 7.49mm，与客观题首行同基准）
-                foreach (var q in pageSub)
+                // 主观题块：作答框外框也是"这一页"的指纹（纯主观页没有选项气泡，
+                // 页码识别全靠这些外框 + 客观题气泡）
+                if (pageSub.Count > 0)
                 {
-                    var frameH = SubjectiveFrameHeightMm(q);
-                    frames.Add(new SubjectiveFrame(q.Index, new BubbleMark(
-                        PagePadSide + QBlockInsetX + QBodyPadX, subTop,
-                        opt.ContentWidthMm - 2 * (QBlockInsetX + QBodyPadX),
-                        frameH)));
-                    subTop += frameH + SubjMb;      // 框间距 = 下间距 3mm
+                    var subTop = colY + QBlockTopInset;   // 作答框顶 = 块顶 + 边框/内边距/块标题（实测 7.49mm，与客观题首行同基准）
+                    foreach (var q in pageSub)
+                    {
+                        var frameH = SubjectiveFrameHeightMm(q);
+                        frames.Add(new SubjectiveFrame(q.Index, new BubbleMark(
+                            colLeft + QBlockInsetX + QBodyPadX, subTop,
+                            blockW - 2 * (QBlockInsetX + QBodyPadX),
+                            frameH)));
+                        subTop += frameH + SubjMb;      // 框间距 = 下间距 3mm
+                    }
                 }
-                y += BlockChromeMm + pageSub.Sum(SubjectiveHeightMm);
             }
 
             result.Add(new SheetPageLayout(opt.Paper, p + 1, pages.Count, optMarks, idMarks, frames));

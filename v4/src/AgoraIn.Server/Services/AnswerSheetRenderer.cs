@@ -51,8 +51,23 @@ public sealed record AnswerSheetOptions
     /// <summary>页面内容宽度 = 纸张宽 - 左右内边距 14×2。</summary>
     public double ContentWidthMm => Paper.WidthMm - 28;
 
-    /// <summary>客观题列数：窄纸（16 开等）两列，常规纸三列。</summary>
-    public int ObjColumns => ContentWidthMm >= 180 ? 3 : 2;
+    /// <summary>
+    /// 内容栏数：大纸（8K/A3/B4，内容宽 ≥ 200mm）自动排成左右两栏，内容左栏排满接右栏。
+    /// 旧版大纸只是把每行拉宽（8K 每行 77mm、页数几乎不比 A4 少），两栏才能真的用上纸面。
+    /// 由纸宽推导而非用户选项：渲染、识别、切图三处必须算出同一套坐标，留个可变的开关只会让它们对不上。
+    /// </summary>
+    public int Columns => ContentWidthMm >= 200 ? 2 : 1;
+
+    /// <summary>双栏时的栏间距（mm）。</summary>
+    public const double ColumnGapMm = 8.0;
+
+    /// <summary>一个内容块的可用宽度（mm）：单栏 = 整幅页内容宽，双栏 = 单栏宽。</summary>
+    public double BlockWidthMm => Columns == 1
+        ? ContentWidthMm
+        : (ContentWidthMm - ColumnGapMm) / 2;
+
+    /// <summary>客观题气泡列数：按「本块可用宽度」决定（窄块两列，常规三列）。</summary>
+    public int ObjColumns => BlockWidthMm >= 180 ? 3 : 2;
 
     /// <summary>首页表头高度（标题 + 副标题 + 注意事项 + 学生信息区）。</summary>
     public double HeaderMm => 92 + (ShowNotes ? 18 : 0);
@@ -114,71 +129,79 @@ public static class AnswerSheetRenderer
         var subjective = questions.Where(q => !IsObjective(q.Type)).ToList();
 
         // ── 服务端分页 ──
-        // 顺序装箱：先排完客观题，再排主观题；每页用「剩余容量」继续装下一块，
-        // 装不下的题目留给下一页（绝不为了塞满而挤压，也不会让任何题目被裁切）。
-        var pages = new List<string>();
+        // 顺序装箱：先排完客观题，再排主观题；满载就换下一个"槽位"——双栏时同页右栏，
+        // 单栏时下一页。单栏模式每页只有 1 个槽位，输出与旧版逐字节一致（A4 识别已验证过）。
+        var pages = new List<List<string>>();
         var objIdx = 0;
         var subIdx = 0;
 
         while (objIdx < objective.Count || subIdx < subjective.Count)
         {
             var capacity = opt.CapacityMm(pages.Count);
-            var used = 0.0;
-            var blocks = new StringBuilder();
+            var cols = new List<string>();
 
-            // 1) 客观题：按 N 列 x M 行装填本页剩余容量
-            if (objIdx < objective.Count)
+            for (var c = 0; c < opt.Columns; c++)
             {
-                var rows = (int)Math.Floor((capacity - used - BlockChromeMm) / ObjRowMm);
-                var take = Math.Min(objective.Count - objIdx, Math.Max(0, rows) * opt.ObjColumns);
-                if (take > 0)
-                {
-                    var chunk = objective.Skip(objIdx).Take(take).ToList();
-                    objIdx += take;
-                    blocks.Append(BuildObjectiveBlock(chunk, options, opt.ObjColumns));
-                    used += BlockChromeMm + Math.Ceiling(take / (double)opt.ObjColumns) * ObjRowMm;
-                }
-            }
+                if (objIdx >= objective.Count && subIdx >= subjective.Count) break;   // 排完了就别占空栏
+                var used = 0.0;
+                var blocks = new StringBuilder();
 
-            // 2) 主观题：客观题排完后，继续用本页剩余容量装主观题
-            if (objIdx >= objective.Count && subIdx < subjective.Count)
-            {
-                var availSub = capacity - used - BlockChromeMm;
-                var chunk = new List<Question>();
-                var chunkUsed = 0.0;
-                while (subIdx < subjective.Count)
-                {
-                    var h = SubjectiveHeightMm(subjective[subIdx]);
-                    if (chunk.Count > 0 && chunkUsed + h > availSub) break;
-                    chunk.Add(subjective[subIdx]);
-                    chunkUsed += h;
-                    subIdx++;
-                }
-                if (chunk.Count > 0) blocks.Append(BuildSubjectiveBlock(chunk));
-            }
-
-            // 兜底：容量估算若异常（理论上不会）也必须有内容，避免死循环
-            if (blocks.Length == 0)
-            {
+                // 1) 客观题：按 N 列 x M 行装填本栏剩余容量
                 if (objIdx < objective.Count)
                 {
-                    var one = objective.Skip(objIdx).Take(opt.ObjColumns).ToList();
-                    objIdx += one.Count;
-                    blocks.Append(BuildObjectiveBlock(one, options, opt.ObjColumns));
+                    var rows = (int)Math.Floor((capacity - used - BlockChromeMm) / ObjRowMm);
+                    var take = Math.Min(objective.Count - objIdx, Math.Max(0, rows) * opt.ObjColumns);
+                    if (take > 0)
+                    {
+                        var chunk = objective.Skip(objIdx).Take(take).ToList();
+                        objIdx += take;
+                        blocks.Append(BuildObjectiveBlock(chunk, options, opt.ObjColumns));
+                        used += BlockChromeMm + Math.Ceiling(take / (double)opt.ObjColumns) * ObjRowMm;
+                    }
                 }
-                else
+
+                // 2) 主观题：客观题排完后，继续用本栏剩余容量装主观题
+                if (objIdx >= objective.Count && subIdx < subjective.Count)
                 {
-                    var one = subjective.Skip(subIdx).Take(1).ToList();
-                    subIdx += one.Count;
-                    blocks.Append(BuildSubjectiveBlock(one));
+                    var availSub = capacity - used - BlockChromeMm;
+                    var chunk = new List<Question>();
+                    var chunkUsed = 0.0;
+                    while (subIdx < subjective.Count)
+                    {
+                        var h = SubjectiveHeightMm(subjective[subIdx]);
+                        if (chunk.Count > 0 && chunkUsed + h > availSub) break;
+                        chunk.Add(subjective[subIdx]);
+                        chunkUsed += h;
+                        subIdx++;
+                    }
+                    if (chunk.Count > 0) blocks.Append(BuildSubjectiveBlock(chunk));
                 }
+
+                // 兜底：容量估算若异常（理论上不会）也必须有内容，避免死循环
+                if (blocks.Length == 0)
+                {
+                    if (objIdx < objective.Count)
+                    {
+                        var one = objective.Skip(objIdx).Take(opt.ObjColumns).ToList();
+                        objIdx += one.Count;
+                        blocks.Append(BuildObjectiveBlock(one, options, opt.ObjColumns));
+                    }
+                    else
+                    {
+                        var one = subjective.Skip(subIdx).Take(1).ToList();
+                        subIdx += one.Count;
+                        blocks.Append(BuildSubjectiveBlock(one));
+                    }
+                }
+
+                cols.Add(blocks.ToString());
             }
 
-            pages.Add(blocks.ToString());
+            pages.Add(cols);
         }
 
         // 无题兜底：至少生成一页
-        if (pages.Count == 0) pages.Add(BuildObjectiveBlock([], options, opt.ObjColumns));
+        if (pages.Count == 0) pages.Add([BuildObjectiveBlock([], options, opt.ObjColumns)]);
 
         var totalPages = pages.Count;
         var sb = new StringBuilder();
@@ -201,7 +224,7 @@ public static class AnswerSheetRenderer
                 sb.Append($"<div class=\"subtitle\" style=\"margin-bottom:2mm\">第 {pageNo} / {totalPages} 页</div>");
             }
 
-            sb.Append(pages[i]);
+            sb.Append(WrapColumns(pages[i], opt));
             sb.Append(PageClose(paper.Id, studentNo, pageNo));
         }
 
@@ -259,6 +282,16 @@ public static class AnswerSheetRenderer
 
     // ── 页面骨架 ──────────────────────────────────────────────────────
 
+    /// <summary>把一页各栏的内容包进 .cols/.col（双栏）。单栏模式直接拼接，输出与旧版一致。</summary>
+    private static string WrapColumns(List<string> cols, AnswerSheetOptions opt)
+    {
+        if (opt.Columns == 1 || cols.Count == 0) return string.Concat(cols);
+        var sb = new StringBuilder("<div class=\"cols\">");
+        foreach (var c in cols) sb.Append("<div class=\"col\">").Append(c).Append("</div>");
+        sb.Append("</div>");
+        return sb.ToString();
+    }
+
     private static string CssHeader(AnswerSheetOptions opt, string title)
     {
         var obj = opt.ObjColumns;
@@ -280,6 +313,12 @@ public static class AnswerSheetRenderer
   .page { position: relative; width: {{opt.Paper.WidthMm}}mm; height: {{opt.PageBoxHeightMm}}mm;
           padding: 14mm 14mm 16mm; overflow: hidden; page-break-after: always; break-after: page; }
   .page:last-child { page-break-after: auto; break-after: auto; }
+
+  /* 双栏（大纸）：表头通栏，其下内容左栏排满接右栏。宽度用固定 mm 而不是 flex 比例，
+     识别端按同一组 mm 坐标采样，任何"浏览器自己算"的布局都会让切卡偏位。 */
+  .cols { display: flex; align-items: flex-start; }
+  .col { flex: none; width: {{opt.BlockWidthMm}}mm; }
+  .col + .col { margin-left: {{AnswerSheetOptions.ColumnGapMm}}mm; }
 
   /* 四角定位标记：距纸边 7mm，避开打印机不可打印边距，每页各自一份 */
   .anchor { position: absolute; width: 6mm; height: 6mm; background: #000; z-index: 3; }
