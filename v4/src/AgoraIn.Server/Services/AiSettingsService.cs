@@ -38,6 +38,15 @@ public sealed class AiRuntimeSettings
     public int Retries { get; set; } = 2;
 
     /// <summary>
+    /// 是否显式关闭模型的"思考模式"（DeepSeek 系默认 true）。
+    /// 官方文档：请求体带 <c>thinking: {{"type":"disabled"}}</c> 即关闭；不传则默认开启且 effort=high，
+    /// 会把输出预算全烧在推理上——现场的"图片导题 JSON 解析失败"就是这么来的：
+    /// 23715 字全是思考，被 max_tokens 截断，一个 JSON 字符都没吐。
+    /// 其他厂商若不认这个字段，调用层会收到 400 后自动去掉它重试。
+    /// </summary>
+    public bool DisableThinking { get; set; } = true;
+
+    /// <summary>
     /// 主观题批改提示词模板（占位符：{Type} 题型 / {Question} 题干 / {StudentAnswer} 学生答案 /
     /// {StandardAnswer} 标准答案 / {Rubric} 评分要点 / {MaxScore} 满分；空 = 使用内置默认模板）。
     /// </summary>
@@ -108,6 +117,7 @@ public sealed class AiSettingsService
                     case "allowImageToCloud": s.AllowImageToCloud = value != "false"; break;
                     case "humanReviewThreshold": if (double.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out var hv)) s.HumanReviewThreshold = hv; break;
                     case "retries": if (int.TryParse(value, out var rv)) s.Retries = rv; break;
+                    case "disableThinking": s.DisableThinking = value != "false"; break;
                     case "gradingPromptTemplate": s.GradingPromptTemplate = value; break;
                 }
             }
@@ -147,6 +157,7 @@ public sealed class AiSettingsService
             [prefix + "allowImageToCloud"] = s.AllowImageToCloud ? "true" : "false",
             [prefix + "humanReviewThreshold"] = s.HumanReviewThreshold.ToString(System.Globalization.CultureInfo.InvariantCulture),
             [prefix + "retries"] = s.Retries.ToString(),
+            [prefix + "disableThinking"] = s.DisableThinking ? "true" : "false",
             [prefix + "gradingPromptTemplate"] = string.IsNullOrWhiteSpace(s.GradingPromptTemplate) ? null : s.GradingPromptTemplate,
         };
         if (s.ApiKey != null)

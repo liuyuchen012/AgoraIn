@@ -60,6 +60,9 @@ public class AiSettingsController : ControllerBase
             MaxTokens = body.TryGetProperty("maxTokens", out var mt) && mt.TryGetInt32(out var mv) ? mv : current.MaxTokens,
             AllowImageToCloud = !body.TryGetProperty("allowImageToCloud", out var ai) || ai.ValueKind != JsonValueKind.False,
             HumanReviewThreshold = body.TryGetProperty("humanReviewThreshold", out var ht) && ht.TryGetDouble(out var hv) ? hv : current.HumanReviewThreshold,
+            // 思考模式开关：UI 没传就沿用当前值（默认关思考——DeepSeek 系默认开启会把输出预算全烧在推理上）
+            DisableThinking = body.TryGetProperty("disableThinking", out var dt) && dt.ValueKind == JsonValueKind.False
+                ? false : current.DisableThinking,
             Retries = body.TryGetProperty("retries", out var r) && r.TryGetInt32(out var rv) ? rv : current.Retries,
             GradingPromptTemplate = body.TryGetProperty("gradingPromptTemplate", out var gpt)
                 ? (gpt.ValueKind == JsonValueKind.String ? gpt.GetString() : null)

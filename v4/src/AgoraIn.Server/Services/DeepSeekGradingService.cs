@@ -421,12 +421,25 @@ public sealed class DeepSeekGradingService
     private const string JsonOnlyNudge =
         "\n\n（重要）上一条回复里没有出现 JSON。请直接输出 JSON 本身，不要任何思考过程、解释或前导说明；篇幅紧张时优先保证 JSON 完整。";
 
+    /// <summary>
+    /// 是否 DeepSeek 系（官方域名或 deepseek-* 模型）：只有它确定支持 thinking 字段，
+    /// 其他厂商（智谱/通义/自建）不保证，故只在 DeepSeek 系上主动带该字段，
+    /// 其余情况若真需要可用 <see cref="AiRuntimeSettings.DisableThinking"/> 配合 400 回退。
+    /// </summary>
+    private static bool IsDeepSeekFamily(AiRuntimeSettings s)
+        => (s.BaseUrl ?? "").Contains("deepseek", StringComparison.OrdinalIgnoreCase)
+           || (s.Model ?? "").StartsWith("deepseek", StringComparison.OrdinalIgnoreCase)
+           || (s.VisionModel ?? "").StartsWith("deepseek", StringComparison.OrdinalIgnoreCase);
+
     private async Task<string?> CallAsync(
         string prompt, string model, AiRuntimeSettings settings,
         IReadOnlyList<byte[]>? images, string endpoint, CancellationToken ct, int? maxTokensOverride = null)
     {
         if (string.IsNullOrEmpty(model)) model = "deepseek-chat";
         if (string.IsNullOrEmpty(settings.ApiKey)) return null;
+
+        // 是否已因厂商不认 thinking 字段而退回（400 时自动去掉重试）
+        var noThinkingDropped = false;
 
         object BuildRequest()
         {
@@ -437,13 +450,18 @@ public sealed class DeepSeekGradingService
                         : new { type = "image_url", image_url = new { url = $"data:image/jpeg;base64,{Convert.ToBase64String(images[i - 1])}" } })
                     .ToArray()
                 : prompt;
-            return new
+            var body = new Dictionary<string, object?>
             {
-                model,
-                messages = new object[] { new { role = "user", content } },
-                temperature = settings.Temperature,
-                max_tokens = maxTokensOverride ?? settings.MaxTokens,
+                ["model"] = model,
+                ["messages"] = new object[] { new { role = "user", content } },
+                ["temperature"] = settings.Temperature,
+                ["max_tokens"] = maxTokensOverride ?? settings.MaxTokens,
             };
+            // 关掉"思考模式"：DeepSeek 系默认开启且 effort=high，会把输出预算全烧在推理上，
+            // 结果一个 JSON 字符都吐不出来（现场踩过）。文档：thinking.type=disabled。
+            if (settings.DisableThinking && !noThinkingDropped && IsDeepSeekFamily(settings))
+                body["thinking"] = new { type = "disabled" };
+            return body;
         }
 
         _http.DefaultRequestHeaders.Authorization =
@@ -502,6 +520,13 @@ public sealed class DeepSeekGradingService
             {
                 error = ex.Message;
                 await Task.Delay(500 * (attempt + 1), ct);
+            }
+            catch (HttpRequestException hex) when (hex.StatusCode == System.Net.HttpStatusCode.BadRequest
+                                                    && !noThinkingDropped && settings.DisableThinking && IsDeepSeekFamily(settings))
+            {
+                // 该厂商不认 thinking 字段（自建服务/代理转发等）：去掉它重试，别为一个可选字段整调用失败
+                noThinkingDropped = true;
+                continue;
             }
             catch (Exception ex)
             {
