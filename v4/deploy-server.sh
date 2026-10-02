@@ -1,20 +1,26 @@
 #!/bin/bash
 # AgoraIn v4 服务端部署脚本
-# 用法: bash deploy-server.sh <host> <user> <password>
-# 示例: bash deploy-server.sh 49.232.203.254 ubuntu Nj96khu3
+# 用法: bash deploy-server.sh <host> <user> [password]
+# 密码也可用环境变量 AGORAIN_SSH_PASS 提供：
+#   AGORAIN_SSH_PASS=xxx bash deploy-server.sh 49.232.203.254 ubuntu
+# 密码不得写进本文件（仓库为公开仓库）。
 
 set -e
 
 HOST=${1:-"49.232.203.254"}
 USER=${2:-"ubuntu"}
-PASS=${3:-"Nj96khu3"}
+PASS=${3:-"$AGORAIN_SSH_PASS"}
+if [ -z "$PASS" ]; then
+  echo "错误：未提供 SSH 密码。请用第三个参数或环境变量 AGORAIN_SSH_PASS 提供。" >&2
+  exit 1
+fi
 REMOTE_DIR="/home/$USER/agorain-server"
 
 echo "=== [1/5] 构建 WebAdmin ==="
 cd src/AgoraIn.WebAdmin && npm ci && npm run build && cd ../..
 
-echo "=== [2/5] 本地发布（含 WebAdmin） ==="
-dotnet publish src/AgoraIn.Server/AgoraIn.Server.csproj -c Release -o ./publish/server --self-contained false
+echo "=== [2/5] 本地发布（含 WebAdmin，自包含：生产服务器未安装 dotnet 运行时） ==="
+dotnet publish src/AgoraIn.Server/AgoraIn.Server.csproj -c Release -o ./publish/server --self-contained true -r linux-x64
 mkdir -p publish/server/wwwroot
 cp -r src/AgoraIn.WebAdmin/dist/* publish/server/wwwroot/
 
