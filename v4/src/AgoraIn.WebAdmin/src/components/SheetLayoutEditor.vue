@@ -21,9 +21,9 @@
           <div v-for="it in items" :key="it.questionId"
                class="box" :class="{ pinned: modified.has(it.questionId), bad: overlaps.has(it.questionId) }"
                :style="boxStyle(it)"
-               @mousedown="startDrag($event, it, 'move')">
+               @pointerdown="startDrag($event, it, 'move')">
             <span class="tag">{{ it.questionNo }}</span>
-            <div class="handle" @mousedown.stop="startDrag($event, it, 'resize')"></div>
+            <div class="handle" @pointerdown.stop="startDrag($event, it, 'resize')"></div>
           </div>
         </div>
       </div>
@@ -99,15 +99,16 @@ function reloadSheet() {
   sheetVersion.value++
 }
 
-/** 拖动/缩放：move 改位置，resize 改大小；都吸附 1mm，松手保存 */
-function startDrag(e: MouseEvent, it: SheetPlacement, mode: 'move' | 'resize') {
+/** 拖动/缩放：move 改位置，resize 改大小；都吸附 1mm，松手保存。
+ *  用 Pointer Events 而不是 mouse：平板/触屏（老师常见）也能拖，且触屏拖框不会变成滚动画布。 */
+function startDrag(e: PointerEvent, it: SheetPlacement, mode: 'move' | 'resize') {
   e.preventDefault()
   const startX = e.clientX, startY = e.clientY
   const x0 = it.x, y0 = it.y, w0 = it.w, h0 = it.h
   const snap = (v: number) => Math.round(v)
   const target = e.target as HTMLElement
 
-  const onMove = (ev: MouseEvent) => {
+  const onMove = (ev: PointerEvent) => {
     const dx = (ev.clientX - startX) / K
     const dy = (ev.clientY - startY) / K
     if (mode === 'move') {
@@ -119,16 +120,18 @@ function startDrag(e: MouseEvent, it: SheetPlacement, mode: 'move' | 'resize') {
     }
   }
   const onUp = () => {
-    window.removeEventListener('mousemove', onMove)
-    window.removeEventListener('mouseup', onUp)
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onUp)
     target.classList.remove('dragging')
     // 与初始位置相同（只是点了一下）就不必写库
     if (it.x === x0 && it.y === y0 && it.w === w0 && it.h === h0) return
     modified.value = new Set(modified.value).add(it.questionId)
     save()
   }
-  window.addEventListener('mousemove', onMove)
-  window.addEventListener('mouseup', onUp)
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
+  window.addEventListener('pointercancel', onUp)
   target.classList.add('dragging')
 }
 
@@ -179,7 +182,7 @@ defineExpose({ load })
 .box {
   position: absolute; box-sizing: border-box;
   border: 1px dashed rgba(64, 158, 255, .75); background: rgba(64, 158, 255, .06);
-  pointer-events: auto; cursor: move;
+  pointer-events: auto; cursor: move; touch-action: none;
 }
 .box.pinned { border: 1.5px solid #e6a23c; background: rgba(230, 162, 60, .1); }
 .box.bad { border-color: #f56c6c; background: rgba(245, 108, 108, .18); }
