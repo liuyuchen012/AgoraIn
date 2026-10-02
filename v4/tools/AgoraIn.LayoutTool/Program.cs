@@ -10,6 +10,37 @@ using AgoraIn.Server.Services;
 // 覆盖.json 可选（可视化编辑器的拖动结果：[{questionId,pageNo,xMm,yMm,wMm,hMm}]），用来验证"拖过之后仍然对得上"。
 // 校验流程见 docs/answer-sheet-spec.md 第 1 节：模型与 DOM 逐气泡偏差应 < 0.3mm。
 //   python tools/verify_layout.py <输出目录>/sheet.html <输出目录>/layout.json
+// AI 响应排查：
+//   dotnet run --project tools/AgoraIn.LayoutTool -- sanitize <原始响应文件>
+// 复现"JSON 解析失败"：打印剥离思考区前后的长度、提取到的 JSON 能否解析、以及首末题的字段。
+// 原始响应可在服务器 data/ai-raw/ 找到（出题/识别每次调用都会落盘）。
+if (args.Length >= 2 && args[0] == "sanitize")
+{
+    var raw = File.ReadAllText(args[1]);
+    var stripped = AgoraIn.Core.Domain.AiResponseSanitizer.StripThinking(raw);
+    var json = AgoraIn.Core.Domain.AiResponseSanitizer.ExtractJson(raw, expectArray: true);
+    Console.WriteLine($"原始 {raw.Length} 字 → 剥离思考区后 {stripped.Length} 字（剥掉 {raw.Length - stripped.Length} 字）");
+    Console.WriteLine($"提取到 JSON：{(json == null ? "无" : json.Length + " 字")}");
+    if (json == null) return 1;
+    try
+    {
+        using var doc = JsonDocument.Parse(json);
+        Console.WriteLine($"解析成功：顶层 {doc.RootElement.ValueKind}，元素 {doc.RootElement.GetArrayLength()} 个");
+        var first = doc.RootElement[0];
+        Console.WriteLine("第一题：" + string.Join(" | ", first.EnumerateObject()
+            .Select(pr => $"{pr.Name}={pr.Value.ToString()[..Math.Min(36, pr.Value.ToString().Length)]}")));
+        var last = doc.RootElement[doc.RootElement.GetArrayLength() - 1];
+        Console.WriteLine("末题 index=" + (last.TryGetProperty("index", out var ix) ? ix.ToString() : "?"));
+        return 0;
+    }
+    catch (Exception e)
+    {
+        Console.WriteLine("解析失败：" + e.Message);
+        Console.WriteLine("前 300 字：" + json[..Math.Min(300, json.Length)]);
+        return 1;
+    }
+}
+
 var args0 = args.Length > 0 ? args[0] : "export";
 if (args0 != "export")
 {

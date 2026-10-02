@@ -81,6 +81,15 @@ public sealed class DeepSeekGradingService
         if (result == null) return null;
 
         var json = ExtractJsonBlock(result, expectArray: false);
+        if (json == null && !string.IsNullOrWhiteSpace(result))
+        {
+            // 同上：模型可能只输出了思考过程（或被 max_tokens 截断），追问一次"只要 JSON"
+            await WriteLogAsync("recognize", model, default, 0, false,
+                $"未取得 JSON，追问一次（返回 {result.Length} 字），返回开头：{result[..Math.Min(200, result.Length)]}", ct);
+            var retry = await CallAsync(prompt + JsonOnlyNudge, model, settings,
+                imageData == null ? null : [imageData], "recognize", ct);
+            if (retry != null) json = ExtractJsonBlock(retry, expectArray: false);
+        }
         if (json == null) return null;
         try
         {
@@ -161,7 +170,7 @@ public sealed class DeepSeekGradingService
         var parsed = ParseQuestions(result);
         if (parsed == null && result != null)
             await WriteLogAsync("extract", settings.Model, default, 0, false,
-                $"JSON 解析失败，返回前 200 字：{result[..Math.Min(200, result.Length)]}", ct);
+                $"JSON 解析失败（已剥离思考区 {result.Length - AgoraIn.Core.Domain.AiResponseSanitizer.StripThinking(result).Length} 字），返回前 200 字：{result[..Math.Min(200, result.Length)]}", ct);
         return parsed;
     }
 
@@ -201,7 +210,8 @@ public sealed class DeepSeekGradingService
         var prompt = $@"你是专业的试卷结构化解析助手。下面若干张图片是同一份试卷的连续页面片段。请识别其中全部题目，题号从 {startNumber} 开始连续编号。
 
 排版注意：
-- 若图片为**横向大页（A3 两栏排版）**：页面分为左右两栏，必须先读左栏（自上而下）、再读右栏（自上而下），题目按该顺序连续编号，不得漏栏
+- 若图片为**横向大页（8K / A3：一张纸 = 左右两半，速印试卷常见）**：必须先读左半（自上而下）、再读右半（自上而下），题目按该顺序连续编号，不得漏掉半个栏；竖向页（A4/16K）则是单栏自上而下
+- 判断版式只看题目排布本身：一栏读完再读下一栏，不要按『从左到右逐行扫』的方式跨栏跳读
 - 图片可能包含“选择题选项仅字母无题干”的排版：客观题无需转录题干原文
 
 要求：
@@ -220,15 +230,28 @@ public sealed class DeepSeekGradingService
         SaveRawResponse($"extract_images_n{startNumber}", result); // 排障：原始响应落盘
 
         var items = ParseQuestions(result);
+        if (items == null && !string.IsNullOrWhiteSpace(result))
+        {
+            // 没解析出 JSON：多半是模型只输出了思考（或被 max_tokens 截断在思考里）。追问一次。
+            await WriteLogAsync("extract_images", model, default, 0, false,
+                $"未取得 JSON，追问一次（返回 {result.Length} 字，"
+                + $"已剥离思考区 {result.Length - AgoraIn.Core.Domain.AiResponseSanitizer.StripThinking(result).Length} 字），"
+                + $"返回开头：{result[..Math.Min(200, result.Length)]}", ct);
+
+            var retry = await CallAsync(prompt + JsonOnlyNudge, model, settings, batchImages, "extract_images", ct, 16384);
+            SaveRawResponse($"extract_images_n{startNumber}-retry", retry);
+            var retryItems = ParseQuestions(retry);
+            if (retryItems != null)
+            {
+                items = retryItems;
+                result = retry;
+                await WriteLogAsync("extract_images", model, default, 0, true, "追问后取得 JSON 成功", ct);
+            }
+        }
         if (items != null)
         {
             // 按起始题号重编，保证跨批连续
             for (var i = 0; i < items.Count; i++) items[i].Index = startNumber + i;
-        }
-        else if (result != null)
-        {
-            await WriteLogAsync("extract_images", model, default, 0, false,
-                $"JSON 解析失败，返回前 200 字：{result[..Math.Min(200, result.Length)]}", ct);
         }
         return (items, result);
     }
@@ -318,46 +341,12 @@ public sealed class DeepSeekGradingService
     }
 
     /// <summary>
-    /// 从 AI 返回文本中提取可解析的 JSON：剥除 markdown 代码围栏、截取首个 [/{ 到末个 /}]；
-    /// 截断的数组做尾部修复（输出超 max_tokens 时 JSON 断尾）。
+    /// 从 AI 返回文本中提取可解析的 JSON：剥思考区（推理模型会把 &lt;think&gt;…&lt;/think&gt; 一起返回）、
+    /// 剥 markdown 围栏、截取首个 [/{ 到末个 /}]，并对 max_tokens 截断做尾部修复。
+    /// 具体实现在 Core 的 <see cref="AgoraIn.Core.Domain.AiResponseSanitizer"/>，便于单元测试。
     /// </summary>
     internal static string? ExtractJsonBlock(string? content, bool expectArray)
-    {
-        if (string.IsNullOrWhiteSpace(content)) return null;
-        var text = content.Trim();
-
-        // 1) 剥 markdown 围栏（```json ... ```）
-        var fence = text.IndexOf("```", StringComparison.Ordinal);
-        if (fence >= 0)
-        {
-            var start = text.IndexOf('\n', fence);
-            var end = text.LastIndexOf("```", StringComparison.Ordinal);
-            if (start >= 0 && end > start)
-                text = text[(start + 1)..end].Trim();
-        }
-
-        // 2) 截取 JSON 主体（期望数组但实际是对象包装时，按实际类型截取，由调用方展开）
-        var first = text.IndexOfAny(new[] { '[', '{' });
-        if (first < 0) return null;
-        var openActual = text[first];
-        var closeActual = openActual == '[' ? ']' : '}';
-        var last = text.LastIndexOf(closeActual);
-        if (last <= first) return null;
-        var json = text[first..(last + 1)];
-
-        // 3) 截断修复（输出顶满 max_tokens 时 JSON 断尾）：
-        //    裁到最后一个完整对象 '}' 闭合处（数组元素必须完整，不能停在字符串引号上），
-        //    去掉尾部逗号后补外层闭合
-        if (json[^1] != closeActual)
-        {
-            var cut = json.LastIndexOf('}');
-            if (cut <= 0) return null;
-            json = json[..(cut + 1)].TrimEnd();
-            if (json.EndsWith(",")) json = json[..^1];
-            if (openActual == '[') json += closeActual;
-        }
-        return json;
-    }
+        => AgoraIn.Core.Domain.AiResponseSanitizer.ExtractJson(content, expectArray);
 
     /// <summary>出题场景的原始 AI 响应落盘到 data/ai-raw/（保留最近 20 份），便于排查"0 题"类问题。</summary>
     private void SaveRawResponse(string endpoint, string? content)
@@ -424,6 +413,14 @@ public sealed class DeepSeekGradingService
     }
 
     /// <summary>调用 OpenAI 兼容 chat/completions；支持多图输入与 max_tokens 覆盖；含重试与调用日志。</summary>
+    /// <summary>
+    /// 追问语：推理型模型（deepseek-flash 等）常把整个输出预算花在思考上，
+    /// 结果 content 为空、reasoning_content 被截断，一个 JSON 字符都没吐出来。
+    /// 这时再问一次并明说"只要 JSON"，通常就正常了——比单纯报"JSON 解析失败"有用得多。
+    /// </summary>
+    private const string JsonOnlyNudge =
+        "\n\n（重要）上一条回复里没有出现 JSON。请直接输出 JSON 本身，不要任何思考过程、解释或前导说明；篇幅紧张时优先保证 JSON 完整。";
+
     private async Task<string?> CallAsync(
         string prompt, string model, AiRuntimeSettings settings,
         IReadOnlyList<byte[]>? images, string endpoint, CancellationToken ct, int? maxTokensOverride = null)
