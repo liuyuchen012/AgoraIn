@@ -38,7 +38,8 @@ public static class OmrRecognizer
     public static OmrLocalResult? Recognize(
         byte[] imageData,
         IReadOnlyList<Question> questions,
-        IReadOnlyDictionary<string, List<string>> options)
+        IReadOnlyDictionary<string, List<string>> options,
+        IReadOnlyDictionary<string, QuestionPlacement>? placements = null)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var gray = DecodeGray(imageData);
@@ -74,7 +75,7 @@ public static class OmrRecognizer
             var h = SolveHomography(AnswerSheetLayout.MarkerCentersMm(p), src);
             if (h == null) continue;
             canon = Warp(gray, h, p, WarpPpm);
-            var (pg, score, scores) = MatchLayout(canon, questions, options, p);
+            var (pg, score, scores) = MatchLayout(canon, questions, options, p, placements: placements);
             if (score > bestScore)
             {
                 bestScore = score;
@@ -101,7 +102,7 @@ public static class OmrRecognizer
         var pageFromRing = page.PageNo;
         if (qrPageNo is { } qn && qn >= 1 && qn <= page.TotalPages && qn != page.PageNo)
         {
-            var (pgQr, scoreQr, scoresQr) = MatchLayout(canon, questions, options, paper, onlyPageNo: qn);
+            var (pgQr, scoreQr, scoresQr) = MatchLayout(canon, questions, options, paper, onlyPageNo: qn, placements: placements);
             if (pgQr != null && scoreQr >= PageMatchThreshold)
             {
                 page = pgQr;
@@ -184,7 +185,8 @@ public static class OmrRecognizer
     private static (SheetPageLayout? Page, double Score, List<string> Scores) MatchLayout(
         Gray canon, IReadOnlyList<Question> questions,
         IReadOnlyDictionary<string, List<string>> options, SheetPaper paper,
-        int? onlyPageNo = null)
+        int? onlyPageNo = null,
+        IReadOnlyDictionary<string, QuestionPlacement>? placements = null)
     {
         const double white = 235.0;
         SheetPageLayout? best = null;
@@ -195,7 +197,7 @@ public static class OmrRecognizer
         foreach (var idArea in new[] { IdAreaKind.Bubble, IdAreaKind.Handwrite, IdAreaKind.None })
         {
             var variant = new AnswerSheetOptions { Paper = paper, ShowNotes = showNotes, IdArea = idArea };
-            var pages = AnswerSheetLayout.Compute(questions, options, variant);
+            var pages = AnswerSheetLayout.Compute(questions, options, variant, placements);
             for (var i = 0; i < pages.Count; i++)
             {
                 if (onlyPageNo is { } only && pages[i].PageNo != only) continue;
@@ -277,7 +279,8 @@ public static class OmrRecognizer
     internal static (SheetPageLayout? Page, double Score, List<string>) MatchLayoutDebug(
         Gray canon, IReadOnlyList<Question> questions,
         IReadOnlyDictionary<string, List<string>> options, SheetPaper paper,
-        out List<string> details)
+        out List<string> details,
+        IReadOnlyDictionary<string, QuestionPlacement>? placements = null)
     {
         const double white = 235.0;
         SheetPageLayout? best = null;
@@ -288,7 +291,7 @@ public static class OmrRecognizer
         foreach (var idArea in new[] { IdAreaKind.Bubble, IdAreaKind.Handwrite, IdAreaKind.None })
         {
             var variant = new AnswerSheetOptions { Paper = paper, ShowNotes = showNotes, IdArea = idArea };
-            var pages = AnswerSheetLayout.Compute(questions, options, variant);
+            var pages = AnswerSheetLayout.Compute(questions, options, variant, placements);
             for (var i = 0; i < pages.Count; i++)
             {
                 var score = RingMatchScore(canon, pages[i], WarpPpm, white);
@@ -323,7 +326,8 @@ public static class OmrRecognizer
         byte[] imageData,
         IReadOnlyList<Question> questions,
         IReadOnlyDictionary<string, List<string>> options,
-        int questionIndex)
+        int questionIndex,
+        IReadOnlyDictionary<string, QuestionPlacement>? placements = null)
     {
         var gray = DecodeGray(imageData);
         if (gray == null) return null;
@@ -348,7 +352,7 @@ public static class OmrRecognizer
             // 先用与整卷识别相同的"整页匹配"认页（多纸型候选 + 版式变体 + 平分取多），
             // 匹配可信（≥0.7）才继续；再在该页上验证"本题区域"真实存在并裁剪。
             // 只验证本题区域不够：别的页/别的纸型的框可能与本照片上其它元素重合造成假阳性。
-            var (bestPage, pageScore, _) = MatchLayout(canon, questions, options, paper);
+            var (bestPage, pageScore, _) = MatchLayout(canon, questions, options, paper, placements: placements);
             if (bestPage == null || pageScore < 0.7) continue;
 
             // 环匹配可能把本页认成结构相近的另一页（第 2 页 ↔ 第 6 页）——那会让"本题"落到
@@ -356,7 +360,7 @@ public static class OmrRecognizer
             var (qrPageNo, _) = DecodePageQr(gray, h, paper);
             if (qrPageNo is { } qn && qn != bestPage.PageNo && qn >= 1 && qn <= bestPage.TotalPages)
             {
-                var (pgQr, scoreQr, _) = MatchLayout(canon, questions, options, paper, onlyPageNo: qn);
+                var (pgQr, scoreQr, _) = MatchLayout(canon, questions, options, paper, onlyPageNo: qn, placements: placements);
                 if (pgQr != null && scoreQr >= 0.7) bestPage = pgQr;
             }
 

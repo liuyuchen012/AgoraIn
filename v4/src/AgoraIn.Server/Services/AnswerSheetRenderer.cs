@@ -120,7 +120,8 @@ public static class AnswerSheetRenderer
 </div>
 """;
 
-    /// <summary>生成通用答题卡 HTML（自动服务端分页，每页独立定位标记与页码 QR）。</summary>
+    /// <summary>生成通用答题卡 HTML（自动服务端分页，每页独立定位标记与页码 QR）。
+    /// placements：可视化编辑器拖过/缩放的题目——这些题从自动流里摘出，按覆盖坐标绝对定位。</summary>
     public static string Render(
         ExamPaper paper,
         IReadOnlyList<Question> questions,
@@ -129,14 +130,20 @@ public static class AnswerSheetRenderer
         string? studentNo = null,
         int pageIndex = 1,
         int pageCount = 1,
-        AnswerSheetOptions? sheetOptions = null)
+        AnswerSheetOptions? sheetOptions = null,
+        IReadOnlyDictionary<string, QuestionPlacement>? placements = null)
     {
         var opt = sheetOptions ?? AnswerSheetOptions.Default;
         // 三个分组：客观题（选/判断，涂卡）→ 填空题（一条横线）→ 主观题（大作答框）。
         // 填空题判分与客观题同一套（比标准答案对错），版面却要紧凑得多，故单独成节。
-        var objective = questions.Where(q => IsObjective(q.Type)).ToList();
-        var blanks = questions.Where(q => IsBlank(q.Type)).ToList();
-        var subjective = questions.Where(q => !IsObjective(q.Type) && !IsBlank(q.Type)).ToList();
+        // 拖过的题（placements）不参与流动，最后按覆盖坐标绝对定位，避免被自动分页挤走。
+        var pinned = placements is { Count: > 0 }
+            ? questions.Where(q => placements.ContainsKey(q.Id)).ToList()
+            : [];
+        var flow = pinned.Count > 0 ? questions.Where(q => !placements!.ContainsKey(q.Id)).ToList() : questions;
+        var objective = flow.Where(q => IsObjective(q.Type)).ToList();
+        var blanks = flow.Where(q => IsBlank(q.Type)).ToList();
+        var subjective = flow.Where(q => !IsObjective(q.Type) && !IsBlank(q.Type)).ToList();
 
         // 只给实际存在的分组编号：没有填空题时"主观题"就是二
         var ordinal = 0;
@@ -241,7 +248,16 @@ public static class AnswerSheetRenderer
         // 无题兜底：至少生成一页
         if (pages.Count == 0) pages.Add([BuildObjectiveBlock([], options, opt.ObjColumns)]);
 
-        var totalPages = pages.Count;
+        // 拖过的题可能被放到自动流之外的页上（例如单独摆到第 3 页）→ 补出这些页
+        var pinnedByPage = new Dictionary<int, List<Question>>();
+        foreach (var q in pinned)
+        {
+            var pg = Math.Max(1, placements![q.Id].PageNo);
+            if (!pinnedByPage.TryGetValue(pg, out var list)) pinnedByPage[pg] = list = [];
+            list.Add(q);
+        }
+        var totalPages = Math.Max(pages.Count, pinnedByPage.Count == 0 ? 0 : pinnedByPage.Keys.Max());
+
         var sb = new StringBuilder();
         sb.Append(CssHeader(opt, Escape(paper.Title) + " - 答题卡"));
         sb.Append("<body>\n");
@@ -262,7 +278,15 @@ public static class AnswerSheetRenderer
                 sb.Append($"<div class=\"subtitle\" style=\"margin-bottom:2mm\">第 {pageNo} / {totalPages} 页</div>");
             }
 
-            sb.Append(WrapColumns(pages[i], opt));
+            // 自动流内容（补出来的页没有流内容）
+            if (i < pages.Count) sb.Append(WrapColumns(pages[i], opt));
+
+            // 拖过/缩放过的题：按覆盖坐标绝对定位在本页（.page 是 position:relative，
+            // 且无边框，所以 left/top 的 0 点就是纸面左上角，与定位标记同一坐标系）
+            if (pinnedByPage.TryGetValue(pageNo, out var pagePinned))
+                foreach (var q in pagePinned)
+                    sb.Append(BuildPinned(q, options, placements![q.Id]));
+
             sb.Append(PageClose(paper.Id, studentNo, pageNo));
         }
 
@@ -319,6 +343,50 @@ public static class AnswerSheetRenderer
     }
 
     // ── 页面骨架 ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 一道"拖过"的题：按覆盖坐标绝对定位（mm，纸面坐标系）。
+    /// 三种题型各自的排版与自动流里保持一致——同一道题不管是自动排的还是拖过去的，
+    /// 识别端看到的几何必须一样（.pinned .omr-row / .blank-row / .answer-box）。
+    /// </summary>
+    private static string BuildPinned(
+        Question q, IReadOnlyDictionary<string, List<string>> options, QuestionPlacement pl)
+    {
+        var box = $"left:{pl.Xmm:0.##}mm;top:{pl.Ymm:0.##}mm;width:{pl.Wmm:0.##}mm;height:{pl.Hmm:0.##}mm";
+
+        if (IsObjective(q.Type))
+        {
+            var keys = q.Type == QuestionType.Judge
+                ? ["√", "×"]
+                : options.TryGetValue(q.Id, out var list) && list.Count > 0 ? list : ["A", "B", "C", "D"];
+            var sb = new StringBuilder($"<div class=\"pinned\" style=\"{box}\" data-qid=\"{q.Id}\" data-q=\"{q.Index + 1}\">");
+            sb.Append("<div class=\"omr-row\">");
+            sb.Append($"<div class=\"omr-no\">{q.Index + 1}.</div><div class=\"omr-opts\">");
+            foreach (var k in keys)
+                sb.Append($"<div class=\"omr-opt\" data-q=\"{q.Index + 1}\" data-opt=\"{Escape(k)}\">{Escape(k)}</div>");
+            sb.Append("</div></div></div>");
+            return sb.ToString();
+        }
+
+        if (IsBlank(q.Type))
+            return $"""
+<div class="pinned" style="{box}" data-qid="{q.Id}">
+  <div class="blank-row"><div class="blank-no">第 {q.Index + 1} 题（{q.Score:0.#} 分）</div><div class="blank-line"></div></div>
+</div>
+""";
+
+        // 主观题：整框高度 = 题头 6mm + 正文 + 上下边框（渲染边框约 0.265mm/条）
+        var body = Math.Max(6.0, pl.Hmm - 6.0 - 0.53);
+        var lines = q.Type is QuestionType.ShortAnswer or QuestionType.Essay ? " answer-lines" : "";
+        return $"""
+<div class="pinned" style="{box}" data-qid="{q.Id}">
+  <div class="answer-box" style="--h:{body:0.##}mm;margin:0">
+    <div class="answer-head">第 {q.Index + 1} 题（{q.Score:0.#} 分）</div>
+    <div class="answer-body{lines}"></div>
+  </div>
+</div>
+""";
+    }
 
     /// <summary>把一页各栏的内容包进 .cols/.col（双栏）。单栏模式直接拼接，输出与旧版一致。</summary>
     private static string WrapColumns(List<string> cols, AnswerSheetOptions opt)
@@ -433,6 +501,12 @@ public static class AnswerSheetRenderer
                display: flex; align-items: center; padding: 0 2mm; break-inside: avoid; }
   .blank-no { font-size: 9pt; white-space: nowrap; margin-right: 2mm; }
   .blank-line { flex: 1; height: 5mm; border-bottom: 0.3mm dashed #888; }
+
+  /* ── 可视化编辑器拖过的题：绝对定位在纸面坐标系（.page 无边框，left/top 的 0 点即纸面左上角） ── */
+  .pinned { position: absolute; z-index: 2; }
+  .pinned .omr-row { display: flex; align-items: center; height: 100%; }
+  .pinned .blank-row { height: 100%; margin: 0; }
+  .pinned .answer-box { height: 100%; }
 
   /* ── 考号表 ── */
   .roster-title { font-size: 15pt; font-weight: bold; text-align: center; margin: 0 0 1.5mm; }

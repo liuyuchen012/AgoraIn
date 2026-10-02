@@ -183,17 +183,28 @@ public static class AnswerSheetLayout
     private static int RowsOnPage(int count, int columns) => Math.Max(1, (int)Math.Ceiling(count / (double)columns));
 
     /// <summary>
-    /// 计算全部页面的几何。分页规则与渲染器完全一致（顺序装箱：客观题占满页再排主观题）。
+    /// 计算全部页面的几何。分页规则与渲染器完全一致（顺序装箱：客观题 → 填空题 → 主观题）。
+    /// placements 是可视化编辑器拖过/缩放的题目：这些题从自动流里摘出，按覆盖坐标绝对定位；
+    /// 其余题照常流动。渲染、识别、切图都读这一份，所以拖完还能扫得出来。
     /// </summary>
     public static List<SheetPageLayout> Compute(
         IReadOnlyList<Question> questions,
         IReadOnlyDictionary<string, List<string>> options,
-        AnswerSheetOptions? sheetOptions = null)
+        AnswerSheetOptions? sheetOptions = null,
+        IReadOnlyDictionary<string, QuestionPlacement>? placements = null)
     {
         var opt = sheetOptions ?? AnswerSheetOptions.Default;
-        var objective = questions.Where(q => IsObjective(q.Type)).ToList();
-        var blanks = questions.Where(q => IsBlank(q.Type)).ToList();
-        var subjective = questions.Where(q => !IsObjective(q.Type) && !IsBlank(q.Type)).ToList();
+        // 可视化编辑器拖过的题从自动流里摘出去，稍后按覆盖坐标绝对定位；其余题照常流动
+        var pinned = placements is { Count: > 0 }
+            ? questions.Where(q => placements.ContainsKey(q.Id)).ToList()
+            : [];
+        var flowQuestions = pinned.Count > 0
+            ? questions.Where(q => !placements!.ContainsKey(q.Id)).ToList()
+            : questions.ToList();
+
+        var objective = flowQuestions.Where(q => IsObjective(q.Type)).ToList();
+        var blanks = flowQuestions.Where(q => IsBlank(q.Type)).ToList();
+        var subjective = flowQuestions.Where(q => !IsObjective(q.Type) && !IsBlank(q.Type)).ToList();
         var columns = opt.ObjColumns;
 
         // ── 与渲染器相同的顺序装箱（槽位 = 页 × 栏），得到每页各栏的内容 ──
@@ -377,6 +388,53 @@ public static class AnswerSheetLayout
             }
 
             result.Add(new SheetPageLayout(opt.Paper, p + 1, pages.Count, optMarks, idMarks, frames));
+        }
+
+        // ── 覆盖项：拖动/缩放过的题按绝对坐标落到它的页上 ──
+        if (pinned.Count > 0)
+        {
+            // 覆盖项可能被拖到自动流没有的页（比如把一道题单独放到第 3 页）——补出这些页
+            var maxPage = pinned.Max(q => Math.Max(1, placements![q.Id].PageNo));
+            while (result.Count < maxPage)
+                result.Add(new SheetPageLayout(opt.Paper, result.Count + 1, maxPage, [], [], []));
+
+            var extraOptions = new Dictionary<int, List<OptionMark>>();
+            var extraFrames = new Dictionary<int, List<SubjectiveFrame>>();
+
+            foreach (var q in pinned)
+            {
+                var pl = placements![q.Id];
+                var idx = Math.Clamp(pl.PageNo, 1, result.Count) - 1;
+                if (IsObjective(q.Type))
+                {
+                    // 客观题：按"题号 + 气泡"的行内几何重建（与渲染器的 .pinned .omr-row 一致）
+                    if (!extraOptions.TryGetValue(idx, out var list)) extraOptions[idx] = list = [];
+                    var keys = OptionsOf(q, options);
+                    var px = pl.Xmm + ObjNoW + ObjNoGap;
+                    var py = pl.Ymm + Math.Max(0, (pl.Hmm - ObjOptH) / 2);
+                    foreach (var k in keys)
+                    {
+                        list.Add(new OptionMark(q.Index, k, new BubbleMark(px, py, ObjOptW, ObjOptH)));
+                        px += ObjOptW + ObjOptMr;
+                    }
+                }
+                else
+                {
+                    // 填空题/主观题：整块就是一个作答框（切图、阅卷、整页指纹都用它）
+                    if (!extraFrames.TryGetValue(idx, out var list)) extraFrames[idx] = list = [];
+                    list.Add(new SubjectiveFrame(q.Index, new BubbleMark(pl.Xmm, pl.Ymm, pl.Wmm, pl.Hmm)));
+                }
+            }
+
+            // 页数在补页后可能变化，回填 TotalPages；同时把覆盖项并进各页
+            var total = result.Count;
+            for (var i = 0; i < total; i++)
+            {
+                var pg = result[i];
+                var opts2 = extraOptions.TryGetValue(i, out var o2) ? pg.Options.Concat(o2).ToList() : pg.Options;
+                var frames2 = extraFrames.TryGetValue(i, out var f2) ? pg.Frames.Concat(f2).ToList() : pg.Frames;
+                result[i] = pg with { TotalPages = total, Options = opts2, Frames = frames2 };
+            }
         }
 
         return result;

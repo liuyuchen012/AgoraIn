@@ -28,9 +28,11 @@ public class ExamsController : ControllerBase
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ServerPaths _paths;
     private readonly GradingPolicyService _gradingPolicy;
+    private readonly SheetLayoutService _sheetLayout;
 
     public ExamsController(ServerDbContext db, DeepSeekGradingService ai, AiSettingsService aiSettings,
-        IServiceScopeFactory scopeFactory, ServerPaths paths, GradingPolicyService gradingPolicy)
+        IServiceScopeFactory scopeFactory, ServerPaths paths, GradingPolicyService gradingPolicy,
+        SheetLayoutService sheetLayout)
     {
         _db = db;
         _ai = ai;
@@ -38,6 +40,7 @@ public class ExamsController : ControllerBase
         _scopeFactory = scopeFactory;
         _paths = paths;
         _gradingPolicy = gradingPolicy;
+        _sheetLayout = sheetLayout;
     }
 
     /// <summary>试卷列表。</summary>
@@ -93,7 +96,96 @@ public class ExamsController : ControllerBase
     }
 
     /// <summary>
-    /// 删除一份扫卡答卷：连同逐题结果与已落盘的原图一起清掉。
+    /// 可视化编辑器的版面数据：每道题在自动排版下的落位（mm，纸面坐标系），
+    /// 供编辑页画拖拽框；已被拖动过的题带 pinned=true，坐标为覆盖值。
+    /// </summary>
+    [HttpGet("papers/{paperId}/sheet-layout")]
+    public async Task<IActionResult> GetSheetLayout(string paperId, [FromQuery] string? paper, [FromQuery] string? idArea, [FromQuery] bool? notes)
+    {
+        var (questions, optionKeys) = await LoadPaperQuestionsAsync(paperId);
+        if (questions.Count == 0) return NotFound(new { error = "试卷没有题目" });
+        var opt = ParseSheetOptions(paper, idArea, notes);
+        var placements = (await _sheetLayout.LoadAsync(paperId)).ToDictionary(p => p.QuestionId);
+        var pages = AnswerSheetLayout.Compute(questions, optionKeys, opt, placements);
+
+        var byQid = questions.ToDictionary(q => q.Id);
+        return Ok(new
+        {
+            paperId,
+            columns = opt.Columns,
+            paperWidthMm = opt.Paper.WidthMm,
+            paperHeightMm = opt.Paper.HeightMm,
+            pageCount = pages.Count,
+            items = pages.SelectMany(pg => pg.Options
+                    .GroupBy(o => o.QuestionIndex)
+                    .Select(g => new { g.Key, B = g.First().Bubble })
+                    .Select(o => new { o.Key, o.B })
+                    .Concat(pg.Frames.Select(f => new { Key = f.QuestionIndex, B = f.Box }))
+                    .Select(x => new
+                    {
+                        questionId = questions.First(q => q.Index == x.Key).Id,
+                        questionNo = x.Key + 1,
+                        type = questions.First(q => q.Index == x.Key).Type.ToString(),
+                        page = pg.PageNo,
+                        // 客观题：气泡行整体外框（含左侧题号）；其余：作答框
+                        kind = IsObjective(questions.First(q => q.Index == x.Key).Type) ? "objective" : "frame",
+                        x = x.B.Xmm,
+                        y = x.B.Ymm,
+                        w = x.B.Wmm,
+                        h = x.B.Hmm,
+                        pinned = false,
+                    }))
+                .Concat(placements.Values.Where(pl => byQid.ContainsKey(pl.QuestionId)).Select(pl => new
+                {
+                    questionId = pl.QuestionId,
+                    questionNo = byQid[pl.QuestionId].Index + 1,
+                    type = byQid[pl.QuestionId].Type.ToString(),
+                    page = pl.PageNo,
+                    kind = IsObjective(byQid[pl.QuestionId].Type) ? "objective" : "frame",
+                    x = pl.Xmm,
+                    y = pl.Ymm,
+                    w = pl.Wmm,
+                    h = pl.Hmm,
+                    pinned = true,
+                })),
+        });
+    }
+
+    /// <summary>保存可视化编辑的版面覆盖（整份替换）；传空数组即恢复全自动排版。</summary>
+    [HttpPut("papers/{paperId}/sheet-layout")]
+    public async Task<IActionResult> SaveSheetLayout(string paperId, [FromBody] List<QuestionPlacement> items)
+    {
+        var (questions, _) = await LoadPaperQuestionsAsync(paperId);
+        if (questions.Count == 0) return NotFound(new { error = "试卷没有题目" });
+        var valid = questions.Select(q => q.Id).ToHashSet();
+        // 只接受本试卷的题（防止把别的卷的覆盖塞进来）
+        await _sheetLayout.SaveAsync(paperId, items.Where(i => valid.Contains(i.QuestionId)));
+        var saved = await _sheetLayout.LoadAsync(paperId);
+        return Ok(new { saved = saved.Count });
+    }
+
+    /// <summary>试卷题目 + 选项键（渲染/版面/编辑三处共用）。</summary>
+    private async Task<(List<Question> Questions, Dictionary<string, List<string>> OptionKeys)> LoadPaperQuestionsAsync(string paperId)
+    {
+        var questions = await _db.Questions.Where(q => q.PaperId == paperId).OrderBy(q => q.Index).ToListAsync();
+        return (questions, BuildOptionKeys(questions));
+    }
+
+    /// <summary>答题卡纸张/考号区/注意事项参数（渲染端点与编辑器共用同一套解析）。</summary>
+    internal static AnswerSheetOptions ParseSheetOptions(string? paper, string? idArea, bool? notes)
+        => new()
+        {
+            Paper = SheetPaper.FromName(paper),
+            IdArea = (idArea ?? "").Trim().ToLowerInvariant() switch
+            {
+                "handwrite" => IdAreaKind.Handwrite,
+                "none" => IdAreaKind.None,
+                _ => IdAreaKind.Bubble,
+            },
+            ShowNotes = notes ?? true,
+        };
+
+    /// <summary>删除一份扫卡答卷：连同逐题结果与已落盘的原图一起清掉。
     /// 用于扫错卷（拍了别班/别科的卡）、照片拍坏、重复扫描留下的垃圾记录；
     /// 已确认出分的答卷不允许删（成绩已计入统计），要删先退回。
     /// </summary>
@@ -721,13 +813,15 @@ public class ExamsController : ControllerBase
             .OrderBy(q => q.Index)
             .ToListAsync();
         var optionKeys = BuildOptionKeys(questions);
+        // 老师拖过版面的卷：切图必须按覆盖后的坐标，否则切出来的位置会错
+        var placements = (await _sheetLayout.LoadAsync(submission.PaperId)).ToDictionary(p => p.QuestionId);
 
         foreach (var name in images)
         {
             var full = Path.Combine(_paths.SheetDirectory, name);
             if (!System.IO.File.Exists(full)) continue;
             var bytes = await System.IO.File.ReadAllBytesAsync(full);
-            var cropped = OmrRecognizer.CropQuestion(bytes, questions, optionKeys, questionNo - 1);
+            var cropped = OmrRecognizer.CropQuestion(bytes, questions, optionKeys, questionNo - 1, placements);
             if (cropped != null)
             {
                 Response.Headers.CacheControl = "private, max-age=86400";
@@ -791,11 +885,13 @@ public class ExamsController : ControllerBase
             .OrderBy(q => q.Index)
             .ToListAsync();
         var optionKeys = BuildOptionKeys(questions);
+        // 识别同样按覆盖后的版面（拖过的题在它被拖到的地方采样）
+        var placements = (await _sheetLayout.LoadAsync(paperId)).ToDictionary(p => p.QuestionId);
 
         // 先本地识别（切卡 + 客观题 + 考号 + 页码，不调大模型、不外发图像）；
         // 找不到四角定位标记（没拍全/太模糊）才回退到视觉模型。
         string recognizeSource = "ai";
-        var local = OmrRecognizer.Recognize(imageData, questions, optionKeys);
+        var local = OmrRecognizer.Recognize(imageData, questions, optionKeys, placements);
         OmrResult? omrResult;
         int pageNo = 1, totalPages = 1;
         if (local != null)

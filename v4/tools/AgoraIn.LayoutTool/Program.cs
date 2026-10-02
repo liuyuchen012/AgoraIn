@@ -4,21 +4,23 @@ using AgoraIn.Server.Services;
 
 // 答题卡版面校验：导出渲染 HTML 与版面模型 JSON，交给 tools/verify_layout.py 在浏览器里实测比对。
 //
-//   dotnet run --project tools/AgoraIn.LayoutTool -- export <A4|16K|B4|8K|A3> [题目.json] [输出目录]
+//   dotnet run --project tools/AgoraIn.LayoutTool -- export <A4|16K|B4|8K|A3> [题目.json] [输出目录] [覆盖.json]
 //
 // 题目.json 可选（[{index,type,options,score}]，生产试卷导出的格式）；缺省用 24 客观 + 6 主观的合成题。
+// 覆盖.json 可选（可视化编辑器的拖动结果：[{questionId,pageNo,xMm,yMm,wMm,hMm}]），用来验证"拖过之后仍然对得上"。
 // 校验流程见 docs/answer-sheet-spec.md 第 1 节：模型与 DOM 逐气泡偏差应 < 0.3mm。
 //   python tools/verify_layout.py <输出目录>/sheet.html <输出目录>/layout.json
 var args0 = args.Length > 0 ? args[0] : "export";
 if (args0 != "export")
 {
-    Console.WriteLine("用法: export <A4|16K|B4|8K|A3> [题目.json] [输出目录]");
+    Console.WriteLine("用法: export <A4|16K|B4|8K|A3> [题目.json] [输出目录] [覆盖.json]");
     return 1;
 }
 
 var paperName = args.Length > 1 ? args[1] : "8K";
 var questionsFile = args.Length > 2 ? args[2] : null;
 var outDir = args.Length > 3 ? args[3] : Path.Combine(Path.GetTempPath(), "agorain-layout-check");
+var placementsFile = args.Length > 4 ? args[4] : null;
 Directory.CreateDirectory(outDir);
 
 var paper = SheetPaper.FromName(paperName);
@@ -72,8 +74,27 @@ else
 }
 
 var sheet = new ExamPaper { Id = "layout-check", Title = "版面校验卷", Subject = "数学", TotalScore = 150 };
-var html = AnswerSheetRenderer.Render(sheet, questions, options, sheetOptions: opt);
-var pages = AnswerSheetLayout.Compute(questions, options, opt);
+
+// 可视化编辑器的覆盖：拖动/缩放过的题按这份坐标绝对定位
+var placements = new Dictionary<string, QuestionPlacement>();
+if (placementsFile != null && File.Exists(placementsFile))
+{
+    foreach (var el in JsonDocument.Parse(File.ReadAllText(placementsFile)).RootElement.EnumerateArray())
+    {
+        var pl = new QuestionPlacement(
+            el.GetProperty("questionId").GetString() ?? "",
+            el.GetProperty("pageNo").GetInt32(),
+            el.GetProperty("xMm").GetDouble(),
+            el.GetProperty("yMm").GetDouble(),
+            el.GetProperty("wMm").GetDouble(),
+            el.GetProperty("hMm").GetDouble());
+        placements[pl.QuestionId] = pl;
+    }
+    Console.WriteLine($"覆盖项 {placements.Count} 条：{string.Join(", ", placements.Keys)}");
+}
+
+var html = AnswerSheetRenderer.Render(sheet, questions, options, sheetOptions: opt, placements: placements);
+var pages = AnswerSheetLayout.Compute(questions, options, opt, placements);
 
 var htmlPath = Path.Combine(outDir, "sheet.html");
 var jsonPath = Path.Combine(outDir, "layout.json");

@@ -40,6 +40,8 @@ catch (Exception ex)
 var dbPath = Path.Combine(dataDir, "server.db");
 builder.Services.AddSingleton(new ServerPaths(dataDir));
 builder.Services.AddSingleton<GradingPolicyService>();
+// 答题卡版面的可视化编辑覆盖（拖动/缩放后的题目坐标），渲染/识别/切图共用
+builder.Services.AddSingleton<SheetLayoutService>();
 // AddDbContextFactory 同时把 ServerDbContext 注册为 scoped 服务，控制器照常注入；
 // 额外提供单例工厂，供 DeepSeekGradingService 等非作用域组件写 AI 调用日志
 builder.Services.AddDbContextFactory<ServerDbContext>(opt => opt.UseSqlite($"Data Source={dbPath}"));

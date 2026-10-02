@@ -332,6 +332,12 @@ export const examApi = {
   // 答题卡渲染（匿名控制器；iframe 不带 JWT，区域用户需显式带 region 参数）
   // opts：纸张 A4/B4/8K/16K/A3、考号区 bubble(填涂)/handwrite(仅手写)/none、notes 注意事项
   sheetUrl: (paperId: string, opts?: SheetQuery) => `/api/v4/sheet/${paperId}${sheetQuery(opts)}`,
+  /** 可视化排版的版面数据：每道题自动排版下的落位 + 已拖动的覆盖项（mm，纸面坐标系） */
+  sheetLayout: (paperId: string, opts?: SheetQuery) =>
+    client.get<SheetLayoutData>(`/exams/papers/${paperId}/sheet-layout${sheetQuery(opts)}`),
+  /** 保存可视化排版的覆盖（整份替换；传空数组 = 恢复全自动排版） */
+  saveSheetLayout: (paperId: string, items: SheetPlacement[]) =>
+    client.put<{ saved: number }>(`/exams/papers/${paperId}/sheet-layout`, items),
   sheetForStudent: (paperId: string, studentId: string, opts?: SheetQuery) =>
     `/api/v4/sheet/${paperId}/student/${studentId}${sheetQuery(opts)}`,
   batchSheetUrl: (paperId: string, classId: string, opts?: SheetQuery) =>
@@ -342,6 +348,28 @@ export const examApi = {
 }
 
 /** 答题卡渲染参数 */
+export interface SheetPlacement {
+  questionId: string
+  questionNo: number
+  type: string
+  page: number
+  kind: 'objective' | 'frame'
+  x: number
+  y: number
+  w: number
+  h: number
+  pinned: boolean
+}
+
+export interface SheetLayoutData {
+  paperId: string
+  columns: number
+  paperWidthMm: number
+  paperHeightMm: number
+  pageCount: number
+  items: SheetPlacement[]
+}
+
 export interface SheetQuery {
   paper?: string
   idArea?: 'bubble' | 'handwrite' | 'none'

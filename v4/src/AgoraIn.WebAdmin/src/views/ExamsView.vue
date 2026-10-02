@@ -179,6 +179,7 @@
 
             <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap">
               <el-button type="primary" @click="previewSheet(editingPaper)">预览答题卡</el-button>
+              <el-button type="warning" plain @click="openLayoutEditor(editingPaper)">可视化排版</el-button>
               <el-button type="success" @click="downloadSheet(editingPaper)">下载打印</el-button>
               <el-button @click="showBatchSheet(editingPaper)">按班级批量生成（一人一张）</el-button>
               <el-button type="warning" @click="showExamNumbers(editingPaper)">生成考号</el-button>
@@ -344,6 +345,10 @@
         </el-table-column>
       </el-table>
     </el-dialog>
+
+    <!-- 可视化排版：拖拽/缩放题目框，松手即保存并实时重渲染预览 -->
+    <SheetLayoutEditor v-model="layoutVisible" :paper-id="layoutPaper?.id || ''"
+                       :paper-title="layoutPaper?.title || ''" :query="sheetQuery" />
 
     <!-- 批改分配（分题 / 双判 / 仲裁） -->
     <el-dialog v-model="assignVisible" title="批改分配 — 分题 / 双判 / 仲裁" width="760px" top="5vh" destroy-on-close>
@@ -722,6 +727,7 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { examApi, classApi, studentApi, usersApi, type ClassRow, type StudentRow, type ExamNumberResult, type ResultRow } from '@/api/client'
 import GradingPanel from '@/components/GradingPanel.vue'
+import SheetLayoutEditor from '@/components/SheetLayoutEditor.vue'
 
 const loading = ref(false)
 const papers = ref<any[]>([])
@@ -761,6 +767,8 @@ const examNoResult = ref<ExamNumberResult | null>(null)
 
 // 预览
 const previewVisible = ref(false)
+const layoutVisible = ref(false)
+const layoutPaper = ref<any>(null)
 const previewUrl = ref('')
 const currentPreviewPaper = ref<any>(null)
 
@@ -902,6 +910,12 @@ function previewSheet(row: any) {
   currentPreviewPaper.value = row
   previewUrl.value = examApi.sheetUrl(row.id, sheetQuery.value)
   previewVisible.value = true
+}
+
+function openLayoutEditor(row: any) {
+  if (!row?.id) return
+  layoutPaper.value = row
+  layoutVisible.value = true
 }
 
 function downloadSheet(row: any) {

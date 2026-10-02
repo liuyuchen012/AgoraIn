@@ -15,7 +15,17 @@ namespace AgoraIn.Server.Controllers;
 public class AnswerSheetController : ControllerBase
 {
     private readonly ServerDbContext _db;
-    public AnswerSheetController(ServerDbContext db) => _db = db;
+    private readonly SheetLayoutService _sheetLayout;
+
+    public AnswerSheetController(ServerDbContext db, SheetLayoutService sheetLayout)
+    {
+        _db = db;
+        _sheetLayout = sheetLayout;
+    }
+
+    /// <summary>该试卷被老师拖动过的题目坐标（没有覆盖就返回空表 = 全自动排版）。</summary>
+    private async Task<Dictionary<string, QuestionPlacement>> PlacementsAsync(string paperId)
+        => (await _sheetLayout.LoadAsync(paperId)).ToDictionary(p => p.QuestionId);
 
     /// <summary>匿名渲染的公共入口：按 query 参数切换区域上下文。</summary>
     private async Task<bool> ApplyRegionAsync(string? region)
@@ -54,7 +64,8 @@ public class AnswerSheetController : ControllerBase
         var (paperEntity, questions, options) = await LoadPaperAsync(paperId);
         if (paperEntity == null) return NotFound(new { error = "试卷不存在" });
         var opt = ParseOptions(paper, idArea, notes);
-        return Content(AnswerSheetRenderer.Render(paperEntity, questions, options, sheetOptions: opt),
+        var placements = await PlacementsAsync(paperId);
+        return Content(AnswerSheetRenderer.Render(paperEntity, questions, options, sheetOptions: opt, placements: placements),
             "text/html; charset=utf-8");
     }
 
@@ -69,8 +80,10 @@ public class AnswerSheetController : ControllerBase
         var student = await _db.Students.FindAsync(studentId);
         if (student == null) return NotFound(new { error = "学生不存在" });
         var opt = ParseOptions(paper, idArea, notes);
+        var placements = await PlacementsAsync(paperId);
         return Content(AnswerSheetRenderer.Render(paperEntity, questions, options,
-            studentName: student.Name, studentNo: student.StudentNo ?? student.Id, sheetOptions: opt),
+            studentName: student.Name, studentNo: student.StudentNo ?? student.Id,
+            sheetOptions: opt, placements: placements),
             "text/html; charset=utf-8");
     }
 
@@ -85,11 +98,13 @@ public class AnswerSheetController : ControllerBase
         var students = await _db.Students.Where(s => s.ClassId == classId).OrderBy(s => s.StudentNo).ToListAsync();
         if (students.Count == 0) return NotFound(new { error = "该班级没有学生" });
         var opt = ParseOptions(paper, idArea, notes);
+        var placements = await PlacementsAsync(paperId);
 
         var parts = new List<string>();
         foreach (var stu in students)
             parts.Add(AnswerSheetRenderer.Render(paperEntity, questions, options,
-                studentName: stu.Name, studentNo: stu.StudentNo ?? stu.Id, sheetOptions: opt));
+                studentName: stu.Name, studentNo: stu.StudentNo ?? stu.Id,
+                sheetOptions: opt, placements: placements));
         return Content(string.Join("\n<hr style='page-break-after:always'>\n", parts), "text/html; charset=utf-8");
     }
 
