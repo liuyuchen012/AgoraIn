@@ -277,24 +277,19 @@ public static class AnswerSheetLayout
 
                 if (objIdx >= objective.Count && blankIdx < blanks.Count)
                 {
-                    // 逐行累计：每行可能被单独拉高/压低，装不下就留给下一栏
-                    var fit = 0;
-                    var acc = 0.0;
+                    // 一行 BlankColumns 个（与客观题同规则）；行高全块统一，按"行"算装得下几行
+                    var blankRowH = BlankRowMm;
+                    foreach (var q in blanks.Skip(blankIdx)) blankRowH = Math.Max(blankRowH, HOf(q, BlankRowMm));
                     var limit = capacity - used - BlockChromeMm + BlankRowGapMm;
-                    while (blankIdx + fit < blanks.Count)
-                    {
-                        var rh = HOf(blanks[blankIdx + fit], BlankRowMm) + BlankRowGapMm;
-                        // 栏里已经有内容就不再硬塞（只有完全空的一栏才允许"至少放一条"，保证不死循环）
-                        if (acc + rh > limit && (fit > 0 || used > 0)) break;
-                        acc += rh;
-                        fit++;
-                    }
-                    var take = fit;
+                    var fitRows = (int)Math.Floor(limit / (blankRowH + BlankRowGapMm));
+                    var fitCount = Math.Max(0, fitRows) * opt.BlankColumns;
+                    if (fitCount == 0 && used == 0) fitCount = opt.BlankColumns;   // 空栏至少放一行
+                    var take = Math.Min(blanks.Count - blankIdx, fitCount);
                     if (take > 0)
                     {
                         pageBlank = blanks.Skip(blankIdx).Take(take).ToList();
                         blankIdx += take;
-                        used += BlockChromeMm + pageBlank.Sum(q => HOf(q, BlankRowMm) + BlankRowGapMm);
+                        used += BlockChromeMm + RowsOnPage(take, opt.BlankColumns) * (blankRowH + BlankRowGapMm);
                     }
                 }
 
@@ -409,16 +404,25 @@ public static class AnswerSheetLayout
                 // 每行登记成"作答框"，切图与阅卷都按一题一块走，识别端的整页指纹也用它。
                 if (pageBlank.Count > 0)
                 {
-                    var rowTop = colY + QBlockTopInset;
-                    var fullW = blockW - 2 * (QBlockInsetX + QBodyPadX);
-                    foreach (var q in pageBlank)
+                    var blankCols = opt.BlankColumns;
+                    var bodyTop = colY + QBlockTopInset;
+                    var rowH = BlankRowMm;
+                    foreach (var q in pageBlank) rowH = Math.Max(rowH, HOf(q, BlankRowMm));
+                    var cellW = (blockW - 2 * QBlockInsetX - 2 * QBodyPadX
+                                 - (blankCols - 1) * ObjColGap) / blankCols;
+                    var perCol = RowsOnPage(pageBlank.Count, blankCols);
+                    for (var bc = 0; bc < blankCols; bc++)
                     {
-                        var rowH = HOf(q, BlankRowMm);
-                        frames.Add(new SubjectiveFrame(q.Index, new BubbleMark(
-                            colLeft + QBlockInsetX + QBodyPadX, rowTop, WOf(q, fullW), rowH)));
-                        rowTop += rowH + BlankRowGapMm;
+                        var cellX = colLeft + QBlockInsetX + QBodyPadX + bc * (cellW + ObjColGap);
+                        for (var r = 0; r < perCol; r++)
+                        {
+                            var idx = bc * perCol + r;
+                            if (idx >= pageBlank.Count) break;
+                            frames.Add(new SubjectiveFrame(pageBlank[idx].Index, new BubbleMark(
+                                cellX, bodyTop + r * (rowH + BlankRowGapMm), cellW, rowH)));
+                        }
                     }
-                    colY += BlockChromeMm + pageBlank.Sum(q => HOf(q, BlankRowMm) + BlankRowGapMm);
+                    colY += BlockChromeMm + perCol * (rowH + BlankRowGapMm);
                 }
 
                 // 主观题块：作答框外框也是"这一页"的指纹（纯主观页没有选项气泡，

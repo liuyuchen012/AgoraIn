@@ -4,15 +4,16 @@
     <div class="wrap">
       <div class="toolbar">
         <span class="hint">
-          拖动题目框改位置、拖右下角改大小；自动吸附 1mm。**改大小会让下方题目自动让位/回收**（分页重排），重叠会标红。
+          拖动题目框改位置、拖右下角改大小；自动吸附 1mm。改大小会让下方题目自动让位/回收（分页重排）。改完点「保存」才生效。
           <b>松手即保存</b>，右侧预览就是打印出来的样子。
         </span>
         <span class="spacer"></span>
         <el-tag v-if="overlaps.size" type="danger" size="small">重叠 {{ overlaps.size }} 处</el-tag>
-        <el-tag v-if="modified.size" type="warning" size="small">已改 {{ modified.size }} 题</el-tag>
+        <el-tag v-if="dirty" type="warning" size="small">有未保存的修改</el-tag>
         <span class="saved">{{ savedHint }}</span>
-        <el-button size="small" @click="reloadSheet">刷新预览</el-button>
-        <el-button size="small" :disabled="!modified.size" @click="resetAll">全部恢复自动</el-button>
+        <el-button size="small" :disabled="!dirty" @click="discard">放弃修改</el-button>
+        <el-button size="small" type="primary" :loading="saving" :disabled="!dirty" @click="save">保存</el-button>
+        <el-button size="small" :disabled="!hasAny" @click="resetAll">全部恢复自动</el-button>
       </div>
 
       <div class="canvas" v-loading="loading">
@@ -32,7 +33,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { examApi, type SheetPlacement, type SheetQuery } from '@/api/client'
 
@@ -45,6 +46,8 @@ const visible = defineModel<boolean>({ required: true })
 const frameEl = ref<HTMLIFrameElement>()
 const loading = ref(false)
 const savedHint = ref('')
+const dirty = ref(false)      // 有未保存的改动（改完点保存才生效，不做自动保存：每次落库都重渲染会一卡一卡的）
+const saving = ref(false)
 const items = ref<SheetPlacement[]>([])
 const modified = ref(new Set<string>())   // 拖动过（绝对定位）的题
 const sized = ref(new Set<string>())      // 只改过大小（仍在自动流、下方让位）的题
@@ -52,6 +55,7 @@ const paperH = ref(297)
 const pageCount = ref(1)
 const sheetVersion = ref(0)
 
+const hasAny = computed(() => modified.value.size > 0 || sized.value.size > 0)
 const iframeSrc = computed(() => examApi.sheetUrl(props.paperId, props.query) + `&_v=${sheetVersion.value}`)
 const docHeight = computed(() => Math.round(pageCount.value * (paperH.value - 6) * K))
 /** 第 N 页的顶边（mm→px）：每页高 = 纸高 - 6mm（与 .page 容器一致） */
@@ -138,7 +142,7 @@ function startDrag(e: PointerEvent, it: SheetPlacement, mode: 'move' | 'resize')
       // 只改大小 = 留在自动流：**下方题目自动让位/回收**（分页也跟着重排）
       sized.value = new Set(sized.value).add(it.questionId)
     }
-    save()
+    dirty.value = true       // 只标脏；保存交给「保存」按钮（落库+重渲染较慢，松手就存会卡）
   }
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)
@@ -146,28 +150,35 @@ function startDrag(e: PointerEvent, it: SheetPlacement, mode: 'move' | 'resize')
   target.classList.add('dragging')
 }
 
-let saveTimer: number | undefined
-function save() {
-  window.clearTimeout(saveTimer)
+async function save() {
+  saving.value = true
   savedHint.value = '保存中…'
-  saveTimer = window.setTimeout(async () => {
-    try {
-      // 只写拖动过的题：没动过的继续走自动排版（否则整卷都被钉死，加题后不会自动重排）
-      const payload = items.value
-        .filter(i => modified.value.has(i.questionId) || sized.value.has(i.questionId))
-        .map(i => ({
-          questionId: i.questionId, pageNo: i.page, xMm: i.x, yMm: i.y, wMm: i.w, hMm: i.h,
-          sizeOnly: !modified.value.has(i.questionId),   // 只缩放的题留在自动流里重排
-        }))
-      await examApi.saveSheetLayout(props.paperId, payload as never)
-      await nextTick()
-      reloadSheet()
-      await load()          // 重新拉版面：缩放过之后下方题目已让位，框要跟着移到新位置
-      savedHint.value = `已保存 ${new Date().toLocaleTimeString()}`
-    } catch {
-      savedHint.value = '保存失败'
-    }
-  }, 500)
+  try {
+    // 只写改过的题：没动过的继续走自动排版（否则整卷被钉死，以后加题不会自动重排）
+    const payload = items.value
+      .filter(i => modified.value.has(i.questionId) || sized.value.has(i.questionId))
+      .map(i => ({
+        questionId: i.questionId, pageNo: i.page, xMm: i.x, yMm: i.y, wMm: i.w, hMm: i.h,
+        sizeOnly: !modified.value.has(i.questionId),   // 只缩放的题留在自动流里重排
+      }))
+    await examApi.saveSheetLayout(props.paperId, payload as never)
+    await load()            // 重拉版面：缩放过之后下方题目已让位，框要跟着移到新位置
+    reloadSheet()           // 预览也跟着重渲染
+    dirty.value = false
+    savedHint.value = `已保存 ${new Date().toLocaleTimeString()}`
+  } catch {
+    savedHint.value = '保存失败'
+  } finally {
+    saving.value = false
+  }
+}
+
+/** 放弃未保存的改动：从服务端重新拉一份版面 */
+async function discard() {
+  await load()
+  reloadSheet()
+  dirty.value = false
+  savedHint.value = '已放弃修改'
 }
 
 async function resetAll() {
@@ -178,6 +189,7 @@ async function resetAll() {
     ElMessage.success('已恢复全自动排版')
     await load()
     reloadSheet()
+    dirty.value = false
   } catch {
     savedHint.value = '恢复失败'
   }

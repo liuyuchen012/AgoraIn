@@ -70,6 +70,9 @@ public sealed record AnswerSheetOptions
     /// <summary>客观题气泡列数：按「本块可用宽度」决定（窄块两列，常规三列）。</summary>
     public int ObjColumns => BlockWidthMm >= 180 ? 3 : 2;
 
+    /// <summary>填空题每行的题数：与客观题同一套分栏规则（一行多个，不再一题占一整行）。</summary>
+    public int BlankColumns => ObjColumns;
+
     /// <summary>首页表头高度（标题 + 副标题 + 注意事项 + 学生信息区）。</summary>
     public double HeaderMm => 92 + (ShowNotes ? 18 : 0);
 
@@ -206,29 +209,26 @@ public static class AnswerSheetRenderer
                     }
                 }
 
-                // 2) 填空题：一题一行；逐行累计——每题可能被单独拉高/压低，装不下留给下一栏
+                // 2) 填空题：一行 cols 个（与客观题同规则）；行高全块统一，按"行"算能不能装下
                 if (objIdx >= objective.Count && blankIdx < blanks.Count)
                 {
-                    var fit = 0;
-                    var acc = 0.0;
+                    var blankRowH = BlankRowMm;
+                    foreach (var q in blanks.Skip(blankIdx)) blankRowH = Math.Max(blankRowH, sz.H(q.Id, BlankRowMm));
                     var limit = capacity - used - BlockChromeMm + BlankRowGapMm;
-                    while (blankIdx + fit < blanks.Count)
-                    {
-                        var rh = sz.H(blanks[blankIdx + fit].Id, BlankRowMm) + BlankRowGapMm;
-                        // 栏里已经有内容就不再硬塞（只有完全空的一栏才允许"至少放一条"，保证不死循环）
-                        if (acc + rh > limit && (fit > 0 || used > 0)) break;
-                        acc += rh;
-                        fit++;
-                    }
-                    var take = fit;
+                    var fitRows = (int)Math.Floor(limit / (blankRowH + BlankRowGapMm));
+                    var fitCount = Math.Max(0, fitRows) * opt.BlankColumns;
+                    if (fitCount == 0 && used == 0) fitCount = opt.BlankColumns;   // 空栏至少放一行，保证不死循环
+                    var take = Math.Min(blanks.Count - blankIdx, fitCount);
                     if (take > 0)
                     {
                         var chunk = blanks.Skip(blankIdx).Take(take).ToList();
                         blankIdx += take;
-                        blocks.Append(BuildBlankBlock(chunk, blankTitle, sz, opt.BlockWidthMm - 2 * (BlockInsetX + QBodyPadX)));
-                        used += BlockChromeMm + chunk.Sum(q => sz.H(q.Id, BlankRowMm) + BlankRowGapMm);
+                        blocks.Append(BuildBlankBlock(chunk, blankTitle, sz, opt.BlockWidthMm - 2 * (BlockInsetX + QBodyPadX), opt.BlankColumns));
+                        var rowsUsed = (int)Math.Ceiling(chunk.Count / (double)opt.BlankColumns);
+                        used += BlockChromeMm + rowsUsed * (blankRowH + BlankRowGapMm);
                     }
                 }
+
 
                 // 3) 主观题：客观/填空排完后，继续用本栏剩余容量装主观题
                 if (objIdx >= objective.Count && blankIdx >= blanks.Count && subIdx < subjective.Count)
@@ -261,7 +261,7 @@ public static class AnswerSheetRenderer
                     {
                         var one = blanks.Skip(blankIdx).Take(1).ToList();
                         blankIdx += one.Count;
-                        blocks.Append(BuildBlankBlock(one, blankTitle, sz, opt.BlockWidthMm - 2 * (BlockInsetX + QBodyPadX)));
+                        blocks.Append(BuildBlankBlock(one, blankTitle, sz, opt.BlockWidthMm - 2 * (BlockInsetX + QBodyPadX), opt.BlankColumns));
                     }
                     else
                     {
@@ -403,7 +403,7 @@ public static class AnswerSheetRenderer
         if (IsBlank(q.Type))
             return $"""
 <div class="pinned" style="{box}" data-qid="{q.Id}">
-  <div class="blank-row"><div class="blank-no">第 {q.Index + 1} 题（{q.Score:0.#} 分）</div><div class="blank-line"></div></div>
+  <div class="blank-cell" style="height:9mm"><span class="blank-no">{q.Index + 1}.</span><span class="blank-line"></span></div>
 </div>
 """;
 
@@ -413,7 +413,7 @@ public static class AnswerSheetRenderer
         return $"""
 <div class="pinned" style="{box}" data-qid="{q.Id}">
   <div class="answer-box" style="--h:{body:0.##}mm;margin:0">
-    <div class="answer-head">第 {q.Index + 1} 题（{q.Score:0.#} 分）</div>
+    <div class="answer-head">第 {q.Index + 1} 题</div>
     <div class="answer-body{lines}"></div>
   </div>
 </div>
@@ -558,17 +558,19 @@ public static class AnswerSheetRenderer
   .answer-body { height: var(--h, 30mm); }
   .answer-lines { background-image: repeating-linear-gradient(transparent, transparent 7mm, #ccc 7mm, #ccc 7.2mm); }
 
-  /* ── 填空题：一题一行，行内一条横线（高度与 BlankRowMm / BlankRowGapMm 一致） ──
+  /* ── 填空题：与选择题同规则——一行 N 个（列数 = BlankColumns），每格"题号. + 一条横线"。
      四边框不能省：识别端用"框在不在"做整页指纹，纯横线会让整页认不出来。 */
-  .blank-row { height: 9mm; border: 0.5mm solid #000; margin: 0 0 2mm;
-               display: flex; align-items: center; padding: 0 2mm; break-inside: avoid; }
-  .blank-no { font-size: 9pt; white-space: nowrap; margin-right: 2mm; }
+  .blank-cols { display: flex; gap: 3mm; }
+  .blank-col { flex: 1; }
+  .blank-cell { height: 9mm; border: 0.5mm solid #000; margin: 0 0 2mm; padding: 0 1.5mm;
+                display: flex; align-items: center; break-inside: avoid; }
+  .blank-no { font-size: 9pt; white-space: nowrap; margin-right: 1.5mm; }
   .blank-line { flex: 1; height: 5mm; border-bottom: 0.3mm dashed #888; }
 
   /* ── 可视化编辑器拖过的题：绝对定位在纸面坐标系（.page 无边框，left/top 的 0 点即纸面左上角） ── */
   .pinned { position: absolute; z-index: 2; }
   .pinned .omr-row { display: flex; align-items: center; height: 100%; }
-  .pinned .blank-row { height: 100%; margin: 0; }
+  .pinned .blank-cell { height: 100%; margin: 0; }
   .pinned .answer-box { height: 100%; }
 
   /* ── 考号表 ── */
@@ -683,7 +685,7 @@ public static class AnswerSheetRenderer
     /// 纯横线没有四条边，整页就会认不出来（页码、答案都会跟着错）。
     /// </summary>
     private static string BuildBlankBlock(IReadOnlyList<Question> questions, string title = BlankTitleFallback,
-        SizeOverrides? sizes = null, double blockContentW = 0)
+        SizeOverrides? sizes = null, double blockContentW = 0, int columns = 1)
     {
         var sz = sizes ?? SizeOverrides.None;
         var sb = new StringBuilder();
@@ -691,28 +693,35 @@ public static class AnswerSheetRenderer
         sb.Append($"<div class=\"block-title\">{title}</div>");
         sb.Append("<div class=\"qbody\">");
 
+        // 一行多个：行数 = ceil(题数 / 每行题数)，行高全块统一（与客观题一致）
+        var cols = Math.Max(1, columns);
+        var rows = Math.Max(1, (int)Math.Ceiling(questions.Count / (double)cols));
+        var rowH = BlankRowMm;
+        foreach (var q in questions) rowH = Math.Max(rowH, sz.H(q.Id, BlankRowMm));
         var offsets = new List<double>();
-        var acc = 0.0;
-        foreach (var q in questions)
-        {
-            offsets.Add(acc);
-            acc += sz.H(q.Id, BlankRowMm) + BlankRowGapMm;
-        }
-        if (questions.Count > 0) offsets.Add(Math.Max(0, acc - BlankRowGapMm));
+        for (var r = 0; r < rows; r++) offsets.Add(r * (rowH + BlankRowGapMm));
+        if (questions.Count > 0) offsets.Add(rows * (rowH + BlankRowGapMm) - BlankRowGapMm);
         sb.Append(BuildTimingMarks(offsets));
 
-        foreach (var q in questions)
+        sb.Append("<div class=\"blank-cols\">");
+        for (var c = 0; c < cols; c++)
         {
-            var rowH = sz.H(q.Id, BlankRowMm);
-            // 只改高度时宽度保持整栏（兜底 = 整栏内容宽）；.blank-row 是 border-box，宽度即外框宽
-            var w = sz.Has(q.Id) && blockContentW > 0 ? $" width:{sz.W(q.Id, blockContentW):0.##}mm;" : "";   // 分号不能少：否则 height 声明整条被浏览器丢掉
-            sb.Append($$"""
-<div class="blank-row" style="height:{{rowH:0.##}}mm;{{w}}" data-qid="{{q.Id}}">
-  <div class="blank-no">第 {{q.Index + 1}} 题（{{q.Score:0.#}} 分）</div>
-  <div class="blank-line"></div>
+            sb.Append("<div class=\"blank-col\">");
+            for (var r = 0; r < rows; r++)
+            {
+                var idx = c * rows + r;                 // 与客观题同样的"按列分块"顺序
+                if (idx >= questions.Count) break;
+                var q = questions[idx];
+                sb.Append($$"""
+<div class="blank-cell" style="height:{{rowH:0.##}}mm" data-qid="{{q.Id}}">
+  <span class="blank-no">{{q.Index + 1}}.</span>
+  <span class="blank-line"></span>
 </div>
 """);
+            }
+            sb.Append("</div>");
         }
+        sb.Append("</div>");
 
         sb.Append("</div></div>");
         return sb.ToString();
@@ -899,7 +908,7 @@ public static class AnswerSheetRenderer
 
             sb.Append($$"""
 <div class="answer-box" style="{{w}}--h:{{body:0.##}}mm">
-  <div class="answer-head">第 {{q.Index + 1}} 题（{{q.Score:0.#}} 分）</div>
+  <div class="answer-head">第 {{q.Index + 1}} 题</div>
   <div class="answer-body{{lines}}"></div>
 </div>
 """);
