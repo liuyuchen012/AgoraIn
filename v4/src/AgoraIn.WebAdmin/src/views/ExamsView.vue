@@ -330,12 +330,14 @@
         <el-table-column prop="submittedAt" label="提交时间" width="170">
           <template #default="{row}">{{formatTime(row.submittedAt)}}</template>
         </el-table-column>
-        <el-table-column label="操作" width="330">
+        <el-table-column label="操作" width="380">
           <template #default="{row}">
             <el-button link type="primary" size="small" @click="openResults(row)">逐题</el-button>
             <el-button v-if="row.status<3" link type="warning" size="small" :loading="gradingId===row.id" @click="aiGradeAll(row)">AI批改</el-button>
             <el-button v-if="row.status!==3 && row.status!==2" link type="danger" size="small" @click="markReview(row)">待人工</el-button>
             <el-button v-if="row.status>=1" link type="success" size="small" @click="confirmGrade(row)">确认</el-button>
+            <el-button v-if="row.status<3" link type="info" size="small"
+                       :loading="deletingId===row.id" @click="deleteSubmission(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -563,12 +565,14 @@
         <el-table-column prop="submittedAt" label="提交时间" width="170">
           <template #default="{row}">{{formatTime(row.submittedAt)}}</template>
         </el-table-column>
-        <el-table-column label="操作" width="330">
+        <el-table-column label="操作" width="380">
           <template #default="{row}">
             <el-button link type="primary" size="small" @click="openResults(row)">逐题</el-button>
             <el-button v-if="row.status<3" link type="warning" size="small" :loading="gradingId===row.id" @click="aiGradeAll(row)">AI批改</el-button>
             <el-button v-if="row.status!==3 && row.status!==2" link type="danger" size="small" @click="markReview(row)">待人工</el-button>
             <el-button v-if="row.status>=1" link type="success" size="small" @click="confirmGrade(row)">确认</el-button>
+            <el-button v-if="row.status<3" link type="info" size="small"
+                       :loading="deletingId===row.id" @click="deleteSubmission(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -773,6 +777,7 @@ const submissionsLoading = ref(false)
 const submissions = ref<any[]>([])
 const uploading = ref(false)
 const gradingId = ref('')
+const deletingId = ref('')
 const currentPaperId = ref('')
 
 // 逐题批改
@@ -1192,6 +1197,23 @@ async function markReview(row: any) {
 
 async function confirmGrade(row: any) {
   try { await examApi.confirm(row.id); ElMessage.success('已确认，成绩计入统计'); row.status = 3 } catch {}
+}
+
+/** 删除一份已扫的答卷（连同逐题结果与已存原图）：扫错卷/拍坏的照片清掉，别混进批次。 */
+async function deleteSubmission(row: any) {
+  const who = row.studentName || (row.studentRef ? `考号 ${row.studentRef}` : '未识别考生')
+  try {
+    await ElMessageBox.confirm(
+      `确认删除「${who}」这份答卷吗？连同它的逐题结果与已扫描的原图一起删除，不可恢复。`,
+      '删除已扫答题卡', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+  } catch { return }   // 点了取消
+  deletingId.value = row.id
+  try {
+    const res = await examApi.deleteSubmission(row.id)
+    submissions.value = submissions.value.filter((s: any) => s.id !== row.id)
+    ElMessage.success(`已删除（本题结果 ${res.questionResults} 条、原图 ${res.images} 张）`)
+  } catch { /* 拦截器已提示（如"已确认出分不能删除"） */ }
+  finally { deletingId.value = '' }
 }
 
 function statusName(s: string) { return { NotGraded: '未批', AiGraded: 'AI已批', NeedsHuman: '待人工', Confirmed: '已确认' }[s] || s }

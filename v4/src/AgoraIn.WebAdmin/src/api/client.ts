@@ -238,6 +238,9 @@ export const examApi = {
     client.put<unknown>(`/exams/papers/${paperId}/questions/${questionId}`, data),
   // 答题卡
   getSubmissions: (paperId: string) => client.get<unknown[]>(`/exams/submissions?paperId=${paperId}`),
+  /** 删除一份扫卡答卷（连带逐题结果与已存原图）；已确认出分的会被服务端拒绝 */
+  deleteSubmission: (submissionId: string) =>
+    client.delete<{ deleted: boolean; questionResults: number; images: number }>(`/exams/submissions/${submissionId}`),
   uploadSubmission: (paperId: string, file: File) => {
     const fd = new FormData()
     fd.append('file', file)

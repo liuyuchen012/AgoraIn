@@ -92,6 +92,38 @@ public class ExamsController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// 删除一份扫卡答卷：连同逐题结果与已落盘的原图一起清掉。
+    /// 用于扫错卷（拍了别班/别科的卡）、照片拍坏、重复扫描留下的垃圾记录；
+    /// 已确认出分的答卷不允许删（成绩已计入统计），要删先退回。
+    /// </summary>
+    [HttpDelete("submissions/{submissionId}")]
+    public async Task<IActionResult> DeleteSubmission(string submissionId)
+    {
+        var submission = await _db.AnswerSheetSubmissions.FindAsync(submissionId);
+        if (submission == null) return NotFound(new { error = "提交记录不存在" });
+        if (submission.Status == SubmissionStatus.Confirmed)
+            return BadRequest(new { error = "该答卷已确认出分并计入统计，不能删除；如需重扫请先撤销确认" });
+
+        var results = await _db.QuestionResults.Where(r => r.SubmissionId == submissionId).ToListAsync();
+        _db.QuestionResults.RemoveRange(results);
+
+        var deletedFiles = 0;
+        foreach (var name in StoredImages(submission))
+        {
+            try
+            {
+                var full = Path.Combine(_paths.SheetDirectory, name);
+                if (System.IO.File.Exists(full)) { System.IO.File.Delete(full); deletedFiles++; }
+            }
+            catch { /* 原图删不掉不阻断记录删除：记录才是老师要清掉的东西 */ }
+        }
+
+        _db.AnswerSheetSubmissions.Remove(submission);
+        await _db.SaveChangesAsync();
+        return Ok(new { deleted = true, questionResults = results.Count, images = deletedFiles });
+    }
+
     /// <summary>试卷下的题目列表。</summary>
     [HttpGet("papers/{paperId}/questions")]
     public async Task<IActionResult> ListQuestions(string paperId)

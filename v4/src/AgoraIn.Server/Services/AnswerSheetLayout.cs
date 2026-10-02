@@ -90,6 +90,28 @@ public static class AnswerSheetLayout
     /// <summary>主观题作答框外框的渲染高度（.answer-box 边框盒，不含下间距）——与 DOM 实测一致。</summary>
     public static double SubjectiveFrameHeightMm(Question q) => SubjectiveBodyMm(q) + SubjHeadH + 2 * SubjBorderRendered;
 
+    // ── 页脚二维码（页码的唯一权威来源）────────────────────────────────
+    // 卡面右下角印着 agorain:sheet:{paperId}:p{页号} 的二维码。定位标记 + 版面环匹配
+    // 只能"猜"页码：同卷各页结构相近，环图案匹配会把第 1 页认成第 5 页，进而用错的
+    // 题目几何去采样答案。所以页码必须从二维码读。
+    // 几何与 CSS 对齐：.page 高 = 纸高 − 6；.footer{ position:absolute; bottom:16mm;
+    // height:18mm; left/right:14mm }；.qr{ width/height:16mm; border:0.3mm } 且靠右居中。
+    public const double PageBoxShorterThanPaperMm = 6.0;   // .page 高度相对纸面短 6mm
+    public const double FooterBottomMm = 16.0;             // .footer bottom:16mm
+    public const double FooterHeightMm = 18.0;
+    public const double PagePadSideMm = 14.0;              // .page / .footer 左右 padding
+    public const double QrSizeMm = 16.0, QrBorderMm = 0.3;
+
+    /// <summary>页脚二维码的外框（含 0.3mm 边框）在纸面的毫米矩形。</summary>
+    public static BubbleMark QrBox(SheetPaper paper)
+    {
+        var outer = QrSizeMm + 2 * QrBorderMm;
+        var right = paper.WidthMm - PagePadSideMm;                     // 靠右对齐到页脚右边
+        var footerTop = paper.HeightMm - PageBoxShorterThanPaperMm - FooterBottomMm - FooterHeightMm;
+        var top = footerTop + Math.Max(0, (FooterHeightMm - outer) / 2);   // align-items:center
+        return new BubbleMark(right - outer, top, outer, outer);
+    }
+
     private static double SubjectiveBodyMm(Question q) => q.Type switch
     {
         QuestionType.Blank => SubjBlankBody,

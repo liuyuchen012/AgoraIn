@@ -65,6 +65,7 @@ public static class OmrRecognizer
         double bestScore = 0.0;
         List<string> pageScores = [];
         Gray? canon = null;
+        double[]? hOfBest = null;
         var tried = 0;
         foreach (var p in candidates)
         {
@@ -80,10 +81,36 @@ public static class OmrRecognizer
                 paper = p;
                 page = pg;
                 pageScores = scores;
+                hOfBest = h;
             }
             if (bestScore >= 0.80) break;      // 已经足够确定，不必再试
         }
         if (paper == null || page == null || bestScore < PageMatchThreshold || canon == null) return null;
+
+        // ── 页码以页脚二维码为准 ──
+        // 环匹配猜错页的后果不只是页码难看：后续采样用的是"那一页"的题目几何，
+        // 报"第 5 页"就意味着答案也是按第 5 页的位置采的。读得出二维码就按它选页。
+        var (qrPageNo, qrPaperId) = hOfBest != null ? DecodePageQr(gray, hOfBest, paper) : (null, null);
+        if (qrPageNo == null && hOfBest != null && gray.W < 2400)
+        {
+            // 大纸（8K 等）降到 1800px 后二维码不足 2px/模块，解不出来。
+            // 只在第一次失败时按高分辨率重解一次，常态路径不付这份代价。
+            var hiRes = DecodeGray(imageData, maxSide: 3600);
+            if (hiRes != null) (qrPageNo, qrPaperId) = DecodePageQr(hiRes, hOfBest, paper);
+        }
+        var pageFromRing = page.PageNo;
+        if (qrPageNo is { } qn && qn >= 1 && qn <= page.TotalPages && qn != page.PageNo)
+        {
+            var (pgQr, scoreQr, scoresQr) = MatchLayout(canon, questions, options, paper, onlyPageNo: qn);
+            if (pgQr != null && scoreQr >= PageMatchThreshold)
+            {
+                page = pgQr;
+                bestScore = scoreQr;
+                pageScores = scoresQr;
+            }
+        }
+        // 版面按二维码那页匹配不上时也认二维码的页码（印刷事实优先于图案猜测）
+        if (qrPageNo is { } q2 && q2 >= 1 && q2 <= page.TotalPages) page = page with { PageNo = q2 };
 
 
         // ── 采样气泡 ──
@@ -141,11 +168,14 @@ public static class OmrRecognizer
         return new OmrLocalResult(
             paper.Name, page.PageNo, page.TotalPages, studentRef, answers, confidence,
             $"markers=4 paper={paper.Name} {paper.WidthMm:0}x{paper.HeightMm:0}mm pxPerMm={pxPerMm:0.0} " +
-            $"page={page.PageNo}/{page.TotalPages} ringScore={bestScore:0.00} " +
+            $"page={page.PageNo}/{page.TotalPages} qr={qrPageNo?.ToString() ?? "-"} ring={pageFromRing} " +
+            $"qrPaper={Short(qrPaperId) ?? "-"} ringScore={bestScore:0.00} " +
             $"all=[{string.Join(" ", pageScores.Take(6))}] " +
             $"answers={answers.Count}/{total} id={studentRef ?? "-"} " +
             $"binarize={stats} ms={sw.ElapsedMilliseconds}");
     }
+
+    private static string? Short(string? id) => string.IsNullOrEmpty(id) ? null : id[..Math.Min(8, id.Length)];
 
     /// <summary>
     /// 在归正图上匹配"哪种版式 + 第几页"：打印时的「注意事项开关 / 考号区形式」不入库，
@@ -153,7 +183,8 @@ public static class OmrRecognizer
     /// </summary>
     private static (SheetPageLayout? Page, double Score, List<string> Scores) MatchLayout(
         Gray canon, IReadOnlyList<Question> questions,
-        IReadOnlyDictionary<string, List<string>> options, SheetPaper paper)
+        IReadOnlyDictionary<string, List<string>> options, SheetPaper paper,
+        int? onlyPageNo = null)
     {
         const double white = 235.0;
         SheetPageLayout? best = null;
@@ -167,6 +198,7 @@ public static class OmrRecognizer
             var pages = AnswerSheetLayout.Compute(questions, options, variant);
             for (var i = 0; i < pages.Count; i++)
             {
+                if (onlyPageNo is { } only && pages[i].PageNo != only) continue;
                 var score = RingMatchScore(canon, pages[i], WarpPpm, white);
                 if (score < 0.4) continue;
                 scores.Add($"{(showNotes ? "N" : "-")}{(idArea == IdAreaKind.Bubble ? "B" : idArea == IdAreaKind.Handwrite ? "H" : "-")}p{i + 1}:{score:0.00}");
@@ -182,6 +214,63 @@ public static class OmrRecognizer
             }
         }
         return (best, bestScore, scores);
+    }
+
+    /// <summary>
+    /// 读页脚二维码（<c>agorain:sheet:{试卷Id}:p{页号}</c>）取回权威页码。
+    ///
+    /// 环图案匹配只能"猜"页码：同卷各页结构相近（纯主观页互为子集），第 2 页会被认成第 6 页——
+    /// 页码错，采样用的题目几何也就跟着错。二维码是印在卡上的事实，读它才是正解。
+    ///
+    /// 二维码只有 16mm，手机照片里常常不足 2px/模块，所以不读降采样后的灰度图，
+    /// 而是按单应矩阵从原图直接放大采样一个方块再解码（顺带留 2mm 静区）。
+    /// 读不出（模糊/遮挡/老版本卡）返回 (null, null)，调用方回退到环匹配的猜测。
+    /// </summary>
+    internal static (int? PageNo, string? PaperId) DecodePageQr(Gray src, double[] h, SheetPaper paper)
+    {
+        const int targetPx = 360;      // 约 20px/mm ≈ 8px/模块，ZXing 的舒适区
+        const double pad = 2.0;        // 静区：二维码四周留白，否则定位图案难找
+        var box = AnswerSheetLayout.QrBox(paper);
+        var x0 = box.Xmm - pad;
+        var y0 = box.Ymm - pad;
+        var side = box.Wmm + 2 * pad;
+
+        var px = new byte[targetPx * targetPx];
+        for (var oy = 0; oy < targetPx; oy++)
+        for (var ox = 0; ox < targetPx; ox++)
+        {
+            var mx = x0 + (ox + 0.5) * side / targetPx;
+            var my = y0 + (oy + 0.5) * side / targetPx;
+            var d = h[6] * mx + h[7] * my + 1.0;
+            if (Math.Abs(d) < 1e-9) { px[oy * targetPx + ox] = 255; continue; }
+            var sx = (h[0] * mx + h[1] * my + h[2]) / d;
+            var sy = (h[3] * mx + h[4] * my + h[5]) / d;
+            px[oy * targetPx + ox] = Bilinear(src, sx, sy);
+        }
+
+        try
+        {
+            var luminance = new ZXing.RGBLuminanceSource(px, targetPx, targetPx);   // 灰度数组
+            var bmp = new ZXing.BinaryBitmap(new ZXing.Common.HybridBinarizer(luminance));
+            var hints = new Dictionary<ZXing.DecodeHintType, object>
+            {
+                [ZXing.DecodeHintType.TRY_HARDER] = true,
+                [ZXing.DecodeHintType.POSSIBLE_FORMATS] = new List<ZXing.BarcodeFormat> { ZXing.BarcodeFormat.QR_CODE },
+            };
+            var text = new ZXing.MultiFormatReader().decode(bmp, hints)?.Text;
+            if (string.IsNullOrEmpty(text)) return (null, null);
+
+            // agorain:sheet:{paperId}:p{页号}
+            var parts = text.Split(':');
+            if (parts.Length < 4 || parts[0] != "agorain" || parts[1] != "sheet") return (null, null);
+            var pageNo = parts[3].StartsWith('p') && int.TryParse(parts[3][1..], out var n) ? n : (int?)null;
+            return (pageNo, parts[2]);
+        }
+        catch
+        {
+            // 读不出二维码不是错误：老卡、模糊、遮挡都会走到这里，交给调用方回退
+            return (null, null);
+        }
     }
 
     /// <summary>调试版：同时回传各变体得分明细。</summary>
@@ -262,6 +351,15 @@ public static class OmrRecognizer
             var (bestPage, pageScore, _) = MatchLayout(canon, questions, options, paper);
             if (bestPage == null || pageScore < 0.7) continue;
 
+            // 环匹配可能把本页认成结构相近的另一页（第 2 页 ↔ 第 6 页）——那会让"本题"落到
+            // 错误的位置上。二维码写着这是第几页，按它重新匹配。
+            var (qrPageNo, _) = DecodePageQr(gray, h, paper);
+            if (qrPageNo is { } qn && qn != bestPage.PageNo && qn >= 1 && qn <= bestPage.TotalPages)
+            {
+                var (pgQr, scoreQr, _) = MatchLayout(canon, questions, options, paper, onlyPageNo: qn);
+                if (pgQr != null && scoreQr >= 0.7) bestPage = pgQr;
+            }
+
             var frame = bestPage.Frames.FirstOrDefault(f => f.QuestionIndex == questionIndex);
             BubbleMark region;
             if (frame != null)
@@ -325,14 +423,14 @@ public static class OmrRecognizer
     }
 
     /// <summary>解码并降采样为灰度图（0=黑 255=白）。</summary>
-    internal static Gray? DecodeGray(byte[] data)
+    internal static Gray? DecodeGray(byte[] data, int maxSide = MaxSidePx)
     {
         try
         {
             using var bmp = SKBitmap.Decode(data);
             if (bmp == null || bmp.Width < 32 || bmp.Height < 32) return null;
 
-            var scale = Math.Min(1.0, (double)MaxSidePx / Math.Max(bmp.Width, bmp.Height));
+            var scale = Math.Min(1.0, (double)maxSide / Math.Max(bmp.Width, bmp.Height));
             var tw = Math.Max(1, (int)Math.Round(bmp.Width * scale));
             var th = Math.Max(1, (int)Math.Round(bmp.Height * scale));
 
