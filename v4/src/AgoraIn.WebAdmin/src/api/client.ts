@@ -2,6 +2,11 @@ import axios, { type AxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
 
 const TOKEN_KEY = 'agorain_admin_token'
+
+/** 供嵌入式批改页（手机 WebView）从 URL 注入令牌 */
+export function applyToken(token: string) {
+  localStorage.setItem(TOKEN_KEY, token)
+}
 const USER_KEY = 'agorain_admin_user'
 
 /** 底层 axios 实例：自动附带 JWT，401 自动跳登录 */
@@ -235,6 +240,19 @@ export const examApi = {
   /** 答题卡扫描原图（人工复盘对照用；走鉴权 blob，拿到后用 URL.createObjectURL 显示） */
   submissionImage: (submissionId: string, page = 1) =>
     client.get(`/exams/submissions/${submissionId}/image?page=${page}`, { responseType: 'blob', timeout: 60000 }),
+  /** 本题切图：从扫描原图自动裁出某道题的作答区域（题号=卡面题号 1 起；404 = 无法切图） */
+  questionCrop: (submissionId: string, questionNo: number) =>
+    client.get(`/exams/submissions/${submissionId}/image/crop/${questionNo}`, { responseType: 'blob', timeout: 120000 }),
+  /** 批改策略（分题/双判/仲裁） */
+  gradingPolicy: (paperId: string) => client.get<GradingPolicy>(`/exams/papers/${paperId}/grading-policy`),
+  saveGradingPolicy: (paperId: string, policy: GradingPolicy) =>
+    client.put(`/exams/papers/${paperId}/grading-policy`, policy),
+  /** 批改分配（含仲裁教师） */
+  submissionHeader: (submissionId: string) =>
+    client.get<{ submissionId: string; paperId: string; paperTitle: string; studentName?: string | null; studentRef?: string | null; status: string }>(`/exams/submissions/${submissionId}/header`),
+  gradingAssignments: (paperId: string) => client.get<GradingAssignment[]>(`/exams/papers/${paperId}/grading-assignments`),
+  saveGradingAssignments: (paperId: string, list: GradingAssignment[]) =>
+    client.put(`/exams/papers/${paperId}/grading-assignments`, list),
   /** 教师复判/改分 */
   overrideResult: (submissionId: string, questionId: string, data: { score: number; comment?: string }) =>
     client.put<unknown>(`/exams/submissions/${submissionId}/results/${questionId}`, data),
@@ -245,6 +263,7 @@ export const examApi = {
   review: (submissionId: string) =>
     client.post<{ status: string }>(`/exams/submissions/${submissionId}/review`, {}),
   confirm: (submissionId: string) => client.post<unknown>(`/exams/submissions/${submissionId}/confirm`, {}),
+  markReview: (submissionId: string) => client.post<unknown>(`/exams/submissions/${submissionId}/review`, {}),
   /** 成绩统计与导出 */
   statistics: (paperId: string) => client.get<StatisticsRow>(`/exams/papers/${paperId}/statistics`),
   exportCsvUrl: (paperId: string) => `/api/v4/exams/papers/${paperId}/export`,
@@ -323,6 +342,21 @@ function sheetQuery(params: SheetQuery = {}): string {
   } catch { /* 未登录（理论上不会走到渲染） */ }
   const s = q.toString()
   return s ? `?${s}` : ''
+}
+
+/** 批改策略 */
+export interface GradingPolicy {
+  splitEnabled: boolean
+  doubleGrading: boolean
+  arbitrationThreshold: number
+}
+
+/** 批改分配：把指定题号的一定比例答卷分给某位教师（kind: 0=批改 1=仲裁） */
+export interface GradingAssignment {
+  teacherUsername: string
+  questionNos: number[]
+  percent: number
+  kind: number
 }
 
 // ── 点名 ──
@@ -640,6 +674,11 @@ export interface ResultRow {
   confidence?: number | null
   source?: string | null
   gradedAt?: string | null
+  grader?: string | null
+  score2?: number | null
+  grader2?: string | null
+  needArbitration?: boolean
+  arbiter?: string | null
 }
 
 export interface StatisticsRow {

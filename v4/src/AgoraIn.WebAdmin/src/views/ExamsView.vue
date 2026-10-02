@@ -33,6 +33,7 @@
             <el-button link type="warning" size="small" @click="downloadSheet(row)">下载</el-button>
             <el-button link type="warning" size="small" @click="showBatchSheet(row)">批量</el-button>
             <el-button link type="info" size="small" @click="viewSubmissions(row)">扫卡记录</el-button>
+            <el-button link type="warning" size="small" @click="openAssign(row)">批改分配</el-button>
             <el-button link type="primary" size="small" @click="showStats(row)">成绩</el-button>
             <el-popconfirm title="确定删除？" @confirm="deletePaper(row.id)">
               <template #reference><el-button link type="danger" size="small">删除</el-button></template>
@@ -340,6 +341,239 @@
       </el-table>
     </el-dialog>
 
+    <!-- 批改分配（分题 / 双判 / 仲裁） -->
+    <el-dialog v-model="assignVisible" title="批改分配 — 分题 / 双判 / 仲裁" width="760px" top="5vh" destroy-on-close>
+      <el-form label-width="120px">
+        <el-form-item label="分题功能">
+          <el-switch v-model="assignPolicy.splitEnabled" />
+          <span style="font-size:11px;color:#909399;margin-left:8px">开启后，教师登录只能批改分配给自己的题与答卷</span>
+        </el-form-item>
+        <el-form-item label="双判">
+          <el-switch v-model="assignPolicy.doubleGrading" :disabled="!assignPolicy.splitEnabled" />
+          <span style="font-size:11px;color:#909399;margin-left:8px">
+            一题两位教师独立评，取平均后<b>进位到 0.5</b>（平均 1.23→1.5，0.98→1）；须先开启分题
+          </span>
+        </el-form-item>
+        <el-form-item label="仲裁阈值（分）">
+          <el-input-number v-model="assignPolicy.arbitrationThreshold" :min="0.5" :max="20" :step="0.5"
+                           :disabled="!assignPolicy.doubleGrading" />
+          <span style="font-size:11px;color:#909399;margin-left:8px">两判分差超过该值自动交由资深教师仲裁</span>
+        </el-form-item>
+      </el-form>
+
+      <el-divider content-position="left">分配明细</el-divider>
+      <el-table :data="assignList" size="small" border>
+        <el-table-column label="类型" width="90">
+          <template #default="{ row }">
+            <el-select v-model="row.kind" size="small">
+              <el-option label="批改" :value="0" />
+              <el-option label="仲裁" :value="1" :disabled="!assignPolicy.doubleGrading" />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="教师" min-width="140">
+          <template #default="{ row }">
+            <el-select v-model="row.teacherUsername" size="small" filterable placeholder="选择教师">
+              <el-option v-for="u in teacherOptions" :key="u" :label="u" :value="u" />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="题号（逗号分隔，可多个）" min-width="170">
+          <template #default="{ row }">
+            <el-input v-model="row.questionNosText" size="small" placeholder="如 1,2,3 或 5-10" />
+          </template>
+        </el-table-column>
+        <el-table-column label="答卷比例%" width="120">
+          <template #default="{ row }">
+            <el-input-number v-model="row.percent" size="small" :min="0" :max="100" :step="5"
+                             :disabled="row.kind === 1" style="width:96px" />
+          </template>
+        </el-table-column>
+        <el-table-column label="" width="60">
+          <template #default="{ $index }">
+            <el-button link type="danger" size="small" @click="assignList.splice($index, 1)">删</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+        <el-button size="small" @click="addAssignment(0)">＋批改分配</el-button>
+        <el-button size="small" :disabled="!assignPolicy.doubleGrading" @click="addAssignment(1)">＋仲裁教师</el-button>
+        <span style="font-size:11px;color:#909399">
+          批改比例合计 {{ gradingPercentSum }}%（≤100；两位教师各 50% 即互补双判同一批题）
+        </span>
+      </div>
+
+      <template #footer>
+        <el-button @click="assignVisible = false">取消</el-button>
+        <el-button type="primary" :loading="assignSaving" @click="saveAssign">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 逐题批改对话框：上=参考答案，下=本题切图，右=快捷记分 -->
+    <el-dialog v-model="resultsVisible" :title="`逐题批改 — ${currentSubmission?.studentName || currentSubmission?.studentRef || ''}`"
+               width="92%" top="3vh" destroy-on-close @closed="closeSheetImage">
+      <GradingPanel :submission-id="currentSubmission?.id || ''" :paper-id="currentSubmission?.paperId || ''"
+                    :rows="results" :saving="resultsSaving"
+                    @save="saveResultFromPanel" />
+      <template #footer>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <el-select v-model="bindStudentId" placeholder="绑定学生（考号识别结果需确认）" size="small" style="width:280px" clearable>
+            <el-option v-for="s in students" :key="s.id" :label="`${s.name}${s.studentNo ? ' (' + s.studentNo + ')' : ''}`" :value="s.id!" />
+          </el-select>
+          <div style="display:flex;gap:8px">
+            <el-button @click="bindStudent">绑定学生</el-button>
+            <el-button type="success" :loading="confirming" @click="confirmSubmission">确认出分</el-button>
+            <el-button @click="resultsVisible = false">关闭</el-button>
+          </div>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 文件导题对话框：docx/pdf/txt，题目与答案可一个文件或两个文件 -->
+    <el-dialog v-model="importVisible" title="上传试卷文件 AI 自动出题" width="480px">
+      <el-form label-width="90px">
+        <el-form-item label="试卷文件">
+          <input type="file" accept=".docx,.pdf,.txt" @change="(e:any) => importQFile = e.target.files?.[0] || null" />
+        </el-form-item>
+        <el-form-item label="答案文件">
+          <input type="file" accept=".docx,.pdf,.txt" @change="(e:any) => importAFile = e.target.files?.[0] || null" />
+          <div style="font-size:11px;color:#909399">可选：答案与题目在同一个文件时留空；分开存放时上传答案文件（含评分细则）</div>
+        </el-form-item>
+      </el-form>
+      <p style="color:#909399;font-size:12px">
+        支持 docx / pdf / txt。PDF（含数学公式的试卷）会自动把每页渲染成图片交给 AI 视觉识别，
+        公式不会乱码；docx/txt 走文本解析。解析后逐题生成（题型/选项/答案/分值/评分要点/知识点）。
+      </p>
+      <div v-if="importLog" ref="logEl" class="import-log">{{ importLog }}</div>
+      <template #footer>
+        <el-button @click="importVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!importQFile" :loading="importing" @click="doImportFile">上传并解析</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 批量答题卡对话框（按班级一人一张带考号条码） -->
+    <el-dialog v-model="batchVisible" title="按班级批量生成答题卡" width="420px">
+      <el-form label-width="80px">
+        <el-form-item label="班级">
+          <el-select v-model="batchClassId" placeholder="选择班级" style="width:100%">
+            <el-option v-for="c in classes" :key="c.id" :label="c.name" :value="c.id!" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <p style="color:#909399;font-size:12px;margin:0 0 8px">
+        生成一人一张、带学号条码的答题卡页面，打印后按人分发。<br>
+        速印机（一体机）请改用「预览答题卡」打印<b>通用答题卡</b>：全班同一版。
+      </p>
+      <template #footer>
+        <el-button @click="batchVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!batchClassId" @click="openBatchSheet">生成并打开</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 生成考号（供通用答题卡填涂） -->
+    <el-dialog v-model="examNoVisible" title="生成考号（供通用答题卡填涂）" width="620px" top="6vh">
+      <el-form label-width="110px">
+        <el-form-item label="班级">
+          <el-select v-model="examNoForm.classId" placeholder="选择班级" style="width:200px">
+            <el-option v-for="c in classes" :key="c.id" :label="c.name" :value="c.id!" />
+          </el-select>
+          <span style="font-size:11px;color:#909399;margin-left:8px">按学号/姓名排序后依次编号</span>
+        </el-form-item>
+        <el-form-item label="考号位数">
+          <el-input-number v-model="examNoForm.digits" :min="4" :max="12" />
+          <span style="font-size:11px;color:#909399;margin-left:8px">与答题卡考号区列数一致，默认 8 位</span>
+        </el-form-item>
+        <el-form-item label="前缀">
+          <el-input v-model="examNoForm.prefix" placeholder="可空，如年级/学校代码 2026" style="width:200px" />
+        </el-form-item>
+        <el-form-item label="起始序号">
+          <el-input-number v-model="examNoForm.start" :min="1" />
+        </el-form-item>
+        <el-form-item label="覆盖已有考号">
+          <el-switch v-model="examNoForm.overwrite" />
+          <span style="font-size:11px;color:#909399;margin-left:8px">
+            默认关闭：只给没有考号的学生编号，不影响已印好的答题卡
+          </span>
+        </el-form-item>
+      </el-form>
+
+      <el-alert type="warning" :closable="false" show-icon style="margin-bottom:10px">
+        <template #title>考号写入学生的「学号」字段，答题卡识别时按此匹配</template>
+        <div style="font-size:12px">生成后请打印考号表（张贴或下发），学生据此在自己的通用答题卡上填涂。</div>
+      </el-alert>
+
+      <el-table v-if="examNoResult" :data="examNoResult.rows" size="small" max-height="240" border>
+        <el-table-column type="index" label="#" width="50" />
+        <el-table-column prop="name" label="姓名" />
+        <el-table-column prop="no" label="考号" width="140" />
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag v-if="row.changed" type="success" size="small">新生成</el-tag>
+            <el-tag v-else type="info" size="small">保留原号</el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <template #footer>
+        <el-button @click="examNoVisible = false">关闭</el-button>
+        <el-button :loading="examNoSaving" @click="previewExamNumbers">预览编号</el-button>
+        <el-button type="primary" :loading="examNoSaving" :disabled="!examNoForm.classId" @click="doGenerateExamNumbers">
+          生成考号
+        </el-button>
+        <el-button type="success" :disabled="!examNoForm.classId" @click="openRoster">打印考号表</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 题库复用对话框 -->
+    <el-dialog v-model="reuseVisible" title="从题库复用题目" width="480px">
+      <el-table :data="templatePapers" size="small" max-height="320" @current-change="(r:any) => reusePaperId = r?.id" highlight-current-row>
+        <el-table-column prop="title" label="模板试卷" min-width="180" />
+        <el-table-column prop="subject" label="科目" width="90" />
+        <el-table-column prop="questionCount" label="题数" width="70" />
+      </el-table>
+      <template #footer>
+        <el-button @click="reuseVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!reusePaperId" @click="doReuse">复制题目</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 扫卡记录对话框 -->
+    <el-dialog v-model="submissionsVisible" title="扫卡记录（上传 → AI批改 → 人工复判 → 确认）" width="78%" destroy-on-close>
+      <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
+        <el-upload :show-file-list="false" accept="image/*" :before-upload="uploadSheet">
+          <el-button type="primary" size="small" :loading="uploading">📸 上传答题卡照片</el-button>
+        </el-upload>
+        <span style="color:#909399;font-size:12px">上传后自动识别考号与客观题；主观题点"AI批改"整卷批改</span>
+      </div>
+      <el-table :data="submissions" v-loading="submissionsLoading" stripe>
+        <el-table-column label="学生" width="140">
+          <template #default="{row}">
+            <span v-if="row.studentName">{{ row.studentName }}</span>
+            <span v-else style="color:#e6a23c">考号 {{ row.studentRef || '未识别' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="status" label="状态" width="100">
+          <template #default="{row}">
+            <el-tag :type="row.status===3?'success':row.status===2?'danger':row.status===1?'warning':'info'" size="small">
+              {{['未批','AI已批','待人工','已确认'][row.status]||'未知'}}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="totalScore" label="得分" width="80" />
+        <el-table-column prop="submittedAt" label="提交时间" width="170">
+          <template #default="{row}">{{formatTime(row.submittedAt)}}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="330">
+          <template #default="{row}">
+            <el-button link type="primary" size="small" @click="openResults(row)">逐题</el-button>
+            <el-button v-if="row.status<3" link type="warning" size="small" :loading="gradingId===row.id" @click="aiGradeAll(row)">AI批改</el-button>
+            <el-button v-if="row.status!==3 && row.status!==2" link type="danger" size="small" @click="markReview(row)">待人工</el-button>
+            <el-button v-if="row.status>=1" link type="success" size="small" @click="confirmGrade(row)">确认</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
+
     <!-- 逐题批改对话框 -->
     <el-dialog v-model="resultsVisible" :title="`逐题批改 — ${currentSubmission?.studentName || currentSubmission?.studentRef || ''}`"
                width="92%" top="4vh" destroy-on-close @closed="closeSheetImage">
@@ -480,7 +714,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { examApi, classApi, studentApi, type ClassRow, type StudentRow, type ExamNumberResult } from '@/api/client'
+import { examApi, classApi, studentApi, usersApi, type ClassRow, type StudentRow, type ExamNumberResult, type ResultRow } from '@/api/client'
+import GradingPanel from '@/components/GradingPanel.vue'
 
 const loading = ref(false)
 const papers = ref<any[]>([])
@@ -967,16 +1202,122 @@ async function openResults(row: any) {
   currentSubmission.value = row
   bindStudentId.value = row.studentId || ''
   resultsVisible.value = true
-  sheetZoom.value = 100
-  sheetRotate.value = 0
-  sheetPage.value = 1
-  sheetPageCount.value = Number(row.imageCount) || 1
-  void loadSheetImage(row.id, 1)
   resultsLoading.value = true
   try {
     const data = await examApi.getResults(row.id)
     results.value = (data || []).map(r => ({ ...r, editScore: r.score ?? undefined, editComment: r.comment ?? '' }))
   } catch { results.value = [] } finally { resultsLoading.value = false }
+}
+
+const resultsSaving = ref(false)
+const confirming = ref(false)
+
+// ── 批改分配（分题/双判/仲裁）──
+const assignVisible = ref(false)
+const assignSaving = ref(false)
+const assignPaperId = ref('')
+const assignPolicy = ref({ splitEnabled: false, doubleGrading: false, arbitrationThreshold: 1 })
+const assignList = ref<{ kind: number; teacherUsername: string; questionNosText: string; percent: number }[]>([])
+const teacherOptions = ref<string[]>([])
+const gradingPercentSum = computed(() =>
+  Math.round(assignList.value.filter(a => a.kind === 0).reduce((s, a) => s + (a.percent || 0), 0)))
+
+function parseQuestionNos(text: string): number[] {
+  const out = new Set<number>()
+  for (const part of text.split(/[,，;；\s]+/).filter(Boolean)) {
+    const m = part.match(/^(\d+)-(\d+)$/)
+    if (m) {
+      for (let i = Number(m[1]); i <= Number(m[2]); i++) out.add(i)
+    } else if (/^\d+$/.test(part)) {
+      out.add(Number(part))
+    }
+  }
+  return [...out].sort((a, b) => a - b)
+}
+
+async function openAssign(row: any) {
+  assignPaperId.value = row.id
+  assignVisible.value = true
+  try {
+    const [policy, list, users] = await Promise.all([
+      examApi.gradingPolicy(row.id),
+      examApi.gradingAssignments(row.id),
+      usersApi.list().catch(() => [] as any[]),
+    ])
+    assignPolicy.value = { ...policy }
+    assignList.value = ((list || []) as { kind: number; teacherUsername: string; questionNos: number[]; percent: number }[]).map(a => ({
+      kind: a.kind,
+      teacherUsername: a.teacherUsername,
+      questionNosText: a.questionNos.join(','),
+      percent: a.percent,
+    }))
+    teacherOptions.value = (users as any[])
+      .filter(u => u.status == null || u.status === 1 || u.status === undefined)
+      .map(u => u.username)
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || '加载批改配置失败')
+  }
+}
+
+function addAssignment(kind: number) {
+  assignList.value.push({ kind, teacherUsername: '', questionNosText: '', percent: kind === 0 ? 50 : 100 })
+}
+
+async function saveAssign() {
+  assignSaving.value = true
+  try {
+    await examApi.saveGradingPolicy(assignPaperId.value, { ...assignPolicy.value })
+    const list = assignList.value.map(a => ({
+      teacherUsername: a.teacherUsername,
+      questionNos: parseQuestionNos(a.questionNosText),
+      percent: a.kind === 1 ? 100 : a.percent,
+      kind: a.kind,
+    }))
+    if (list.some(a => !a.teacherUsername)) { ElMessage.error('请为每条分配选择教师'); return }
+    if (list.some(a => a.questionNos.length === 0)) { ElMessage.error('题号格式：1,2,3 或 5-10'); return }
+    await examApi.saveGradingAssignments(assignPaperId.value, list)
+    ElMessage.success('批改分配已保存')
+    assignVisible.value = false
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || '保存失败')
+  } finally { assignSaving.value = false }
+}
+
+/** 面板保存：改分留痕 + 可选跳下一题 */
+async function saveResultFromPanel(row: ResultRow & { editScore?: number; editComment?: string }, next: boolean) {
+  resultsSaving.value = true
+  try {
+    await examApi.overrideResult(currentSubmission.value.id, row.questionId,
+      { score: row.editScore ?? 0, comment: row.editComment || undefined })
+    row.score = row.editScore ?? 0
+    row.comment = row.editComment || null
+    row.source = 'Teacher'
+    ElMessage.success(`第 ${row.index + 1} 题已记 ${row.editScore} 分`)
+    if (next) {
+      const i = results.value.findIndex(r => r.questionId === row.questionId)
+      if (i >= 0 && i < results.value.length - 1) {
+        const n = results.value[i + 1]
+        n.editScore = n.score ?? undefined
+        n.editComment = n.comment ?? ''
+      }
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || '保存失败')
+  } finally { resultsSaving.value = false }
+}
+
+async function confirmSubmission() {
+  if (!currentSubmission.value) return
+  try { await ElMessageBox.confirm('确认后成绩计入统计，确认出分？', '确认出分', { type: 'warning' }) } catch { return }
+  confirming.value = true
+  try {
+    await examApi.confirm(currentSubmission.value.id)
+    ElMessage.success('已确认出分')
+    resultsVisible.value = false
+    try { submissions.value = await examApi.getSubmissions(currentPaperId.value) } catch {}
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || '确认失败')
+  } finally { confirming.value = false }
 }
 
 // ── 答题卡原图（人工复盘对照用；接口要鉴权，所以取 blob 再转 objectURL）──

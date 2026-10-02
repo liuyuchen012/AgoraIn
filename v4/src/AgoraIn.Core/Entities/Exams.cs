@@ -212,4 +212,21 @@ public sealed class QuestionResult
 
     /// <summary>最近批改时间。</summary>
     public DateTime? GradedAt { get; set; }
+
+    // ── 双判 / 仲裁（开启批改分配+双判后使用）──
+
+    /// <summary>第一判教师（用户名；单判模式下也是改分人）。</summary>
+    public string? Grader { get; set; }
+
+    /// <summary>第二判得分（双判模式：第二位教师的原始分）。</summary>
+    public double? Score2 { get; set; }
+
+    /// <summary>第二判教师（用户名）。</summary>
+    public string? Grader2 { get; set; }
+
+    /// <summary>两判分差超过阈值 → 待仲裁（第三位资深教师裁定）。</summary>
+    public bool NeedArbitration { get; set; }
+
+    /// <summary>仲裁教师（用户名；仲裁裁定的分数直接写入 Score）。</summary>
+    public string? Arbiter { get; set; }
 }

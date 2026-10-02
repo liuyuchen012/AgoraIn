@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using AgoraIn.Core.Entities;
 using AgoraIn.Server.Models;
 using SkiaSharp;
@@ -183,6 +184,36 @@ public static class OmrRecognizer
         return (best, bestScore, scores);
     }
 
+    /// <summary>调试版：同时回传各变体得分明细。</summary>
+    internal static (SheetPageLayout? Page, double Score, List<string>) MatchLayoutDebug(
+        Gray canon, IReadOnlyList<Question> questions,
+        IReadOnlyDictionary<string, List<string>> options, SheetPaper paper,
+        out List<string> details)
+    {
+        const double white = 235.0;
+        SheetPageLayout? best = null;
+        var bestScore = 0.0;
+        var bestMarks = 0;
+        var all = new List<string>();
+        foreach (var showNotes in new[] { true, false })
+        foreach (var idArea in new[] { IdAreaKind.Bubble, IdAreaKind.Handwrite, IdAreaKind.None })
+        {
+            var variant = new AnswerSheetOptions { Paper = paper, ShowNotes = showNotes, IdArea = idArea };
+            var pages = AnswerSheetLayout.Compute(questions, options, variant);
+            for (var i = 0; i < pages.Count; i++)
+            {
+                var score = RingMatchScore(canon, pages[i], WarpPpm, white);
+                if (score < 0.4) continue;
+                var marks = pages[i].Options.Count + pages[i].Frames.Count;
+                all.Add($"{(showNotes ? "N" : "-")}{(idArea == IdAreaKind.Bubble ? "B" : idArea == IdAreaKind.Handwrite ? "H" : "-")}p{i + 1}:{score:0.00}({marks})");
+                if (score > bestScore + 0.02 || (score > bestScore - 0.02 && marks > bestMarks))
+                { bestScore = Math.Max(bestScore, score); bestMarks = marks; best = pages[i]; }
+            }
+        }
+        details = all;
+        return (best, bestScore, all);
+    }
+
     /// <summary>某纸型与该四边形的长宽比误差（用于换纸型时的尝试顺序）。</summary>
     private static double Error(Quad q, SheetPaper p)
     {
@@ -191,6 +222,98 @@ public static class OmrRecognizer
         var want = p.WidthMm / p.HeightMm;
         var got = top / Math.Max(1.0, left);
         return Math.Abs(got - want);
+    }
+
+    /// <summary>
+    /// 人工复盘切图：把某道题的作答区域从照片里裁出来（自动切分只保留本题区域）。
+    /// 复用切卡流水线：定位标记 → 单应归正 → 按版面模型取该题外框（主观题 = 作答框，
+    /// 客观题 = 选项行），四周留 2mm 余量，裁剪后转 JPEG。
+    /// 识别不出定位标记（照片不全/模糊）返回 null，调用方回退显示整张原图。
+    /// </summary>
+    public static byte[]? CropQuestion(
+        byte[] imageData,
+        IReadOnlyList<Question> questions,
+        IReadOnlyDictionary<string, List<string>> options,
+        int questionIndex)
+    {
+        var gray = DecodeGray(imageData);
+        if (gray == null) return null;
+        var ink = AdaptiveBinarize(gray, out _);
+        var markers = FindMarkers(ink, gray.W, gray.H);
+        if (markers.Count < 4) return null;
+        var quad = PickCorners(markers, gray.W, gray.H);
+        if (quad == null) return null;
+
+        var (guessed, _) = IdentifyPaper(quad.Value, quad.Value.SidePx);
+        var candidates = new List<SheetPaper>();
+        if (guessed != null) candidates.Add(guessed);
+        candidates.AddRange(SheetPaper.All.Where(p => p != guessed).OrderBy(p => Error(quad.Value, p)));
+
+        var src = new[] { quad.Value.Tl, quad.Value.Tr, quad.Value.Br, quad.Value.Bl };
+        foreach (var paper in candidates.Take(3))
+        {
+            var h = SolveHomography(AnswerSheetLayout.MarkerCentersMm(paper), src);
+            if (h == null) continue;
+            var canon = Warp(gray, h, paper, WarpPpm);
+
+            // 先用与整卷识别相同的"整页匹配"认页（多纸型候选 + 版式变体 + 平分取多），
+            // 匹配可信（≥0.7）才继续；再在该页上验证"本题区域"真实存在并裁剪。
+            // 只验证本题区域不够：别的页/别的纸型的框可能与本照片上其它元素重合造成假阳性。
+            var (bestPage, pageScore, _) = MatchLayout(canon, questions, options, paper);
+            if (bestPage == null || pageScore < 0.7) continue;
+
+            var frame = bestPage.Frames.FirstOrDefault(f => f.QuestionIndex == questionIndex);
+            BubbleMark region;
+            if (frame != null)
+            {
+                region = frame.Box;
+                if (!RingPresent(canon, region, WarpPpm, search: true)) continue;
+            }
+            else
+            {
+                var row = bestPage.Options.Where(o => o.QuestionIndex == questionIndex).ToList();
+                if (row.Count == 0) continue;
+                var x0 = row.Min(o => o.Bubble.Xmm) - 9.0;    // 含左侧题号
+                var y0 = row.Min(o => o.Bubble.Ymm);
+                region = new BubbleMark(x0, y0,
+                    row.Max(o => o.Bubble.Xmm + o.Bubble.Wmm) - x0 + 1.0,
+                    row.Max(o => o.Bubble.Ymm + o.Bubble.Hmm) - y0);
+                // 客观题行没有外框：验证选项气泡外框（与页面匹配同口径）
+                if (row.Count(o => RingPresent(canon, o.Bubble, WarpPpm)) < Math.Max(1, row.Count / 2)) continue;
+            }
+
+            const double margin = 2.0;
+            var x = Math.Max(0, region.Xmm - margin);
+            var y = Math.Max(0, region.Ymm - margin);
+            var w = Math.Min(paper.WidthMm - x, region.Wmm + 2 * margin);
+            var hh = Math.Min(paper.HeightMm - y, region.Hmm + 2 * margin);
+            return EncodeCrop(canon, x, y, w, hh);
+        }
+        return null;
+    }
+
+    /// <summary>从归正图裁剪毫米矩形并编码为 JPEG。</summary>
+    private static byte[] EncodeCrop(Gray canon, double xMm, double yMm, double wMm, double hMm)
+    {
+            var px0 = (int)Math.Round(xMm * WarpPpm);
+            var py0 = (int)Math.Round(yMm * WarpPpm);
+            var pw = (int)Math.Round(wMm * WarpPpm);
+            var ph = (int)Math.Round(hMm * WarpPpm);
+            px0 = Math.Clamp(px0, 0, canon.W - 2);
+            py0 = Math.Clamp(py0, 0, canon.H - 2);
+            pw = Math.Clamp(pw, 8, canon.W - px0);
+            ph = Math.Clamp(ph, 8, canon.H - py0);
+
+            using var skBitmap = new SKBitmap(pw, ph, SKColorType.Gray8, SKAlphaType.Opaque);
+            var span = skBitmap.GetPixelSpan();
+            for (var row = 0; row < ph; row++)
+            {
+                var srcOff = (py0 + row) * canon.W + px0;
+                canon.Px.AsSpan(srcOff, pw).CopyTo(span.Slice(row * pw, pw));
+            }
+            using var skImage = SKImage.FromBitmap(skBitmap);
+            using var skData = skImage.Encode(SKEncodedImageFormat.Jpeg, 88);
+            return skData.ToArray();
     }
 
     // ── 图像基础 ──────────────────────────────────────────────────────
@@ -592,11 +715,11 @@ public static class OmrRecognizer
         var total = page.Options.Count + page.Frames.Count;
         if (total == 0) return 0;
         var present = page.Options.Count(o => RingPresent(img, o.Bubble, ppm))
-                    + page.Frames.Count(f => RingPresent(img, f, ppm, search: true));
+                    + page.Frames.Count(f => RingPresent(img, f.Box, ppm, search: true));
         return present / (double)total;
     }
 
-    private static double MeanRegion(Gray img, double x0mm, double y0mm, double x1mm, double y1mm, int ppm)
+    internal static double MeanRegion(Gray img, double x0mm, double y0mm, double x1mm, double y1mm, int ppm)
     {
         var x0 = Math.Clamp((int)Math.Round(x0mm * ppm), 0, img.W - 1);
         var x1 = Math.Clamp((int)Math.Round(x1mm * ppm), x0 + 1, img.W);

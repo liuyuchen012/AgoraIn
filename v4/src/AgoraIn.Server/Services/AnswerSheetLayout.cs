@@ -15,6 +15,9 @@ public sealed record OptionMark(int QuestionIndex, string Option, BubbleMark Bub
 /// <summary>考号某列某个数字的气泡（Column 从 0 起，Digit 为 0-9）。</summary>
 public sealed record IdMark(int Column, int Digit, BubbleMark Bubble);
 
+/// <summary>主观题作答框外框（人工复盘时按题切图用）。</summary>
+public sealed record SubjectiveFrame(int QuestionIndex, BubbleMark Box);
+
 /// <summary>单页版面几何（毫米）：气泡的精确坐标，供本地 OMR 识别按同一套坐标采样。</summary>
 public sealed record SheetPageLayout(
     SheetPaper Paper,
@@ -22,7 +25,7 @@ public sealed record SheetPageLayout(
     int TotalPages,
     IReadOnlyList<OptionMark> Options,
     IReadOnlyList<IdMark> IdDigits,
-    IReadOnlyList<BubbleMark> Frames)
+    IReadOnlyList<SubjectiveFrame> Frames)
 {
     /// <summary>页面墨迹外框（用于快速判断切卡是否合理）。</summary>
     public double PaperWidthMm => Paper.WidthMm;
@@ -227,7 +230,7 @@ public static class AnswerSheetLayout
             var (hasHeader, pageObj, pageSub) = pages[p];
             var optMarks = new List<OptionMark>();
             var idMarks = new List<IdMark>();
-            var frames = new List<BubbleMark>();
+            var frames = new List<SubjectiveFrame>();
             var y = PagePadTop;
 
             if (hasHeader)
@@ -279,10 +282,10 @@ public static class AnswerSheetLayout
                 foreach (var q in pageSub)
                 {
                     var frameH = SubjectiveFrameHeightMm(q);
-                    frames.Add(new BubbleMark(
+                    frames.Add(new SubjectiveFrame(q.Index, new BubbleMark(
                         PagePadSide + QBlockInsetX + QBodyPadX, subTop,
                         opt.ContentWidthMm - 2 * (QBlockInsetX + QBodyPadX),
-                        frameH));
+                        frameH)));
                     subTop += frameH + SubjMb;      // 框间距 = 下间距 3mm
                 }
                 y += BlockChromeMm + pageSub.Sum(SubjectiveHeightMm);

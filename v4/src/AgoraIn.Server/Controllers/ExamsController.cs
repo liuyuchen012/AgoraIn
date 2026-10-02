@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using AgoraIn.Core.Domain;
 using AgoraIn.Core.Entities;
 using AgoraIn.Core.Security;
 using AgoraIn.Server.Models;
@@ -26,15 +27,17 @@ public class ExamsController : ControllerBase
     private readonly AiSettingsService _aiSettings;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ServerPaths _paths;
+    private readonly GradingPolicyService _gradingPolicy;
 
     public ExamsController(ServerDbContext db, DeepSeekGradingService ai, AiSettingsService aiSettings,
-        IServiceScopeFactory scopeFactory, ServerPaths paths)
+        IServiceScopeFactory scopeFactory, ServerPaths paths, GradingPolicyService gradingPolicy)
     {
         _db = db;
         _ai = ai;
         _aiSettings = aiSettings;
         _scopeFactory = scopeFactory;
         _paths = paths;
+        _gradingPolicy = gradingPolicy;
     }
 
     /// <summary>试卷列表。</summary>
@@ -626,6 +629,30 @@ public class ExamsController : ControllerBase
         }));
     }
 
+    /// <summary>提交概要（嵌入式批改页的标题栏用）。</summary>
+    [HttpGet("submissions/{submissionId}/header")]
+    public async Task<IActionResult> SubmissionHeader(string submissionId)
+    {
+        var submission = await _db.AnswerSheetSubmissions.FindAsync(submissionId);
+        if (submission == null) return NotFound(new { error = "提交记录不存在" });
+        var paper = await _db.ExamPapers.FindAsync(submission.PaperId);
+        string? studentName = null;
+        if (submission.StudentId != null)
+        {
+            var stu = await _db.Students.FindAsync(submission.StudentId);
+            studentName = stu?.Name;
+        }
+        return Ok(new
+        {
+            submissionId = submission.Id,
+            paperId = submission.PaperId,
+            paperTitle = paper?.Title ?? "",
+            studentName,
+            studentRef = submission.StudentRef,
+            status = submission.Status.ToString(),
+        });
+    }
+
     /// <summary>取某次提交的扫描原图（人工复盘时对照原卷；多页答卷用 ?page=N 选页）。</summary>
     [HttpGet("submissions/{submissionId}/image")]
     public async Task<IActionResult> GetSubmissionImage(string submissionId, [FromQuery] int page = 1)
@@ -642,6 +669,40 @@ public class ExamsController : ControllerBase
 
         Response.Headers.CacheControl = "private, max-age=86400";
         return PhysicalFile(full, "image/jpeg", enableRangeProcessing: true);
+    }
+
+    /// <summary>
+    /// 人工复盘"本题切图"：把某道题的作答区域从扫描原图里裁出来（题号为卡面题号，1 起）。
+    /// 依次尝试各页扫描图，找到含该题且定位成功的页做透视归正后裁剪；
+    /// 全部失败（照片拍不全等）返回 404，前端回退显示整页原图。
+    /// </summary>
+    [HttpGet("submissions/{submissionId}/image/crop/{questionNo}")]
+    public async Task<IActionResult> CropQuestionImage(string submissionId, int questionNo)
+    {
+        var submission = await _db.AnswerSheetSubmissions.FindAsync(submissionId);
+        if (submission == null) return NotFound(new { error = "提交记录不存在" });
+        var images = StoredImages(submission);
+        if (images.Count == 0) return NotFound(new { error = "没有存原图" });
+
+        var questions = await _db.Questions
+            .Where(q => q.PaperId == submission.PaperId)
+            .OrderBy(q => q.Index)
+            .ToListAsync();
+        var optionKeys = BuildOptionKeys(questions);
+
+        foreach (var name in images)
+        {
+            var full = Path.Combine(_paths.SheetDirectory, name);
+            if (!System.IO.File.Exists(full)) continue;
+            var bytes = await System.IO.File.ReadAllBytesAsync(full);
+            var cropped = OmrRecognizer.CropQuestion(bytes, questions, optionKeys, questionNo - 1);
+            if (cropped != null)
+            {
+                Response.Headers.CacheControl = "private, max-age=86400";
+                return File(cropped, "image/jpeg");
+            }
+        }
+        return NotFound(new { error = "该题无法自动切图（照片定位失败），请对照整页原图" });
     }
 
     /// <summary>提交里「已落盘」的原图文件名（按页号升序）。只认本服务生成的 {提交Id}-p{页}.jpg 命名，
@@ -1118,7 +1179,19 @@ public class ExamsController : ControllerBase
             .Where(r => r.SubmissionId == submissionId)
             .ToDictionaryAsync(r => r.QuestionId);
 
-        return Ok(questions.Select(q =>
+        // 分题/双判：非特权教师只看到分给自己的题（批改分配 + 待仲裁的题）
+        var (role, username) = CurrentRoleAndName();
+        var isPrivileged = role is AppRoles.Admin or AppRoles.Owner;
+        var arbitrationState = results.ToDictionary(
+            r => questions.FirstOrDefault(q => q.Id == r.Key)?.Index + 1 ?? 0,
+            r => r.Value.NeedArbitration);
+        var assigned = await _gradingPolicy.AssignedQuestionNosAsync(
+            submission.PaperId, submissionId, username, isPrivileged, arbitrationState);
+        var visible = assigned == null
+            ? questions
+            : questions.Where(q => assigned.Contains(q.Index + 1)).ToList();
+
+        return Ok(visible.Select(q =>
         {
             results.TryGetValue(q.Id, out var r);
             return new
@@ -1132,11 +1205,30 @@ public class ExamsController : ControllerBase
                 confidence = r?.Confidence,
                 source = r?.Source.ToString(),
                 gradedAt = r?.GradedAt,
+                // 双判 / 仲裁
+                grader = r?.Grader,
+                score2 = r?.Score2,
+                grader2 = r?.Grader2,
+                needArbitration = r?.NeedArbitration ?? false,
+                arbiter = r?.Arbiter,
             };
         }));
     }
 
-    /// <summary>教师复判/改分（Source=Teacher，原结果进 HistoryJson 留痕）。</summary>
+    /// <summary>当前请求的角色与用户名。</summary>
+    private (string Role, string Username) CurrentRoleAndName()
+    {
+        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? "";
+        var name = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "";
+        return (role, name);
+    }
+
+    /// <summary>
+    /// 教师复判/改分（Source=Teacher，原结果进 HistoryJson 留痕）。
+    /// 开启双判时：第一次提交记一判，第二位教师提交记二判；两判齐全后
+    /// 取平均并**进位到 0.5**（GradingMath.RoundToHalfCeil：1.23→1.5，0.98→1）；
+    /// 分差超过阈值 → 标记待仲裁，分数清空等待第三位资深教师裁定。
+    /// </summary>
     [HttpPut("submissions/{submissionId}/results/{questionId}")]
     public async Task<IActionResult> OverrideResult(
         string submissionId, string questionId, [FromBody] OverrideResultRequest req)
@@ -1144,21 +1236,154 @@ public class ExamsController : ControllerBase
         var existing = await _db.QuestionResults
             .FirstOrDefaultAsync(r => r.SubmissionId == submissionId && r.QuestionId == questionId);
         if (existing == null) return NotFound();
+        var submission = await _db.AnswerSheetSubmissions.FindAsync(submissionId);
+        if (submission == null) return NotFound();
+        var question = await _db.Questions.FindAsync(questionId);
+        if (question == null) return NotFound();
+
+        var (role, username) = CurrentRoleAndName();
+        var isPrivileged = role is AppRoles.Admin or AppRoles.Owner;
+        var policy = await _gradingPolicy.LoadPolicyAsync(submission.PaperId);
 
         AppendHistory(existing, existing.Score, existing.Comment, existing.Source);
-        existing.Score = req.Score;
-        existing.Comment = req.Comment;
-        existing.Confidence = null;
-        existing.Source = GradingSource.Teacher;
-        existing.GradedAt = DateTime.Now;
+
+        if (policy.DoubleGrading)
+        {
+            var questionNo = question.Index + 1;
+
+            // 仲裁教师：该题待仲裁且本用户持有该题的仲裁分配（特权用户亦可仲裁）
+            var arbiterScope = existing.NeedArbitration
+                ? await _gradingPolicy.AssignedQuestionNosAsync(
+                    submission.PaperId, submissionId, username, isPrivileged,
+                    new Dictionary<int, bool> { [questionNo] = true })
+                : null;
+            if (existing.NeedArbitration && (isPrivileged || (arbiterScope?.Contains(questionNo) ?? false)))
+            {
+                existing.Score = Math.Clamp(req.Score, 0, question.Score);
+                existing.Comment = req.Comment ?? existing.Comment;
+                existing.NeedArbitration = false;
+                existing.Arbiter = username;
+                existing.Source = GradingSource.Teacher;
+                existing.GradedAt = DateTime.Now;
+            }
+            else
+            {
+                // 分配校验：非特权教师只能判分给自己的题
+                var assigned = await _gradingPolicy.AssignedQuestionNosAsync(
+                    submission.PaperId, submissionId, username, isPrivileged);
+                if (assigned != null && !assigned.Contains(questionNo))
+                    return StatusCode(403, new { error = $"第 {questionNo} 题不在分配给你的批改范围内" });
+
+                // 一判 / 二判：按改分人区分（同一教师重复提交覆盖自己那一判）
+                if (existing.Score == null || existing.Grader == username)
+                {
+                    existing.Score = Math.Clamp(req.Score, 0, question.Score);
+                    existing.Grader = username;
+                }
+                else if (existing.Score2 == null || existing.Grader2 == username)
+                {
+                    existing.Score2 = Math.Clamp(req.Score, 0, question.Score);
+                    existing.Grader2 = username;
+                }
+                else
+                {
+                    return BadRequest(new { error = "两位教师均已提交评分；如有异议请联系仲裁教师" });
+                }
+
+                existing.Comment = req.Comment ?? existing.Comment;
+                existing.Confidence = null;
+                existing.Source = GradingSource.Teacher;
+                existing.GradedAt = DateTime.Now;
+
+                // 两判齐全 → 合分或仲裁
+                if (existing.Score != null && existing.Score2 != null)
+                {
+                    var s1 = existing.Score.Value;
+                    var s2 = existing.Score2.Value;
+                    if (GradingMath.NeedsArbitration(s1, s2, policy.ArbitrationThreshold))
+                    {
+                        existing.NeedArbitration = true;   // 分差超阈值：清空得分等待仲裁
+                        existing.Score = null;
+                    }
+                    else
+                    {
+                        existing.Score = GradingMath.RoundToHalfCeil((s1 + s2) / 2);
+                        existing.NeedArbitration = false;
+                    }
+                }
+            }
+        }
+        else
+        {
+            existing.Score = Math.Clamp(req.Score, 0, question.Score);
+            existing.Comment = req.Comment;
+            existing.Confidence = null;
+            existing.Source = GradingSource.Teacher;
+            existing.Grader = username;
+            existing.GradedAt = DateTime.Now;
+        }
 
         // 教师介入后进入待人工队列，仍需显式"确认"才计入成绩
-        var submission = await _db.AnswerSheetSubmissions.FindAsync(submissionId);
-        if (submission != null && submission.Status != SubmissionStatus.Confirmed)
+        if (submission.Status != SubmissionStatus.Confirmed)
             submission.Status = SubmissionStatus.NeedsHuman;
 
         await _db.SaveChangesAsync();
         return Ok(existing);
+    }
+
+    // ── 批改策略与分配（分题 / 双判 / 仲裁）──
+
+    /// <summary>读取批改策略。</summary>
+    [HttpGet("papers/{paperId}/grading-policy")]
+    public async Task<IActionResult> GetGradingPolicy(string paperId)
+        => Ok(await _gradingPolicy.LoadPolicyAsync(paperId));
+
+    /// <summary>保存批改策略（开双判必须先开分题）。</summary>
+    [HttpPut("papers/{paperId}/grading-policy")]
+    public async Task<IActionResult> SetGradingPolicy(string paperId, [FromBody] GradingPolicy policy)
+    {
+        try
+        {
+            await _gradingPolicy.SavePolicyAsync(paperId, policy with
+            {
+                ArbitrationThreshold = Math.Clamp(policy.ArbitrationThreshold, 0.5, 100),
+            });
+            return Ok(new { ok = true });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>读取批改分配。</summary>
+    [HttpGet("papers/{paperId}/grading-assignments")]
+    public async Task<IActionResult> GetGradingAssignments(string paperId)
+        => Ok(await _gradingPolicy.LoadAssignmentsAsync(paperId));
+
+    /// <summary>整体替换批改分配（含仲裁教师，Kind=1）。</summary>
+    [HttpPut("papers/{paperId}/grading-assignments")]
+    public async Task<IActionResult> SetGradingAssignments(string paperId,
+        [FromBody] List<GradingAssignment> assignments)
+    {
+        try
+        {
+            if (assignments.Sum(a => a.Kind == GradingAssignment.KindGrading ? a.Percent : 0) > 100.5)
+                return BadRequest(new { error = "批改分配的百分比之和不能超过 100%" });
+            foreach (var a in assignments)
+            {
+                if (a.Percent is < 0 or > 100)
+                    return BadRequest(new { error = "百分比须在 0-100 之间" });
+                if (a.QuestionNos.Count == 0)
+                    return BadRequest(new { error = "请为每条分配指定至少一个题号" });
+            }
+            await _gradingPolicy.SaveAssignmentsAsync(paperId, assignments);
+            return Ok(new { ok = true });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
     }
 
     /// <summary>标记整份提交为待人工复判。</summary>

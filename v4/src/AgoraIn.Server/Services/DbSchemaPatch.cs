@@ -152,6 +152,28 @@ public static class DbSchemaPatch
                 $"CREATE INDEX IF NOT EXISTS \"IX_{tableName}_RegionId\" ON \"{tableName}\" (\"RegionId\")", ct);
         }
 
+        // QuestionResults：双判/仲裁列（2026-10 增补，老库逐列补齐）
+        string[] qrColumns =
+        [
+            "Grader",
+            "Score2",
+            "Grader2",
+            "Arbiter",
+        ];
+        foreach (var col in qrColumns)
+        {
+            var has = await db.Database
+                .SqlQuery<int>($"SELECT COUNT(*) AS Value FROM pragma_table_info('QuestionResults') WHERE name = {col}")
+                .SingleAsync(ct);
+            if (has == 0)
+                await db.Database.ExecuteSqlRawAsync($"ALTER TABLE \"QuestionResults\" ADD COLUMN \"{col}\" TEXT NULL", ct);
+        }
+        var qrHasArb = await db.Database
+            .SqlQuery<int>($"SELECT COUNT(*) AS Value FROM pragma_table_info('QuestionResults') WHERE name = 'NeedArbitration'")
+            .SingleAsync(ct);
+        if (qrHasArb == 0)
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"QuestionResults\" ADD COLUMN \"NeedArbitration\" INTEGER NOT NULL DEFAULT 0", ct);
+
         // Users：补 RegionId 列 + 回填 + 唯一约束从全局改到区域内
         var usersHasRegion = await db.Database
             .SqlQuery<int>($"SELECT COUNT(*) AS Value FROM pragma_table_info('Users') WHERE name = 'RegionId'")

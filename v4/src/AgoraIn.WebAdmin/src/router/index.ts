@@ -17,6 +17,13 @@ const router = createRouter({
       meta: { public: true },
     },
     {
+      // 手机 App 内嵌的逐题批改页（WebView 直载；?token= 注入登录态）
+      path: '/grading/:submissionId',
+      name: 'grading-mobile',
+      component: () => import('@/views/GradingMobileView.vue'),
+      meta: { public: true },
+    },
+    {
       path: '/',
       component: () => import('@/layouts/MainLayout.vue'),
       redirect: '/dashboard',
