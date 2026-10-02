@@ -116,11 +116,14 @@ public class ExamsController : ControllerBase
             paperWidthMm = opt.Paper.WidthMm,
             paperHeightMm = opt.Paper.HeightMm,
             pageCount = pages.Count,
+            // 注意：模型里已经包含覆盖项（它们在 .pinned 位置），所以这里要跳过被覆盖的题，
+            // 否则同一道题会出现两个条目（编辑器画出两个框、拖动targeting 也乱）
             items = pages.SelectMany(pg => pg.Options
                     .GroupBy(o => o.QuestionIndex)
                     .Select(g => new { g.Key, B = g.First().Bubble })
                     .Select(o => new { o.Key, o.B })
                     .Concat(pg.Frames.Select(f => new { Key = f.QuestionIndex, B = f.Box }))
+                    .Where(x => !placements.ContainsKey(questions.First(q => q.Index == x.Key).Id))
                     .Select(x => new
                     {
                         questionId = questions.First(q => q.Index == x.Key).Id,
