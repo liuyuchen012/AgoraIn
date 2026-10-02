@@ -17,6 +17,13 @@ const router = createRouter({
       meta: { public: true },
     },
     {
+      // 手机 App 内嵌的动态扫卡页（WebView 直载；?token= 注入登录态，?paper= 预选试卷，?app=1 表示 App 内嵌）
+      path: '/scan',
+      name: 'scan-web',
+      component: () => import('@/views/ScanWebView.vue'),
+      meta: { public: true },
+    },
+    {
       // 手机 App 内嵌的逐题批改页（WebView 直载；?token= 注入登录态）
       path: '/grading/:submissionId',
       name: 'grading-mobile',

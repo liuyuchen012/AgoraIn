@@ -10,18 +10,23 @@
     <div v-if="error" class="error">{{ error }}</div>
     <div v-else-if="!rows.length" class="error">加载中…</div>
 
-    <GradingPanel v-else
+    <GradingPanel v-else ref="panelEl"
                   :submission-id="submissionId"
                   :paper-id="header?.paperId || ''"
                   :rows="rows"
                   :saving="saving"
-                  @save="save" />
-
-    <div class="foot">
-      <el-button size="small" @click="markHuman">待人工</el-button>
-      <el-button type="primary" size="small" :loading="confirming" @click="confirm">✔ 确认出分</el-button>
-      <el-button size="small" @click="finish">完成并关闭</el-button>
-    </div>
+                  @save="save">
+      <!-- 按钮放在面板底栏（在面板元素内部）：进全屏后依然可见 —— 旧版在外部 div 里，
+           全屏时整条 foot 被隐藏，手机上就"没有确认按钮"了 -->
+      <template #actions>
+        <el-button size="small" :loading="saving" @click="panelEl?.save()">保存本题</el-button>
+        <el-button size="small" @click="panelEl?.save(true)">下一题</el-button>
+        <span style="flex:1" />
+        <el-button size="small" @click="markHuman">待人工</el-button>
+        <el-button size="small" @click="finish">完成</el-button>
+        <el-button type="primary" size="small" :loading="confirming" @click="confirm">✔ 确认出分</el-button>
+      </template>
+    </GradingPanel>
   </div>
 </template>
 
@@ -36,6 +41,7 @@ const route = useRoute()
 const router = useRouter()
 const submissionId = computed(() => String(route.params.submissionId || ''))
 
+const panelEl = ref<InstanceType<typeof GradingPanel> | null>(null)
 const header = ref<Awaited<ReturnType<typeof examApi.submissionHeader>> | null>(null)
 const rows = ref<(ResultRow & { editScore?: number; editComment?: string })[]>([])
 const error = ref('')
@@ -133,11 +139,5 @@ function finish() {
 .student { color: #4285f4; font-size: 13px; }
 .status { color: #909399; font-size: 12px; margin-left: auto; }
 .error { padding: 40px 16px; text-align: center; color: #909399; }
-.foot {
-  padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
-  border-top: 1px solid #ebeef5;
-  display: flex;
-  justify-content: flex-end;
-}
 .mobile-grading :deep(.grading-panel) { height: auto; flex: 1; min-height: 0; }
 </style>

@@ -923,10 +923,12 @@ public class ExamsController : ControllerBase
         var identified = local != null || (omrResult?.Answers.Count ?? 0) > 0;
         if (!identified)
         {
+            // recognizeDebug 带出本地识别看到的四角标记/匹配情况，便于现场排查（App 与网页都只显示 error）
             return BadRequest(new
             {
                 code = "sheet_not_recognized",
                 error = "未识别到答题卡：请拍全四个角的定位标记、避免反光与阴影后重扫。本次未录入",
+                recognizeDebug = local?.Debug ?? OmrRecognizer.Diagnose(imageData, questions, optionKeys, placements),
             });
         }
 
@@ -1343,9 +1345,14 @@ public class ExamsController : ControllerBase
         // 分题/双判：非特权教师只看到分给自己的题（批改分配 + 待仲裁的题）
         var (role, username) = CurrentRoleAndName();
         var isPrivileged = role is AppRoles.Admin or AppRoles.Owner;
-        var arbitrationState = results.ToDictionary(
-            r => questions.FirstOrDefault(q => q.Id == r.Key)?.Index + 1 ?? 0,
-            r => r.Value.NeedArbitration);
+        // 仲裁状态按「卡面题号」建。题目被删后会有孤儿结果——旧写法把它们全映射到 0，
+        // 两条孤儿就撞键 500（现场抓到）；这里显式跳过孤儿结果。
+        var arbitrationState = new Dictionary<int, bool>();
+        foreach (var r in results)
+        {
+            var q = questions.FirstOrDefault(x => x.Id == r.Key);
+            if (q != null) arbitrationState[q.Index + 1] = r.Value.NeedArbitration;
+        }
         var assigned = await _gradingPolicy.AssignedQuestionNosAsync(
             submission.PaperId, submissionId, username, isPrivileged, arbitrationState);
         var visible = assigned == null

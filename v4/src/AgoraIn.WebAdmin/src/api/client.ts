@@ -227,7 +227,7 @@ export const resourceApi = {
 
 // ── 试卷 ──
 export const examApi = {
-  list: () => client.get<unknown[]>('/exams/papers'),
+  list: <T = PaperRow>() => client.get<T[]>(`/exams/papers`),
   create: (data: unknown) => client.post<{ id: string }>('/exams/papers', data),
   update: (id: string, data: unknown) => client.put<unknown>(`/exams/papers/${id}`, data),
   remove: (id: string) => client.delete<void>(`/exams/papers/${id}`),
@@ -241,10 +241,13 @@ export const examApi = {
   /** 删除一份扫卡答卷（连带逐题结果与已存原图）；已确认出分的会被服务端拒绝 */
   deleteSubmission: (submissionId: string) =>
     client.delete<{ deleted: boolean; questionResults: number; images: number }>(`/exams/submissions/${submissionId}`),
-  uploadSubmission: (paperId: string, file: File) => {
+  uploadSubmission: (paperId: string, file: File, opts?: { submissionId?: string | null; allowMissingId?: boolean }) => {
     const fd = new FormData()
     fd.append('file', file)
-    return client.post<unknown>(`/exams/submissions?paperId=${paperId}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    const chain = opts?.submissionId ? `&submissionId=${encodeURIComponent(opts.submissionId)}` : ''
+    const allow = opts?.allowMissingId ? '&allowMissingId=true' : ''
+    return client.post<UploadResult>(`/exams/submissions?paperId=${paperId}${chain}${allow}`, fd,
+      { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 })
   },
   /** 整卷 AI 批改（主观题逐题调用大模型） */
   gradeAll: (submissionId: string) =>
@@ -749,3 +752,29 @@ export interface StatisticsRow {
 
 export { TOKEN_KEY, USER_KEY }
 export default client
+
+/** 试卷行（扫卡/导题页用：标题 + 已扫份数） */
+export interface PaperRow {
+  id: string
+  title: string
+  subject?: string | null
+  questionCount?: number
+  submissionCount?: number
+  createdAt?: string
+}
+
+/** 扫卡上传结果（与移动端 SubmissionResult 同构） */
+export interface UploadResult {
+  submissionId?: string | null
+  status?: string
+  isNew?: boolean
+  pageNo?: number
+  totalPages?: number
+  storedPages?: number
+  recognizedStudent?: string | null
+  answers?: string[]
+  confidence?: number | null
+  warning?: string | null
+  recognizeSource?: string
+  autoScored?: number
+}

@@ -79,13 +79,15 @@
                          size="small" style="width:76px;margin-top:8px" controls-position="right" />
         <el-input v-model="editComment" type="textarea" :rows="3" placeholder="评语（可选）"
                   style="margin-top:8px" />
-        <el-button type="primary" style="margin-top:10px;width:100%" :loading="saving" @click="save">
-          保存本题
-        </el-button>
-        <el-button style="width:100%;margin:8px 0 0" :disabled="index >= rows.length - 1" @click="save(true)">
-          保存并下一题
-        </el-button>
       </div>
+    </div>
+
+    <!-- 底栏：保存按钮常驻面板内（全屏也在）；嵌入方（手机批改页）可用 #actions 覆盖 -->
+    <div class="panel-foot">
+      <slot name="actions">
+        <el-button type="primary" :loading="saving" @click="save(false)">保存本题</el-button>
+        <el-button :disabled="index >= rows.length - 1" @click="save(true)">保存并下一题</el-button>
+      </slot>
     </div>
   </div>
 </template>
@@ -186,7 +188,7 @@ function revokeAll() {
   if (fullImageUrl.value) { URL.revokeObjectURL(fullImageUrl.value); fullImageUrl.value = '' }
 }
 
-function save(next: boolean) {
+function save(next = false) {
   const q = current.value
   if (!q) return
   if (editScore.value == null) { ElMessage.warning('请先给分（快捷键或输入框）'); return }
@@ -236,6 +238,9 @@ onBeforeUnmount(() => {
 function fmt(v: number | null | undefined) {
   return v == null ? '—' : (Math.round(v * 100) / 100).toString()
 }
+
+// 嵌入方（GradingMobileView）通过模板 ref 调 panel.value?.save() 触发保存
+defineExpose({ save })
 </script>
 
 <style scoped>
@@ -244,7 +249,7 @@ function fmt(v: number | null | undefined) {
   flex-direction: column;
   height: 70vh;
 }
-.grading-panel.fullscreen { height: 100vh; background: #fff; padding: 8px; }
+.grading-panel.fullscreen { width: 100vw; height: 100vh; background: #fff; padding: 8px; }
 .nav-bar {
   display: flex;
   align-items: center;
@@ -321,6 +326,38 @@ function fmt(v: number | null | undefined) {
   display: flex;
   flex-direction: column;
   align-items: stretch;
+}
+.panel-foot {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 8px 2px 0;
+  border-top: 1px solid #ebeef5;
+  margin-top: 8px;
+}
+
+/* ── 手机 / 窄屏：单列布局。旧版在这里会把 108px 的记分列挤到溢出、元素互相叠（现场反馈）── */
+@media (max-width: 820px) {
+  .grading-panel { height: auto; }
+  .nav-bar { flex-wrap: wrap; }
+  .q-dots { flex: 1; max-width: none; order: 3; }
+  .body { flex-direction: column; overflow: auto; padding-top: 6px; gap: 8px; }
+  .left { flex: none; gap: 8px; }
+  .pane.ref { max-height: 26vh; }
+  .pane.student { height: 34vh; flex: none; }
+  .right {
+    flex: none;
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .right .score-title { width: 100%; }
+  .right > :nth-child(2) { flex: 0 0 150px; }        /* 记分键窗口 */
+  .right > :nth-child(3) { width: 110px !important; margin-top: 0 !important; }  /* 分数输入 */
+  .right > :nth-child(4) { flex: 1; min-width: 140px; margin-top: 0 !important; } /* 评语 */
 }
 .score-title { font-size: 12px; color: #909399; margin-bottom: 6px; text-align: center; }
 .full-fallback { max-width: 100%; max-height: 100%; object-fit: contain; }

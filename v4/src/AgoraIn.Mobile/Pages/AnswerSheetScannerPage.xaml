@@ -1,59 +1,22 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:controls="clr-namespace:AgoraIn.Mobile.Controls"
              x:Class="AgoraIn.Mobile.Pages.AnswerSheetScannerPage"
              Title="扫描答题卡">
 
-    <Grid RowDefinitions="Auto,*,Auto" Padding="16" RowSpacing="12">
-
-        <!-- 顶部：试卷选择 -->
-        <Frame Grid.Row="0" CornerRadius="12" Padding="16" HasShadow="False" BorderColor="#E0E4E8">
-            <StackLayout Spacing="8">
-                <Label Text="选择试卷" FontSize="14" FontAttributes="Bold" TextColor="#303133" />
-                <Picker x:Name="PaperPicker" Title="请选择试卷"
-                        ItemsSource="{Binding Papers}" ItemDisplayBinding="{Binding Title}"
-                        SelectedIndexChanged="OnPaperSelected" />
-            </StackLayout>
-        </Frame>
-
-        <!-- 中间：拍照区域 -->
-        <Grid Grid.Row="1" RowDefinitions="*,Auto" RowSpacing="12">
-            <!-- 预览区 -->
-            <Frame Grid.Row="0" CornerRadius="12" Padding="0" HasShadow="False" BorderColor="#E0E4E8">
-                <Grid IsClippedToBounds="True">
-                    <Image x:Name="PreviewImage" Aspect="AspectFill" />
-                    <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center" IsVisible="{Binding ShowPlaceholder}">
-                        <Label Text="📷" FontSize="48" HorizontalOptions="Center" />
-                        <Label Text="点击下方按钮拍照或选择图片" FontSize="13" TextColor="#909399"
-                               HorizontalOptions="Center" Margin="0,8,0,0" />
-                    </VerticalStackLayout>
-                </Grid>
-            </Frame>
-
-            <!-- 操作按钮 -->
-            <Grid Grid.Row="1" ColumnDefinitions="*,*" ColumnSpacing="12">
-                <Button Grid.Column="0" Text="📷 拍照" Clicked="OnTakePhoto"
-                        BackgroundColor="#4285f4" TextColor="White" CornerRadius="8" HeightRequest="48" />
-                <Button Grid.Column="1" Text="🖼 相册" Clicked="OnPickPhoto"
-                        BackgroundColor="#34a853" TextColor="White" CornerRadius="8" HeightRequest="48" />
-            </Grid>
-        </Grid>
-
-        <!-- 底部：状态 + 上传 -->
-        <StackLayout Grid.Row="2" Spacing="8">
-            <Frame CornerRadius="8" Padding="12" HasShadow="False" BackgroundColor="#F5F7FA">
-                <StackLayout Spacing="4">
-                    <Label x:Name="StatusLabel" Text="等待扫描…" FontSize="13" TextColor="#606266" />
-                    <Label x:Name="ResultLabel" Text="" FontSize="12" TextColor="#909399" />
-                </StackLayout>
-            </Frame>
-            <Button x:Name="UploadButton" Text="上传识别" Clicked="OnUpload"
-                    BackgroundColor="#ea4335" TextColor="White" CornerRadius="8" HeightRequest="48"
-                    IsEnabled="False" />
-            <!-- 多页答题卡：扫完一份后开始下一份（不再并入上一份） -->
-            <Button x:Name="NewSheetButton" Text="📄 新的一份（下一张从第 1 页开始）" Clicked="OnNewSheet"
-                    BackgroundColor="#fbbc05" TextColor="White" CornerRadius="8" HeightRequest="44"
-                    IsVisible="False" />
-        </StackLayout>
+    <!-- 动态扫卡改为内嵌网页端 /scan：摄像头实时取流 → 必须读到卡面右下角页码二维码 →
+         同一页保持 2 秒自动上传。识别、多页归并、考号闸门都在服务端，App 只负责承载页面
+         （并给网页授予摄像头权限）。 -->
+    <Grid>
+        <controls:CameraWebView x:Name="Web" />
+        <VerticalStackLayout x:Name="LoadingBox" VerticalOptions="Center" HorizontalOptions="Center" Spacing="10">
+            <ActivityIndicator IsRunning="True" Color="#4285f4" />
+            <Label Text="正在加载动态扫卡…" FontSize="13" TextColor="#909399" HorizontalOptions="Center" />
+        </VerticalStackLayout>
+        <VerticalStackLayout x:Name="ErrorBox" IsVisible="False" VerticalOptions="Center" HorizontalOptions="Center" Spacing="12" Padding="24">
+            <Label x:Name="ErrorLabel" FontSize="14" TextColor="#f56c6c" HorizontalOptions="Center" />
+            <Button Text="重试" Clicked="OnRetry" HorizontalOptions="Center" CornerRadius="10" BackgroundColor="#4285f4" TextColor="White" />
+        </VerticalStackLayout>
     </Grid>
 </ContentPage>

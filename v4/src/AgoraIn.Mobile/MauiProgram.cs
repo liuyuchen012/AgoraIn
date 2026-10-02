@@ -20,6 +20,17 @@ public static class MauiProgram
 		// 注册服务
 		builder.Services.AddSingleton<Services.ApiClient>();
 
+		// 动态扫卡页的 WebView 要让网页用摄像头（getUserMedia）：
+		// Android 上由自定义 Handler 的 Chrome Client 授权；其余平台用系统默认。
+		builder.ConfigureMauiHandlers(handlers =>
+		{
+#if ANDROID
+			handlers.AddHandler<Controls.CameraWebView, Controls.CameraWebViewHandler>();
+#else
+			handlers.AddHandler<Controls.CameraWebView, Microsoft.Maui.Handlers.WebViewHandler>();
+#endif
+		});
+
 #if DEBUG
 		builder.Logging.AddDebug();
 #endif

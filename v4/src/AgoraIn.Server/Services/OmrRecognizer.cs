@@ -35,6 +35,53 @@ public static class OmrRecognizer
     private const double RingInkThreshold = 0.25;   // 外框存在阈值（用于判断本页布局是否匹配）
     private const double PageMatchThreshold = 0.55;
 
+    /// <summary>
+    /// 识别失败时的分期诊断（闸门 400 响应带出）：解码 / 二值化 / 定位标记 / 四角 / 版面匹配各到哪一步。
+    /// 只在识别失败的路径上被调用，不在正常路径付成本。
+    /// </summary>
+    internal static string Diagnose(
+        byte[] imageData,
+        IReadOnlyList<Question> questions,
+        IReadOnlyDictionary<string, List<string>> options,
+        IReadOnlyDictionary<string, QuestionPlacement>? placements = null)
+    {
+        var gray = DecodeGray(imageData);
+        if (gray == null) return "diag=decode_failed";
+        var ink = AdaptiveBinarize(gray, out var stats);
+        var markers = FindMarkers(ink, gray.W, gray.H);
+        if (markers.Count < 4) return $"diag=markers<{4} markers={markers.Count} {gray.W}x{gray.H} {stats}";
+        var quad = PickCorners(markers, gray.W, gray.H);
+        if (quad == null) return $"diag=quad_null markers={markers.Count} {stats}";
+
+        var (guessed, pxPerMm) = IdentifyPaper(quad.Value, quad.Value.SidePx);
+        var candidates = new List<SheetPaper>();
+        if (guessed != null) candidates.Add(guessed);
+        candidates.AddRange(SheetPaper.All.Where(p => p != guessed).OrderBy(p => Error(quad.Value, p)));
+
+        var src = new[] { quad.Value.Tl, quad.Value.Tr, quad.Value.Br, quad.Value.Bl };
+        var parts = new List<string> { $"diag=match markers={markers.Count} guess={guessed?.Name ?? "-"} ppm={pxPerMm:0.0}" };
+        var tried = 0;
+        foreach (var p in candidates)
+        {
+            if (++tried > 3) break;
+            var h = SolveHomography(AnswerSheetLayout.MarkerCentersMm(p), src);
+            if (h == null) { parts.Add($"{p.Name}:h_null"); continue; }
+            var canon = Warp(gray, h, p, WarpPpm);
+            for (var rot = 0; rot < 4; rot++)
+            {
+                var srcRot = RotateSrc(src, rot);
+                var hRot = rot == 0 ? h : SolveHomography(AnswerSheetLayout.MarkerCentersMm(p), srcRot);
+                if (hRot == null) { parts.Add($"{p.Name}:r{rot}:h_null"); continue; }
+                var c = rot == 0 ? canon : Warp(gray, hRot, p, WarpPpm);
+                var (pg, score, _) = MatchLayout(c, questions, options, p, placements: placements);
+                if (pg != null) parts.Add($"{p.Name}:r{rot}:p{pg.PageNo}={score:0.00}");
+                else parts.Add($"{p.Name}:r{rot}:none");
+                if (score >= 0.80) break;
+            }
+        }
+        return string.Join(" ", parts);
+    }
+
     public static OmrLocalResult? Recognize(
         byte[] imageData,
         IReadOnlyList<Question> questions,
