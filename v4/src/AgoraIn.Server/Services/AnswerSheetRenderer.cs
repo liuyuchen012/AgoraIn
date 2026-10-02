@@ -9,9 +9,10 @@ public sealed record SheetPaper(string Name, double WidthMm, double HeightMm)
 {
     public static readonly SheetPaper A4 = new("A4", 210, 297);
     public static readonly SheetPaper B4 = new("B4", 250, 353);
-    public static readonly SheetPaper K8 = new("8K", 260, 370);
+    // 8K/A3 答题卡是**横向**使用：一张纸 = 左右两半，各是一张 A4 样式的页，一次拍照两半同时识别
+    public static readonly SheetPaper K8 = new("8K", 370, 260);
     public static readonly SheetPaper K16 = new("16K", 185, 260);
-    public static readonly SheetPaper A3 = new("A3", 297, 420);
+    public static readonly SheetPaper A3 = new("A3", 420, 297);   // 横向 = 恰好两张 A4（420 = 2×210）
 
     public static readonly SheetPaper[] All = [A4, B4, K8, K16, A3];
 
@@ -58,8 +59,8 @@ public sealed record AnswerSheetOptions
     /// </summary>
     public int Columns => ContentWidthMm >= 200 ? 2 : 1;
 
-    /// <summary>双栏时的栏间距（mm）。</summary>
-    public const double ColumnGapMm = 8.0;
+    /// <summary>两栏之间的间距（mm）= 左右两半各自的 14mm 内边距，凑成"两张 A4 页并排"的样子。</summary>
+    public const double ColumnGapMm = 28.0;
 
     /// <summary>一个内容块的可用宽度（mm）：单栏 = 整幅页内容宽，双栏 = 单栏宽。</summary>
     public double BlockWidthMm => Columns == 1
@@ -74,6 +75,16 @@ public sealed record AnswerSheetOptions
 
     /// <summary>无底部安全余量的可排高度（分页用）。</summary>
     public double CapacityMm(int pageOrdinal) => UsableMm - 6 - (pageOrdinal == 0 ? HeaderMm : 0);
+
+    /// <summary>续栏/续页的页眉高度（"第 N / M 页"一行 + 2mm 间距）。</summary>
+    public const double SmallHeaderMm = 4.5 + 2.0;
+
+    /// <summary>
+    /// 某一"栏"的可排高度：只有第 1 张的左栏带整块页眉（标题/注意事项/信息区+考号区），
+    /// 其余栏（同张的右半、后续各张）都只有一行"第 N / M 页"页眉。
+    /// </summary>
+    public double ColumnCapacityMm(int pageOrdinal, int column)
+        => UsableMm - 6 - (pageOrdinal == 0 && column == 0 ? HeaderMm : SmallHeaderMm);
 }
 
 /// <summary>
@@ -168,12 +179,13 @@ public static class AnswerSheetRenderer
 
         while (objIdx < objective.Count || blankIdx < blanks.Count || subIdx < subjective.Count)
         {
-            var capacity = opt.CapacityMm(pages.Count);
             var cols = new List<string>();
 
             for (var c = 0; c < opt.Columns; c++)
             {
                 if (objIdx >= objective.Count && blankIdx >= blanks.Count && subIdx >= subjective.Count) break;   // 排完了就别占空栏
+                // 每栏容量：第 1 张左栏带整块页眉，其余栏只有一行"第 N / M 页"
+                var capacity = opt.ColumnCapacityMm(pages.Count, c);
                 var used = 0.0;
                 var blocks = new StringBuilder();
 
@@ -203,7 +215,8 @@ public static class AnswerSheetRenderer
                     while (blankIdx + fit < blanks.Count)
                     {
                         var rh = sz.H(blanks[blankIdx + fit].Id, BlankRowMm) + BlankRowGapMm;
-                        if (fit > 0 && acc + rh > limit) break;
+                        // 栏里已经有内容就不再硬塞（只有完全空的一栏才允许"至少放一条"，保证不死循环）
+                        if (acc + rh > limit && (fit > 0 || used > 0)) break;
                         acc += rh;
                         fit++;
                     }
@@ -226,7 +239,8 @@ public static class AnswerSheetRenderer
                     while (subIdx < subjective.Count)
                     {
                         var h = SubjectiveItemHeightMm(subjective[subIdx], sz);
-                        if (chunk.Count > 0 && chunkUsed + h > availSub) break;
+                        // 同上：栏里已有内容就不硬塞
+                        if (chunkUsed + h > availSub && (chunk.Count > 0 || used > 0)) break;
                         chunk.Add(subjective[subIdx]);
                         chunkUsed += h;
                         subIdx++;
@@ -280,24 +294,24 @@ public static class AnswerSheetRenderer
         sb.Append(CssHeader(opt, Escape(paper.Title) + " - 答题卡"));
         sb.Append("<body>\n");
 
+        var halfPages = totalPages * opt.Columns;   // "半页"数 = 页数 × 栏数（大纸一张 = 两个半页）
         for (var i = 0; i < totalPages; i++)
         {
             var pageNo = i + 1;
             sb.Append(PageOpen(opt));
-            if (i == 0)
+            if (opt.Columns == 1)
             {
-                sb.Append($"<div class=\"title\">{Escape(paper.Title)}</div>");
-                sb.Append($"<div class=\"subtitle\">科目：{Escape(paper.Subject ?? "—")}　总分：{paper.TotalScore:0.#}　第 {pageNo} / {totalPages} 页</div>");
-                if (opt.ShowNotes) sb.Append(NotesHtml);
-                sb.Append(BuildInfoArea(opt.IdArea, studentName, studentNo));
+                // 单栏（A4/16K）：页眉仍在内容之前
+                sb.Append(i == 0
+                    ? BigHeaderHtml(paper, 1, halfPages) + (opt.ShowNotes ? NotesHtml : "") + BuildInfoArea(opt.IdArea, studentName, studentNo)
+                    : SmallHeaderHtml(pageNo, totalPages));
             }
-            else
-            {
-                sb.Append($"<div class=\"subtitle\" style=\"margin-bottom:2mm\">第 {pageNo} / {totalPages} 页</div>");
-            }
-
             // 自动流内容（补出来的页没有流内容）
-            if (i < pages.Count) sb.Append(WrapColumns(pages[i], opt));
+            var cols = i < pages.Count ? pages[i] : [];
+            if (opt.Columns > 1)
+                sb.Append(WrapColumnsWithHeaders(cols, opt, paper, i, totalPages, halfPages, studentName, studentNo));
+            else
+                sb.Append(string.Concat(cols));
 
             // 拖过/缩放过的题：按覆盖坐标绝对定位在本页（.page 是 position:relative，
             // 且无边框，所以 left/top 的 0 点就是纸面左上角，与定位标记同一坐标系）
@@ -406,12 +420,42 @@ public static class AnswerSheetRenderer
 """;
     }
 
-    /// <summary>把一页各栏的内容包进 .cols/.col（双栏）。单栏模式直接拼接，输出与旧版一致。</summary>
-    private static string WrapColumns(List<string> cols, AnswerSheetOptions opt)
+    /// <summary>大纸（8K/A3 横向）标题行：一张纸 = 两张 A4 样式的页并排。</summary>
+    private static string BigHeaderHtml(ExamPaper paper, int halfNo, int totalHalves)
+        => $"<div class=\"title\">{Escape(paper.Title)}</div>"
+         + $"<div class=\"subtitle\">科目：{Escape(paper.Subject ?? "—")}　总分：{paper.TotalScore:0.#}　第 {halfNo} / {totalHalves} 页</div>";
+
+    /// <summary>续页/右半的页眉：只有一行"第 N / M 页"。</summary>
+    private static string SmallHeaderHtml(int halfNo, int totalHalves)
+        => $"<div class=\"subtitle\" style=\"margin-bottom:2mm\">第 {halfNo} / {totalHalves} 页</div>";
+
+    /// <summary>
+    /// 把一张纸的内容按栏包进 .cols/.col，并给每栏配上自己的页眉：
+    /// 第 1 张的左栏 = 标题 + 注意事项 + 信息区/考号区；其余各栏（含第 1 张的右半）= 一行"第 N / M 页"。
+    /// 页号按"半页"连续编（一张大纸 = 第 1 页 + 第 2 页），与老师"两张 A4 合在一起"的心智一致。
+    /// </summary>
+    private static string WrapColumnsWithHeaders(
+        List<string> cols, AnswerSheetOptions opt, ExamPaper paper,
+        int pageIdx, int totalPages, int totalHalves, string? studentName, string? studentNo)
     {
-        if (opt.Columns == 1 || cols.Count == 0) return string.Concat(cols);
         var sb = new StringBuilder("<div class=\"cols\">");
-        foreach (var c in cols) sb.Append("<div class=\"col\">").Append(c).Append("</div>");
+        for (var c = 0; c < cols.Count; c++)
+        {
+            var halfNo = pageIdx * opt.Columns + c + 1;
+            sb.Append("<div class=\"col\">");
+            if (pageIdx == 0 && c == 0)
+            {
+                sb.Append(BigHeaderHtml(paper, halfNo, totalHalves));
+                if (opt.ShowNotes) sb.Append(NotesHtml);
+                sb.Append(BuildInfoArea(opt.IdArea, studentName, studentNo));
+            }
+            else
+            {
+                sb.Append(SmallHeaderHtml(halfNo, totalHalves));
+            }
+            sb.Append(cols[c]);
+            sb.Append("</div>");
+        }
         sb.Append("</div>");
         return sb.ToString();
     }

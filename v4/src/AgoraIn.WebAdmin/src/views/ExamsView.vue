@@ -170,9 +170,10 @@
                   <el-option v-for="p in paperOptions" :key="p.value" :label="p.label" :value="p.value" />
                 </el-select>
                 <div style="font-size:11px;color:#909399;line-height:1.6">
-                  速印机常用 8 开（8K）；普通打印机选 A4。改动后请重新预览确认分页。<br>
-                  <b>双栏</b>：8K / A3 / B4 等大纸自动排成左右两栏（左栏排满接右栏），
-                  页数约为 A4 的一半；A4 / 16K 仍是单栏。
+                  速印机常用 8 开（8K，横向）；普通打印机选 A4。改动后请重新预览确认分页。<br>
+                  <b>8K / A3 是横向、一张纸 = 两张 A4 样式的页并排</b>：左半印标题/注意事项/信息区+考号区，
+                  右半接后续内容（各自带页码）。<b>一次拍照两半同时识别</b>，不用分两次扫。
+                  A4 / 16K 仍是竖版单页。
                 </div>
               </el-form-item>
             </el-form>
@@ -742,10 +743,10 @@ const totalScore = computed(() => questions.value.reduce((s,q)=>s+(q.score||0),0
 // 答题卡配置（真正传给渲染接口，见 sheetQuery）
 const paperOptions = [
   { label: 'A4（210×297，普通打印机）', value: 'A4' },
-  { label: '8K 8开（260×370，速印机常用）', value: '8K' },
+  { label: '8K 8开 横向（370×260，速印机常用）', value: '8K' },
   { label: 'B4（250×353）', value: 'B4' },
   { label: '16K 16开（185×260，小测验）', value: '16K' },
-  { label: 'A3（297×420）', value: 'A3' },
+  { label: 'A3 横向（420×297）', value: 'A3' },
 ]
 const sheetConfig = ref({
   paperTitle: '', subject: '', idAreaType: 'bubble',

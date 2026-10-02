@@ -72,19 +72,27 @@ public static class OmrRecognizer
         {
             tried++;
             if (tried > 3) break;
-            var h = SolveHomography(AnswerSheetLayout.MarkerCentersMm(p), src);
-            if (h == null) continue;
-            canon = Warp(gray, h, p, WarpPpm);
-            var (pg, score, scores) = MatchLayout(canon, questions, options, p, placements: placements);
-            if (score > bestScore)
+            var model = AnswerSheetLayout.MarkerCentersMm(p);
+            // 先按"照片是正的"试；分不够再看它是不是整体转了 90/180/270°（横版答题卡手机随手拍很常见）。
+            // 正的那次一旦匹配上就直接跳出，日常不付额外代价。
+            for (var rot = 0; rot < 4; rot++)
             {
-                bestScore = score;
-                paper = p;
-                page = pg;
-                pageScores = scores;
-                hOfBest = h;
+                var h = SolveHomography(model, RotateSrc(src, rot));
+                if (h == null) continue;
+                var canonRot = Warp(gray, h, p, WarpPpm);
+                var (pg, score, scores) = MatchLayout(canonRot, questions, options, p, placements: placements);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    paper = p;
+                    page = pg;
+                    pageScores = scores;
+                    hOfBest = h;
+                    canon = canonRot;
+                }
+                if (bestScore >= 0.80) break;      // 已经足够确定，不必再试
             }
-            if (bestScore >= 0.80) break;      // 已经足够确定，不必再试
+            if (bestScore >= 0.80) break;
         }
         if (paper == null || page == null || bestScore < PageMatchThreshold || canon == null) return null;
 
@@ -306,14 +314,24 @@ public static class OmrRecognizer
         return (best, bestScore, all);
     }
 
-    /// <summary>某纸型与该四边形的长宽比误差（用于换纸型时的尝试顺序）。</summary>
+    /// <summary>
+    /// 某纸型与该四边形的长宽比误差（用于换纸型时的尝试顺序）。
+    /// 横竖两个方向取较小值：手机拍横版答题卡时可能整体转了 90°，纸型判断不该因此跑偏。
+    /// </summary>
     private static double Error(Quad q, SheetPaper p)
     {
         var top = Dist(q.Tl, q.Tr);
         var left = Dist(q.Tl, q.Bl);
         var want = p.WidthMm / p.HeightMm;
         var got = top / Math.Max(1.0, left);
-        return Math.Abs(got - want);
+        return Math.Min(Math.Abs(got - want), Math.Abs(1.0 / Math.Max(1e-6, got) - want));
+    }
+
+    /// <summary>把四边形顶点按顺时针转 k 格：模拟"照片整体转了 90°×k"的假设。</summary>
+    private static (double X, double Y)[] RotateSrc((double X, double Y)[] src, int k)
+    {
+        if (k == 0) return src;
+        return [.. src.Skip(k), .. src.Take(k)];
     }
 
     /// <summary>
@@ -594,7 +612,13 @@ public static class OmrRecognizer
             if (!IsConvex(q)) continue;
             var area = QuadArea(q);
             if (area < imageArea * 0.20 || area > imageArea * 1.05) continue;
-            if (area > bestArea) { bestArea = area; best = q; }
+            // 打分 = 面积 ÷（1 + 4×长宽比误差）：只看面积容易被"几个大气泡碰巧拼成的四边形"骗到
+            // （横版答题卡随手拍时尤其明显），要求长宽比也像某一种纸张才当选。
+            var aspectErr = SheetPaper.All.Min(p2 => Error(q, p2));
+            // 四个标记应各占一个象限（纸张铺满画面时必然如此）；"几个墨团拼成的四边形"通常挤在一角
+            var quadrants = pick.Select(c => (c.Cx < imgW / 2 ? 0 : 1) + (c.Cy < imgH / 2 ? 0 : 2)).Distinct().Count();
+            var score = area / (1.0 + 4.0 * aspectErr) * (quadrants == 4 ? 1.0 : 0.35);
+            if (score > bestArea) { bestArea = score; best = q; }
         }
         return best;
     }

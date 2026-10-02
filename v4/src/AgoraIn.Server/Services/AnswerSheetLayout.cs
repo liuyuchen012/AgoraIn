@@ -248,12 +248,13 @@ public static class AnswerSheetLayout
         var subIdx = 0;
         while (objIdx < objective.Count || blankIdx < blanks.Count || subIdx < subjective.Count)
         {
-            var capacity = opt.CapacityMm(pages.Count);
             var cols = new List<(List<Question>, List<Question>, List<Question>)>();
 
             for (var c = 0; c < opt.Columns; c++)
             {
                 if (objIdx >= objective.Count && blankIdx >= blanks.Count && subIdx >= subjective.Count) break;   // 排完了不占空栏
+                // 每栏容量：第 1 张左栏带整块页眉（标题/注意事项/信息区+考号区），其余栏只有一行页眉
+                var capacity = opt.ColumnCapacityMm(pages.Count, c);
                 var used = 0.0;
                 var pageObj = new List<Question>();
                 var pageBlank = new List<Question>();
@@ -283,7 +284,8 @@ public static class AnswerSheetLayout
                     while (blankIdx + fit < blanks.Count)
                     {
                         var rh = HOf(blanks[blankIdx + fit], BlankRowMm) + BlankRowGapMm;
-                        if (fit > 0 && acc + rh > limit) break;
+                        // 栏里已经有内容就不再硬塞（只有完全空的一栏才允许"至少放一条"，保证不死循环）
+                        if (acc + rh > limit && (fit > 0 || used > 0)) break;
                         acc += rh;
                         fit++;
                     }
@@ -303,7 +305,8 @@ public static class AnswerSheetLayout
                     while (subIdx < subjective.Count)
                     {
                         var h = HOf(subjective[subIdx], SubjectiveHeightMm(subjective[subIdx]));
-                        if (pageSub.Count > 0 && subUsed + h > availSub) break;
+                        // 同上：栏里已有内容就不硬塞，避免超出页盒被 overflow:hidden 裁掉
+                        if (subUsed + h > availSub && (pageSub.Count > 0 || used > 0)) break;
                         pageSub.Add(subjective[subIdx]);
                         subUsed += h;
                         subIdx++;
@@ -346,30 +349,26 @@ public static class AnswerSheetLayout
             var idMarks = new List<IdMark>();
             var frames = new List<SubjectiveFrame>();
             var rowBoxes = new List<SubjectiveFrame>();
-            var y = PagePadTop;
+            var flowTop = PagePadTop;
 
+            // 大页眉（标题/注意事项/信息区+考号区）只在第 1 张的左栏——一张纸 = 两张 A4 样式的页并排
             if (hasHeader)
             {
-                y += TitleH + TitleMb + SubtitleH + SubtitleMb;                 // 标题 + 副标题
-                if (opt.ShowNotes) y += NotesH + NotesMb;                        // 注意事项
-                if (opt.IdArea == IdAreaKind.Bubble) idMarks.AddRange(IdBubbles(opt, y));
-                y += (opt.IdArea == IdAreaKind.Bubble ? InfoH_Bubble : InfoH_Plain) + InfoMb;  // 信息区
-            }
-            else
-            {
-                y += SubtitleH + 2.0;                                            // 页眉"第 N / M 页"（margin 2mm）
+                var hy = flowTop + TitleH + TitleMb + SubtitleH + SubtitleMb;    // 标题 + 副标题
+                if (opt.ShowNotes) hy += NotesH + NotesMb;                        // 注意事项
+                if (opt.IdArea == IdAreaKind.Bubble) idMarks.AddRange(IdBubbles(opt, hy));
             }
 
-            // 表头通栏；其下每栏各自从列区顶部开始往下排（与 .cols/.col 的 flex 起点一致）
-            var colsTop = y;
+            // 每栏各自从"本栏页眉之下"开始排（与 .col 内的流式起点一致）
+            var colsTop = flowTop;
             for (var c = 0; c < pageCols.Count; c++)
             {
                 var (pageObj, pageBlank, pageSub) = pageCols[c];
                 var colLeft = PagePadSide + c * (opt.BlockWidthMm + AnswerSheetOptions.ColumnGapMm);
                 var blockW = opt.BlockWidthMm;
-                // 每栏的纵向游标都从列区顶部重新开始：右栏不受左栏排到哪儿的影响
+                // 每栏的纵向游标都从"本栏页眉之下"重新开始：右栏不受左栏排到哪儿的影响
                 // （这条曾经写错过——复用同一个 y——右栏作答框整体上移了 84mm，靠 DOM 实测比对才发现）
-                var colY = colsTop;
+                var colY = colsTop + (hasHeader && c == 0 ? HeaderMm(opt) : AnswerSheetOptions.SmallHeaderMm);
 
                 // 客观题块
                 if (pageObj.Count > 0)
@@ -403,7 +402,7 @@ public static class AnswerSheetLayout
                             rowBoxes.Add(new SubjectiveFrame(q.Index, new BubbleMark(colX, rowY, rowW, geoRowH)));
                         }
                     }
-                    colY = colsTop + BlockChromeMm + RowsOnPage(pageObj.Count, columns) * geoRowH;
+                    colY += BlockChromeMm + RowsOnPage(pageObj.Count, columns) * geoRowH;
                 }
 
                 // 填空题块：一题一行、行高固定（与 .blank-row 的 9mm 一致）。
@@ -495,7 +494,8 @@ public static class AnswerSheetLayout
     private static IEnumerable<IdMark> IdBubbles(AnswerSheetOptions opt, double infoTop)
     {
         // 信息区右侧的考号区
-        var areaRight = PagePadSide + opt.ContentWidthMm - InfoInset;
+        // 考号区贴在本栏内容区右侧（大纸时它在左半那张 A4 上，不是整纸最右）
+        var areaRight = PagePadSide + opt.BlockWidthMm - InfoInset;
         var areaLeft = areaRight - IdAreaW;
 
         var rowLabelsW = 5.0;   // .id-rowlabel 宽度

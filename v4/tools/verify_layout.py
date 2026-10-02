@@ -118,4 +118,19 @@ for i, dp in enumerate(dom):
     print(f"    作答框最大偏差 {worst_f:.2f}mm")
 
 print("\n结果：" + ("全部一致 ✓" if bad == 0 else f"{bad} 处不一致 ✗"))
+# 越界检查：任何框/气泡都不能超出页盒（overflow:hidden 会静默裁掉，光比坐标看不出来）
+overflow = 0
+for dp in dom:
+    ph = dp["paper"][1] - 6      # .page 高度 = 纸高 − 6
+    pw = dp["paper"][0]
+    for kind, items in (("气泡", dp["opts"]), ("作答框", dp["frames"])):
+        for it in items:
+            x, y, w, h = it["r"]
+            if y + h > ph + 0.5 or x + w > pw + 0.5 or y < -0.5 or x < -0.5:
+                print(f"    ✗ 超出页盒 第{dp['page']}页 {kind} 题{it['q']}: ({x:.1f},{y:.1f}) {w:.1f}x{h:.1f}")
+                overflow += 1
+if overflow:
+    print(f"越界 {overflow} 处（会被裁切）✗")
+    bad += overflow
+
 sys.exit(0 if bad == 0 else 2)
