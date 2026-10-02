@@ -164,11 +164,7 @@ public sealed class ApiClient
         };
         AddAuth(req);
         using var res = await Http.SendAsync(req);
-        if (!res.IsSuccessStatusCode)
-        {
-            var text = await res.Content.ReadAsStringAsync();
-            throw new HttpRequestException($"{(int)res.StatusCode}: {text}");
-        }
+        if (!res.IsSuccessStatusCode) throw await FailAsync(res);
         return await res.Content.ReadFromJsonAsync<T>(JsonOpts);
     }
 
@@ -180,11 +176,7 @@ public sealed class ApiClient
         };
         AddAuth(req);
         using var res = await Http.SendAsync(req);
-        if (!res.IsSuccessStatusCode)
-        {
-            var text = await res.Content.ReadAsStringAsync();
-            throw new HttpRequestException($"{(int)res.StatusCode}: {text}");
-        }
+        if (!res.IsSuccessStatusCode) throw await FailAsync(res);
         return await res.Content.ReadFromJsonAsync<T>(JsonOpts);
     }
 
@@ -194,12 +186,28 @@ public sealed class ApiClient
         using var req = new HttpRequestMessage(HttpMethod.Post, BaseUrl + url) { Content = content };
         AddAuth(req);
         using var res = await Http.SendAsync(req);
-        if (!res.IsSuccessStatusCode)
-        {
-            var text = await res.Content.ReadAsStringAsync();
-            throw new HttpRequestException($"{(int)res.StatusCode}: {text}");
-        }
+        if (!res.IsSuccessStatusCode) throw await FailAsync(res);
         return await res.Content.ReadFromJsonAsync<T>(JsonOpts);
+    }
+
+    /// <summary>
+    /// 把失败响应转成带 code 的 <see cref="ApiException"/>：调用方据此分支
+    /// （如扫卡被退回时区分"没认出答题卡"还是"考号没涂"），并把服务端的中文
+    /// 提示原样显示给老师，而不是抛一串 "400: {"error":"…"}"。
+    /// </summary>
+    private static async Task<ApiException> FailAsync(HttpResponseMessage res)
+    {
+        var status = (int)res.StatusCode;
+        var text = await res.Content.ReadAsStringAsync();
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            var error = doc.RootElement.TryGetProperty("error", out var e) ? e.GetString() : null;
+            var code = doc.RootElement.TryGetProperty("code", out var c) ? c.GetString() : null;
+            if (!string.IsNullOrWhiteSpace(error)) return new ApiException(status, code, error!);
+        }
+        catch (JsonException) { /* 非 JSON 错误体：退回原文 */ }
+        return new ApiException(status, null, string.IsNullOrWhiteSpace(text) ? $"HTTP {status}" : text);
     }
 
     private void AddAuth(HttpRequestMessage req)
@@ -207,6 +215,15 @@ public sealed class ApiClient
         if (!string.IsNullOrEmpty(Token))
             req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Token);
     }
+}
+
+/// <summary>服务端返回的业务错误（含稳定 code，便于调用方分支处理）。</summary>
+public sealed class ApiException(int status, string? code, string message) : Exception(message)
+{
+    public int Status { get; } = status;
+
+    /// <summary>服务端错误码，如 sheet_not_recognized / student_ref_missing；旧接口可能为 null。</summary>
+    public string? Code { get; } = code;
 }
 
 // ── DTO ──

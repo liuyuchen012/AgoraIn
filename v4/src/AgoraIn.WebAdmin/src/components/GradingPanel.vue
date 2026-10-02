@@ -168,10 +168,10 @@ async function loadCrop() {
   } catch {
     cropFailed.value = true
     try {
-      const res: any = await examApi.submissionImage(props.submissionId)
+      const res: any = await examApi.submissionImageSilent(props.submissionId)
       const blob = res?.data instanceof Blob ? res.data : new Blob([res?.data ?? res], { type: 'image/jpeg' })
       fullImageUrl.value = URL.createObjectURL(blob)
-    } catch { /* 没有原图 */ }
+    } catch { /* 没有原图：显示"没有扫描原图"占位 */ }
   } finally {
     cropLoading.value = false
   }

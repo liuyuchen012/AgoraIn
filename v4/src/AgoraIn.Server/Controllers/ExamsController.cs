@@ -745,7 +745,8 @@ public class ExamsController : ControllerBase
     /// </summary>
     [HttpPost("submissions")]
     public async Task<IActionResult> UploadSubmission(
-        [FromForm] IFormFile file, [FromQuery] string paperId, [FromQuery] string? submissionId)
+        [FromForm] IFormFile file, [FromQuery] string paperId, [FromQuery] string? submissionId,
+        [FromQuery] bool allowMissingId = false)
     {
         if (file == null || file.Length == 0) return BadRequest("请上传答题卡图片");
 
@@ -780,6 +781,32 @@ public class ExamsController : ControllerBase
         else
         {
             omrResult = await _ai.RecognizeAnswerSheetAsync(imageData);
+        }
+
+        // ── 扫卡准入闸门：认不出答题卡的页当场退回，不落库 ──
+        // 以前一律建提交（还落盘原图），失败的一页会变成"考号空、答案空"的垃圾答卷混进批次，
+        // 事后只能在批改页看到切图失败，分不清是照片拍坏了还是学生真没涂。
+        // local != null 说明四个定位标记与版面都对上了；否则看视觉模型有没有读出答案。
+        var identified = local != null || (omrResult?.Answers.Count ?? 0) > 0;
+        if (!identified)
+        {
+            return BadRequest(new
+            {
+                code = "sheet_not_recognized",
+                error = "未识别到答题卡：请拍全四个角的定位标记、避免反光与阴影后重扫。本次未录入",
+            });
+        }
+
+        // 考号缺失只在"要靠考号认领归属的第 1 页"上拦截：续页带 submissionId 时归属已定，
+        // 学生忘涂考号而教师仍要收卷的，由 App 二次确认后带 allowMissingId=true 重传。
+        if (pageNo <= 1 && !allowMissingId && string.IsNullOrWhiteSpace(submissionId)
+            && string.IsNullOrWhiteSpace(omrResult?.StudentRef))
+        {
+            return BadRequest(new
+            {
+                code = "student_ref_missing",
+                error = "考号未识别/未填涂：无法归属到学生。请涂好考号后重扫，或在 App 上选择「仍然录入」并稍后手动绑定",
+            });
         }
 
         // ── 定位这份答卷该归并到哪条提交（多页答题卡的核心）──

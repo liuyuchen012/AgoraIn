@@ -1,6 +1,17 @@
 import axios, { type AxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
 
+declare module 'axios' {
+  /**
+   * silent=true：失败时不要弹全局错误提示，由调用方自己处理。
+   * 用于"失败是可预期分支"的请求——例如本题切图 404（照片拍不全时本来就切不出来，
+   * 调用方会回退显示整页原图），旧实现在这种情况下仍弹出 404 红条，看着像出了故障。
+   */
+  export interface AxiosRequestConfig {
+    silent?: boolean
+  }
+}
+
 const TOKEN_KEY = 'agorain_admin_token'
 
 /** 供嵌入式批改页（手机 WebView）从 URL 注入令牌 */
@@ -32,6 +43,8 @@ http.interceptors.response.use(
       localStorage.removeItem(USER_KEY)
       ElMessage.error('登录已过期，请重新登录')
       setTimeout(() => { window.location.href = '/login' }, 600)
+    } else if (err.config?.silent) {
+      // 调用方自己处理（如切图失败回退整页），不打扰用户
     } else if (err.response?.status === 403) {
       ElMessage.error('权限不足')
     } else {
@@ -240,9 +253,14 @@ export const examApi = {
   /** 答题卡扫描原图（人工复盘对照用；走鉴权 blob，拿到后用 URL.createObjectURL 显示） */
   submissionImage: (submissionId: string, page = 1) =>
     client.get(`/exams/submissions/${submissionId}/image?page=${page}`, { responseType: 'blob', timeout: 60000 }),
-  /** 本题切图：从扫描原图自动裁出某道题的作答区域（题号=卡面题号 1 起；404 = 无法切图） */
+  /** 本题切图：从扫描原图自动裁出某道题的作答区域（题号=卡面题号 1 起；404 = 无法切图，调用方回退整页，故静默） */
   questionCrop: (submissionId: string, questionNo: number) =>
-    client.get(`/exams/submissions/${submissionId}/image/crop/${questionNo}`, { responseType: 'blob', timeout: 120000 }),
+    client.get(`/exams/submissions/${submissionId}/image/crop/${questionNo}`,
+      { responseType: 'blob', timeout: 120000, silent: true }),
+  /** 整页原图同样静默：没存原图时回退到"没有扫描原图"占位即可 */
+  submissionImageSilent: (submissionId: string, page = 1) =>
+    client.get(`/exams/submissions/${submissionId}/image?page=${page}`,
+      { responseType: 'blob', timeout: 60000, silent: true }),
   /** 批改策略（分题/双判/仲裁） */
   gradingPolicy: (paperId: string) => client.get<GradingPolicy>(`/exams/papers/${paperId}/grading-policy`),
   saveGradingPolicy: (paperId: string, policy: GradingPolicy) =>

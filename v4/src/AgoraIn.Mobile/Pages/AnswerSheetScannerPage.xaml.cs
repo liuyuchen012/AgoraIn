@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Net.Http.Headers;
+using AgoraIn.Mobile.Services;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Graphics.Platform;
 
@@ -180,60 +181,44 @@ public partial class AnswerSheetScannerPage : ContentPage
 
         try
         {
-            using var content = new MultipartFormDataContent();
-            var imageContent = new ByteArrayContent(_imageBytes);
-            imageContent.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
-            content.Add(imageContent, "file", "answersheet.jpg");
-
-            var chain = _chainSubmissionId != null ? $"&submissionId={_chainSubmissionId}" : "";
-            var result = await _api.PostAsync<SubmissionResult>(
-                $"/api/v4/exams/submissions?paperId={_selectedPaperId}{chain}", content);
-
-            if (result != null && !string.IsNullOrEmpty(result.Warning) && result.SubmissionId == null)
+            await UploadAsync(allowMissingId: false);
+        }
+        catch (ApiException ex) when (ex.Code == "student_ref_missing")
+        {
+            // 考号没涂/没认出来：默认不录入，问一句要不要强行收（之后在电脑端手动绑定学生）
+            StatusLabel.Text = "⚠️ 考号未识别，本次未录入";
+            ResultLabel.Text = ex.Message;
+            var keep = await DisplayAlertAsync("考号未识别",
+                $"{ex.Message}\n\n仍然录入这份答卷吗？录入后需在电脑端手动绑定学生。",
+                "仍然录入", "重扫");
+            if (keep)
             {
-                // 服务端无法确定该页归属（如未扫第 1 页就先扫了第 2 页）
-                StatusLabel.Text = "⚠️ 该页没有并入任何答卷";
-                ResultLabel.Text = result.Warning;
-                _chainSubmissionId = null;
-                NewSheetButton.IsVisible = false;
-                return;
-            }
-
-            if (result != null)
-            {
-                // 更新连续扫描状态：第 1 页起链，后续页跟随；换考生时服务端自动开新份
-                if (!string.IsNullOrEmpty(result.SubmissionId))
+                StatusLabel.Text = "正在录入…";
+                try
                 {
-                    _chainSubmissionId = result.SubmissionId;
-                    _chainPage = Math.Max(1, result.PageNo);
-                    _chainTotal = Math.Max(_chainPage, result.TotalPages);
-                    NewSheetButton.IsVisible = _chainTotal > 1;
+                    await UploadAsync(allowMissingId: true);
                 }
-
-                var pageMark = _chainTotal > 1 ? $"第 {_chainPage}/{_chainTotal} 页 " : "";
-                StatusLabel.Text = result.Status switch
+                catch (ApiException retry) when (retry.Code == "student_ref_missing")
                 {
-                    "AiGraded" => $"✅ {pageMark}识别并自动判分完成",
-                    "NeedsHuman" => $"⚠️ {pageMark}已识别，待人工复核",
-                    _ => $"✅ {pageMark}识别完成",
-                };
-                var lines = new List<string>();
-                if (!string.IsNullOrEmpty(result.Warning))
-                    lines.Add($"⚠️ {result.Warning}");
-                if (!string.IsNullOrEmpty(result.RecognizedStudent))
-                    lines.Add($"识别考号：{result.RecognizedStudent}");
-                if (result.Answers is { Count: > 0 })
-                    lines.Add($"识别答案：{string.Join(", ", result.Answers)}");
-                else
-                    lines.Add("未识别到涂卡答案，请在电脑端手动批改");
-                if (result.Confidence.HasValue)
-                    lines.Add($"置信度：{result.Confidence.Value:P0}");
-                ResultLabel.Text = string.Join("\n", lines);
+                    // 不该发生（已带 allowMissingId）：兜底提示，避免静默失败
+                    StatusLabel.Text = "⚠️ 仍未录入";
+                    ResultLabel.Text = retry.Message;
+                }
             }
             else
             {
-                StatusLabel.Text = "⚠️ 识别结果为空";
+                _imageBytes = null;
+                PreviewImage.Source = null;
+                OnPropertyChanged(nameof(ShowPlaceholder));
             }
+        }
+        catch (ApiException ex)
+        {
+            // 未识别到答题卡等：服务端已明确拒绝且未录入
+            StatusLabel.Text = "❌ 未录入";
+            ResultLabel.Text = ex.Message;
+            _chainSubmissionId = null;
+            NewSheetButton.IsVisible = false;
         }
         catch (Exception ex)
         {
@@ -243,6 +228,68 @@ public partial class AnswerSheetScannerPage : ContentPage
         {
             UploadButton.IsEnabled = true;
         }
+    }
+
+    /// <summary>
+    /// 上传一页并回显结果。服务端可能在识别不出答题卡/考号时以 ApiException 退回
+    /// （此时不会落库），由调用方决定是提示重扫还是带 allowMissingId 强行录入。
+    /// </summary>
+    private async Task UploadAsync(bool allowMissingId)
+    {
+        using var content = new MultipartFormDataContent();
+        var imageContent = new ByteArrayContent(_imageBytes!);
+        imageContent.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
+        content.Add(imageContent, "file", "answersheet.jpg");
+
+        var chain = _chainSubmissionId != null ? $"&submissionId={_chainSubmissionId}" : "";
+        var allow = allowMissingId ? "&allowMissingId=true" : "";
+        var result = await _api.PostAsync<SubmissionResult>(
+            $"/api/v4/exams/submissions?paperId={_selectedPaperId}{chain}{allow}", content);
+
+        if (result != null && !string.IsNullOrEmpty(result.Warning) && result.SubmissionId == null)
+        {
+            // 服务端无法确定该页归属（如未扫第 1 页就先扫了第 2 页）
+            StatusLabel.Text = "⚠️ 该页没有并入任何答卷";
+            ResultLabel.Text = result.Warning;
+            _chainSubmissionId = null;
+            NewSheetButton.IsVisible = false;
+            return;
+        }
+
+        if (result == null)
+        {
+            StatusLabel.Text = "⚠️ 识别结果为空";
+            return;
+        }
+
+        // 更新连续扫描状态：第 1 页起链，后续页跟随；换考生时服务端自动开新份
+        if (!string.IsNullOrEmpty(result.SubmissionId))
+        {
+            _chainSubmissionId = result.SubmissionId;
+            _chainPage = Math.Max(1, result.PageNo);
+            _chainTotal = Math.Max(_chainPage, result.TotalPages);
+            NewSheetButton.IsVisible = _chainTotal > 1;
+        }
+
+        var pageMark = _chainTotal > 1 ? $"第 {_chainPage}/{_chainTotal} 页 " : "";
+        StatusLabel.Text = result.Status switch
+        {
+            "AiGraded" => $"✅ {pageMark}识别并自动判分完成",
+            "NeedsHuman" => $"⚠️ {pageMark}已识别，待人工复核",
+            _ => $"✅ {pageMark}识别完成",
+        };
+        var lines = new List<string>();
+        if (!string.IsNullOrEmpty(result.Warning))
+            lines.Add($"⚠️ {result.Warning}");
+        if (!string.IsNullOrEmpty(result.RecognizedStudent))
+            lines.Add($"识别考号：{result.RecognizedStudent}");
+        if (result.Answers is { Count: > 0 })
+            lines.Add($"识别答案：{string.Join(", ", result.Answers)}");
+        else
+            lines.Add("未识别到涂卡答案，请在电脑端手动批改");
+        if (result.Confidence.HasValue)
+            lines.Add($"置信度：{result.Confidence.Value:P0}");
+        ResultLabel.Text = string.Join("\n", lines);
     }
 
     private void OnNewSheet(object? sender, EventArgs e)
