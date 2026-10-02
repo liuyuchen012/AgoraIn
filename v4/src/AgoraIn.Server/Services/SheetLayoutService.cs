@@ -4,19 +4,6 @@ using Microsoft.EntityFrameworkCore;
 namespace AgoraIn.Server.Services;
 
 /// <summary>
-/// 可视化编辑器里拖动/缩放后的题目位置覆盖（mm，相对纸面左上角）。
-/// 有覆盖的题按这份坐标**绝对定位**，其余题仍按自动流排版——老师的调整不该被自动分页冲掉。
-/// 按题目 Id（稳定）而不是题号索引：重新编号后覆盖不会串到别的题上。
-/// </summary>
-public sealed record QuestionPlacement(
-    string QuestionId,
-    int PageNo,
-    double Xmm,
-    double Ymm,
-    double Wmm,
-    double Hmm);
-
-/// <summary>
 /// 答题卡版面覆盖的存取。存 AppSettings（region 隔离自动生效），不动表结构：
 ///   sheet.layout.{paperId} = QuestionPlacement[]
 /// 渲染、版面模型、识别、切图四处都读这一份，拖完照样扫得出来。
@@ -42,7 +29,7 @@ public sealed class SheetLayoutService(ServerDbContext db)
     public async Task SaveAsync(string paperId, IEnumerable<QuestionPlacement> items, CancellationToken ct = default)
     {
         var cleaned = items
-            .Where(i => !string.IsNullOrWhiteSpace(i.QuestionId) && i.PageNo >= 1)
+            .Where(i => !string.IsNullOrWhiteSpace(i.QuestionId) && (i.SizeOnly || i.PageNo >= 1))
             .GroupBy(i => i.QuestionId)
             .Select(g => g.Last())
             .Select(i => i with

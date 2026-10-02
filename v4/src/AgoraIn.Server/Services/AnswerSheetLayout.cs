@@ -3,6 +3,25 @@ using AgoraIn.Core.Entities;
 namespace AgoraIn.Server.Services;
 
 /// <summary>一个可填涂标记（气泡）在纸面上的位置，单位毫米，原点 = 纸张左上角。</summary>
+/// <summary>
+/// 可视化编辑器里对一道题的版面覆盖（mm，相对纸面左上角）。两种语义：
+/// <list type="bullet">
+/// <item><b>拖动（SizeOnly=false）</b>：按这份坐标**绝对定位**到指定页，不参与自动流——
+/// 老师把它挪到哪儿就印在哪儿。</item>
+/// <item><b>缩放（SizeOnly=true）</b>：只改宽高，题仍留在自动流里，下方题目跟着让位/回收——
+/// 这正是"放大某题，下面自动向下移动"要的行为（分页也跟着重排）。此时 PageNo/Xmm/Ymm 忽略。</item>
+/// </list>
+/// 按题目 Id（稳定）而不是题号索引：重新编号后覆盖不会串到别的题上。
+/// </summary>
+public sealed record QuestionPlacement(
+    string QuestionId,
+    int PageNo,
+    double Xmm,
+    double Ymm,
+    double Wmm,
+    double Hmm,
+    bool SizeOnly = false);
+
 public sealed record BubbleMark(double Xmm, double Ymm, double Wmm, double Hmm)
 {
     public double CenterX => Xmm + Wmm / 2;
@@ -19,13 +38,16 @@ public sealed record IdMark(int Column, int Digit, BubbleMark Bubble);
 public sealed record SubjectiveFrame(int QuestionIndex, BubbleMark Box);
 
 /// <summary>单页版面几何（毫米）：气泡的精确坐标，供本地 OMR 识别按同一套坐标采样。</summary>
+/// <param name="Rows">客观题"题号 + 气泡"整行的外框：编辑器要拿它画可拖拽的框、也要反映行高。
+/// 不参与整页指纹——行内没有四边框，RingPresent 会判为"不存在"，混进去会把匹配分拉低。</param>
 public sealed record SheetPageLayout(
     SheetPaper Paper,
     int PageNo,
     int TotalPages,
     IReadOnlyList<OptionMark> Options,
     IReadOnlyList<IdMark> IdDigits,
-    IReadOnlyList<SubjectiveFrame> Frames)
+    IReadOnlyList<SubjectiveFrame> Frames,
+    IReadOnlyList<SubjectiveFrame>? Rows = null)
 {
     /// <summary>页面墨迹外框（用于快速判断切卡是否合理）。</summary>
     public double PaperWidthMm => Paper.WidthMm;
@@ -194,13 +216,24 @@ public static class AnswerSheetLayout
         IReadOnlyDictionary<string, QuestionPlacement>? placements = null)
     {
         var opt = sheetOptions ?? AnswerSheetOptions.Default;
-        // 可视化编辑器拖过的题从自动流里摘出去，稍后按覆盖坐标绝对定位；其余题照常流动
+        // 覆盖分两种语义：
+        //   · 拖动（SizeOnly=false）——从自动流里摘出去，稍后按覆盖坐标绝对定位；
+        //   · 缩放（SizeOnly=true）——留在自动流里，只改宽高，下方题目跟着让位/回收。
         var pinned = placements is { Count: > 0 }
-            ? questions.Where(q => placements.ContainsKey(q.Id)).ToList()
+            ? questions.Where(q => placements.TryGetValue(q.Id, out var pl) && !pl.SizeOnly).ToList()
             : [];
         var flowQuestions = pinned.Count > 0
-            ? questions.Where(q => !placements!.ContainsKey(q.Id)).ToList()
+            ? questions.Where(q => !pinned.Contains(q)).ToList()
             : questions.ToList();
+
+        var sizes = placements is { Count: > 0 }
+            ? placements.Where(kv => kv.Value.SizeOnly).ToDictionary(kv => kv.Key, kv => kv.Value)
+            : [];
+        // 尺寸覆盖查询：没覆盖就用默认值
+        double HOf(Question q, double fallback)
+            => sizes.TryGetValue(q.Id, out var pl) ? Math.Max(6, pl.Hmm) : fallback;
+        double WOf(Question q, double fallback)
+            => sizes.TryGetValue(q.Id, out var pl) ? Math.Min(fallback, Math.Max(20, pl.Wmm)) : fallback;
 
         var objective = flowQuestions.Where(q => IsObjective(q.Type)).ToList();
         var blanks = flowQuestions.Where(q => IsBlank(q.Type)).ToList();
@@ -228,26 +261,38 @@ public static class AnswerSheetLayout
 
                 if (objIdx < objective.Count)
                 {
-                    var rows = (int)Math.Floor((capacity - used - BlockChromeMm) / ObjRowH);
+                    // 客观题是统一网格：块内任一行被缩放时，整块按该行高排（行高一致才像答题卡）
+                    var objRowH = ObjRowH;
+                    foreach (var q in objective.Skip(objIdx)) objRowH = Math.Max(objRowH, HOf(q, ObjRowH));
+                    var rows = (int)Math.Floor((capacity - used - BlockChromeMm) / objRowH);
                     var take = Math.Min(objective.Count - objIdx, Math.Max(0, rows) * columns);
                     if (take > 0)
                     {
                         pageObj = objective.Skip(objIdx).Take(take).ToList();
                         objIdx += take;
-                        used += BlockChromeMm + RowsOnPage(take, columns) * ObjRowH;
+                        used += BlockChromeMm + RowsOnPage(take, columns) * objRowH;
                     }
                 }
 
                 if (objIdx >= objective.Count && blankIdx < blanks.Count)
                 {
-                    var rowH = BlankRowMm + BlankRowGapMm;
-                    var rows = (int)Math.Floor((capacity - used - BlockChromeMm + BlankRowGapMm) / rowH);
-                    var take = Math.Min(blanks.Count - blankIdx, Math.Max(0, rows));
+                    // 逐行累计：每行可能被单独拉高/压低，装不下就留给下一栏
+                    var fit = 0;
+                    var acc = 0.0;
+                    var limit = capacity - used - BlockChromeMm + BlankRowGapMm;
+                    while (blankIdx + fit < blanks.Count)
+                    {
+                        var rh = HOf(blanks[blankIdx + fit], BlankRowMm) + BlankRowGapMm;
+                        if (fit > 0 && acc + rh > limit) break;
+                        acc += rh;
+                        fit++;
+                    }
+                    var take = fit;
                     if (take > 0)
                     {
                         pageBlank = blanks.Skip(blankIdx).Take(take).ToList();
                         blankIdx += take;
-                        used += BlockChromeMm + take * rowH;   // 最后一行的 margin 也在块内
+                        used += BlockChromeMm + pageBlank.Sum(q => HOf(q, BlankRowMm) + BlankRowGapMm);
                     }
                 }
 
@@ -257,7 +302,7 @@ public static class AnswerSheetLayout
                     var subUsed = 0.0;
                     while (subIdx < subjective.Count)
                     {
-                        var h = SubjectiveHeightMm(subjective[subIdx]);
+                        var h = HOf(subjective[subIdx], SubjectiveHeightMm(subjective[subIdx]));
                         if (pageSub.Count > 0 && subUsed + h > availSub) break;
                         pageSub.Add(subjective[subIdx]);
                         subUsed += h;
@@ -300,6 +345,7 @@ public static class AnswerSheetLayout
             var optMarks = new List<OptionMark>();
             var idMarks = new List<IdMark>();
             var frames = new List<SubjectiveFrame>();
+            var rowBoxes = new List<SubjectiveFrame>();
             var y = PagePadTop;
 
             if (hasHeader)
@@ -332,6 +378,9 @@ public static class AnswerSheetLayout
                     var colW = (blockW - 2 * QBlockInsetX - 2 * QBodyPadX
                                 - (columns - 1) * ObjColGap) / columns;
                     var perCol = RowsOnPage(pageObj.Count, columns);
+                    // 行高统一（块内任一题被缩放时整块跟随），下方内容按它让位
+                    var geoRowH = ObjRowH;
+                    foreach (var q in pageObj) geoRowH = Math.Max(geoRowH, HOf(q, ObjRowH));
                     for (var bc = 0; bc < columns; bc++)
                     {
                         var colX = colLeft + QBlockInsetX + QBodyPadX + bc * (colW + ObjColGap);
@@ -340,18 +389,21 @@ public static class AnswerSheetLayout
                             var idx = bc * perCol + r;
                             if (idx >= pageObj.Count) break;
                             var q = pageObj[idx];
-                            var rowY = bodyTop + r * ObjRowH;
+                            var rowY = bodyTop + r * geoRowH;
                             var keys = OptionsOf(q, options);
                             for (var k = 0; k < keys.Count; k++)
                             {
                                 var optX = colX + ObjNoW + ObjNoGap + k * (ObjOptW + ObjOptMr);
-                                var optY = rowY + (ObjRowH - ObjOptH) / 2;
+                                var optY = rowY + (geoRowH - ObjOptH) / 2;
                                 optMarks.Add(new OptionMark(q.Index, keys[k],
                                     new BubbleMark(optX, optY, ObjOptW, ObjOptH)));
                             }
+                            // 整行外框：题号左缘 → 最后一个气泡右缘，高度 = 行高
+                            var rowW = ObjNoW + ObjNoGap + keys.Count * (ObjOptW + ObjOptMr) - ObjOptMr;
+                            rowBoxes.Add(new SubjectiveFrame(q.Index, new BubbleMark(colX, rowY, rowW, geoRowH)));
                         }
                     }
-                    colY = colsTop + BlockChromeMm + RowsOnPage(pageObj.Count, columns) * ObjRowH;
+                    colY = colsTop + BlockChromeMm + RowsOnPage(pageObj.Count, columns) * geoRowH;
                 }
 
                 // 填空题块：一题一行、行高固定（与 .blank-row 的 9mm 一致）。
@@ -359,15 +411,15 @@ public static class AnswerSheetLayout
                 if (pageBlank.Count > 0)
                 {
                     var rowTop = colY + QBlockTopInset;
-                    for (var i = 0; i < pageBlank.Count; i++)
+                    var fullW = blockW - 2 * (QBlockInsetX + QBodyPadX);
+                    foreach (var q in pageBlank)
                     {
-                        frames.Add(new SubjectiveFrame(pageBlank[i].Index, new BubbleMark(
-                            colLeft + QBlockInsetX + QBodyPadX, rowTop,
-                            blockW - 2 * (QBlockInsetX + QBodyPadX),
-                            BlankRowMm)));
-                        rowTop += BlankRowMm + BlankRowGapMm;
+                        var rowH = HOf(q, BlankRowMm);
+                        frames.Add(new SubjectiveFrame(q.Index, new BubbleMark(
+                            colLeft + QBlockInsetX + QBodyPadX, rowTop, WOf(q, fullW), rowH)));
+                        rowTop += rowH + BlankRowGapMm;
                     }
-                    colY += BlockChromeMm + pageBlank.Count * (BlankRowMm + BlankRowGapMm);
+                    colY += BlockChromeMm + pageBlank.Sum(q => HOf(q, BlankRowMm) + BlankRowGapMm);
                 }
 
                 // 主观题块：作答框外框也是"这一页"的指纹（纯主观页没有选项气泡，
@@ -375,19 +427,18 @@ public static class AnswerSheetLayout
                 if (pageSub.Count > 0)
                 {
                     var subTop = colY + QBlockTopInset;   // 作答框顶 = 块顶 + 边框/内边距/块标题（实测 7.49mm，与客观题首行同基准）
+                    var subFullW = blockW - 2 * (QBlockInsetX + QBodyPadX);
                     foreach (var q in pageSub)
                     {
-                        var frameH = SubjectiveFrameHeightMm(q);
+                        var frameH = HOf(q, SubjectiveFrameHeightMm(q));
                         frames.Add(new SubjectiveFrame(q.Index, new BubbleMark(
-                            colLeft + QBlockInsetX + QBodyPadX, subTop,
-                            blockW - 2 * (QBlockInsetX + QBodyPadX),
-                            frameH)));
+                            colLeft + QBlockInsetX + QBodyPadX, subTop, WOf(q, subFullW), frameH)));
                         subTop += frameH + SubjMb;      // 框间距 = 下间距 3mm
                     }
                 }
             }
 
-            result.Add(new SheetPageLayout(opt.Paper, p + 1, pages.Count, optMarks, idMarks, frames));
+            result.Add(new SheetPageLayout(opt.Paper, p + 1, pages.Count, optMarks, idMarks, frames, rowBoxes));
         }
 
         // ── 覆盖项：拖动/缩放过的题按绝对坐标落到它的页上 ──
@@ -396,7 +447,7 @@ public static class AnswerSheetLayout
             // 覆盖项可能被拖到自动流没有的页（比如把一道题单独放到第 3 页）——补出这些页
             var maxPage = pinned.Max(q => Math.Max(1, placements![q.Id].PageNo));
             while (result.Count < maxPage)
-                result.Add(new SheetPageLayout(opt.Paper, result.Count + 1, maxPage, [], [], []));
+                result.Add(new SheetPageLayout(opt.Paper, result.Count + 1, maxPage, [], [], [], []));
 
             var extraOptions = new Dictionary<int, List<OptionMark>>();
             var extraFrames = new Dictionary<int, List<SubjectiveFrame>>();

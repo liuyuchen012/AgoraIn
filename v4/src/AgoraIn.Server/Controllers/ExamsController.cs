@@ -107,6 +107,8 @@ public class ExamsController : ControllerBase
         var opt = ParseSheetOptions(paper, idArea, notes);
         var placements = (await _sheetLayout.LoadAsync(paperId)).ToDictionary(p => p.QuestionId);
         var pages = AnswerSheetLayout.Compute(questions, optionKeys, opt, placements);
+        // 只有"缩放"（SizeOnly）的题留在自动流里，它们的位置由重排决定；"拖动"的题才是绝对定位
+        var sized = placements.Where(kv => kv.Value.SizeOnly).Select(kv => kv.Key).ToHashSet();
 
         var byQid = questions.ToDictionary(q => q.Id);
         return Ok(new
@@ -118,10 +120,8 @@ public class ExamsController : ControllerBase
             pageCount = pages.Count,
             // 注意：模型里已经包含覆盖项（它们在 .pinned 位置），所以这里要跳过被覆盖的题，
             // 否则同一道题会出现两个条目（编辑器画出两个框、拖动targeting 也乱）
-            items = pages.SelectMany(pg => pg.Options
-                    .GroupBy(o => o.QuestionIndex)
-                    .Select(g => new { g.Key, B = g.First().Bubble })
-                    .Select(o => new { o.Key, o.B })
+            items = pages.SelectMany(pg => (pg.Rows ?? [])
+                    .Select(r => new { Key = r.QuestionIndex, B = r.Box })
                     .Concat(pg.Frames.Select(f => new { Key = f.QuestionIndex, B = f.Box }))
                     .Where(x => !placements.ContainsKey(questions.First(q => q.Index == x.Key).Id))
                     .Select(x => new
@@ -137,6 +137,7 @@ public class ExamsController : ControllerBase
                         w = x.B.Wmm,
                         h = x.B.Hmm,
                         pinned = false,
+                        sizeOnly = sized.Contains(questions.First(q => q.Index == x.Key).Id),
                     }))
                 .Concat(placements.Values.Where(pl => byQid.ContainsKey(pl.QuestionId)).Select(pl => new
                 {
@@ -149,7 +150,8 @@ public class ExamsController : ControllerBase
                     y = pl.Ymm,
                     w = pl.Wmm,
                     h = pl.Hmm,
-                    pinned = true,
+                    pinned = !pl.SizeOnly,
+                    sizeOnly = pl.SizeOnly,
                 })),
         });
     }

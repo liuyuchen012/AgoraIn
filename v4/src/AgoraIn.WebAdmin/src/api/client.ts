@@ -358,7 +358,10 @@ export interface SheetPlacement {
   y: number
   w: number
   h: number
+  /** 绝对定位（拖动过）：位置固定，不参与重排 */
   pinned: boolean
+  /** 只改过宽高（缩放）：仍参与自动流，下方题目跟着让位；此时 page/x/y 由重排决定 */
+  sizeOnly?: boolean
 }
 
 export interface SheetLayoutData {

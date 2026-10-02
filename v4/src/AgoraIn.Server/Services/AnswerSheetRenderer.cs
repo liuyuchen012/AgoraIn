@@ -102,6 +102,9 @@ public static class AnswerSheetRenderer
     // + 标题下间距 1.5 + 块下间距 3。旧值 12.0 是按标称尺寸估的：同一页只放一种块时看不出来，
     // 一旦块后面还紧跟别的块（客观题→填空题→主观题），后面的块就会累计偏 0.24mm/块。
     private const double BlockChromeMm = 12.24;
+    /// <summary>与版面模型同名的常量：.qblock 边框 + 左右内边距 / .qbody 左右内边距。</summary>
+    private const double BlockInsetX = 2.26;
+    private const double QBodyPadX = 6.0;
     private const double ObjRowMm = 6.0;         // 客观题行距（与 .omr-item 高度一致）
     /// <summary>填空题行高（mm）：每题一条横线的作答区——不需要主观题那么大的框。</summary>
     private const double BlankRowMm = 9.0;
@@ -138,9 +141,13 @@ public static class AnswerSheetRenderer
         // 填空题判分与客观题同一套（比标准答案对错），版面却要紧凑得多，故单独成节。
         // 拖过的题（placements）不参与流动，最后按覆盖坐标绝对定位，避免被自动分页挤走。
         var pinned = placements is { Count: > 0 }
-            ? questions.Where(q => placements.ContainsKey(q.Id)).ToList()
+            ? questions.Where(q => placements.TryGetValue(q.Id, out var pl) && !pl.SizeOnly).ToList()
             : [];
-        var flow = pinned.Count > 0 ? questions.Where(q => !placements!.ContainsKey(q.Id)).ToList() : questions;
+        var flow = pinned.Count > 0 ? questions.Where(q => !pinned.Contains(q)).ToList() : questions;
+        // 尺寸覆盖（只改宽高、仍留在自动流）——下方题目按它让位/回收
+        var sz = new SizeOverrides(placements is { Count: > 0 }
+            ? placements.Where(kv => kv.Value.SizeOnly).ToDictionary(kv => kv.Key, kv => kv.Value)
+            : new Dictionary<string, QuestionPlacement>());
         var objective = flow.Where(q => IsObjective(q.Type)).ToList();
         var blanks = flow.Where(q => IsBlank(q.Type)).ToList();
         var subjective = flow.Where(q => !IsObjective(q.Type) && !IsBlank(q.Type)).ToList();
@@ -173,29 +180,40 @@ public static class AnswerSheetRenderer
                 // 1) 客观题：按 N 列 x M 行装填本栏剩余容量
                 if (objIdx < objective.Count)
                 {
-                    var rows = (int)Math.Floor((capacity - used - BlockChromeMm) / ObjRowMm);
+                    // 客观题行高统一（块内任一题被缩放 → 整块跟随），与版面模型同口径
+                    var chunkRowH = ObjRowMm;
+                    foreach (var q in objective.Skip(objIdx)) chunkRowH = Math.Max(chunkRowH, sz.H(q.Id, ObjRowMm));
+                    var rows = (int)Math.Floor((capacity - used - BlockChromeMm) / chunkRowH);
                     var take = Math.Min(objective.Count - objIdx, Math.Max(0, rows) * opt.ObjColumns);
                     if (take > 0)
                     {
                         var chunk = objective.Skip(objIdx).Take(take).ToList();
                         objIdx += take;
-                        blocks.Append(BuildObjectiveBlock(chunk, options, opt.ObjColumns, objTitle));
-                        used += BlockChromeMm + Math.Ceiling(take / (double)opt.ObjColumns) * ObjRowMm;
+                        blocks.Append(BuildObjectiveBlock(chunk, options, opt.ObjColumns, objTitle, sz));
+                        used += BlockChromeMm + Math.Ceiling(take / (double)opt.ObjColumns) * chunkRowH;
                     }
                 }
 
-                // 2) 填空题：一题一行，行高固定（每行一条横线）
+                // 2) 填空题：一题一行；逐行累计——每题可能被单独拉高/压低，装不下留给下一栏
                 if (objIdx >= objective.Count && blankIdx < blanks.Count)
                 {
-                    var rowH = BlankRowMm + BlankRowGapMm;
-                    var rows = (int)Math.Floor((capacity - used - BlockChromeMm + BlankRowGapMm) / rowH);
-                    var take = Math.Min(blanks.Count - blankIdx, Math.Max(0, rows));
+                    var fit = 0;
+                    var acc = 0.0;
+                    var limit = capacity - used - BlockChromeMm + BlankRowGapMm;
+                    while (blankIdx + fit < blanks.Count)
+                    {
+                        var rh = sz.H(blanks[blankIdx + fit].Id, BlankRowMm) + BlankRowGapMm;
+                        if (fit > 0 && acc + rh > limit) break;
+                        acc += rh;
+                        fit++;
+                    }
+                    var take = fit;
                     if (take > 0)
                     {
                         var chunk = blanks.Skip(blankIdx).Take(take).ToList();
                         blankIdx += take;
-                        blocks.Append(BuildBlankBlock(chunk, blankTitle));
-                        used += BlockChromeMm + take * rowH;   // 最后一行的 margin 也在块内（CSS 不会塌陷）
+                        blocks.Append(BuildBlankBlock(chunk, blankTitle, sz, opt.BlockWidthMm - 2 * (BlockInsetX + QBodyPadX)));
+                        used += BlockChromeMm + chunk.Sum(q => sz.H(q.Id, BlankRowMm) + BlankRowGapMm);
                     }
                 }
 
@@ -207,13 +225,13 @@ public static class AnswerSheetRenderer
                     var chunkUsed = 0.0;
                     while (subIdx < subjective.Count)
                     {
-                        var h = SubjectiveHeightMm(subjective[subIdx]);
+                        var h = SubjectiveItemHeightMm(subjective[subIdx], sz);
                         if (chunk.Count > 0 && chunkUsed + h > availSub) break;
                         chunk.Add(subjective[subIdx]);
                         chunkUsed += h;
                         subIdx++;
                     }
-                    if (chunk.Count > 0) blocks.Append(BuildSubjectiveBlock(chunk, subjTitle));
+                    if (chunk.Count > 0) blocks.Append(BuildSubjectiveBlock(chunk, subjTitle, sz, opt.BlockWidthMm - 2 * (BlockInsetX + QBodyPadX)));
                 }
 
                 // 兜底：容量估算若异常（理论上不会）也必须有内容，避免死循环
@@ -223,19 +241,19 @@ public static class AnswerSheetRenderer
                     {
                         var one = objective.Skip(objIdx).Take(opt.ObjColumns).ToList();
                         objIdx += one.Count;
-                        blocks.Append(BuildObjectiveBlock(one, options, opt.ObjColumns, objTitle));
+                        blocks.Append(BuildObjectiveBlock(one, options, opt.ObjColumns, objTitle, sz));
                     }
                     else if (blankIdx < blanks.Count)
                     {
                         var one = blanks.Skip(blankIdx).Take(1).ToList();
                         blankIdx += one.Count;
-                        blocks.Append(BuildBlankBlock(one, blankTitle));
+                        blocks.Append(BuildBlankBlock(one, blankTitle, sz, opt.BlockWidthMm - 2 * (BlockInsetX + QBodyPadX)));
                     }
                     else
                     {
                         var one = subjective.Skip(subIdx).Take(1).ToList();
                         subIdx += one.Count;
-                        blocks.Append(BuildSubjectiveBlock(one, subjTitle));
+                        blocks.Append(BuildSubjectiveBlock(one, subjTitle, sz, opt.BlockWidthMm - 2 * (BlockInsetX + QBodyPadX)));
                     }
                 }
 
@@ -481,8 +499,9 @@ public static class AnswerSheetRenderer
   /* ── 客观题（固定行高 6mm，与分页常量 ObjRowMm 一致） ── */
   .omr-cols { display: flex; gap: 3mm; }
   .omr-col { flex: 1; }
-  .omr-item { height: 6mm; overflow: hidden; }
-  .omr-row { display: flex; align-items: center; gap: 1mm; height: 6mm; font-size: 9pt; }
+  /* 行高被放大时气泡在整行里居中（.omr-row 固定 6mm，靠 flex 居中；与版面模型同口径） */
+  .omr-item { height: 6mm; overflow: hidden; display: flex; align-items: center; }
+  .omr-row { display: flex; align-items: center; gap: 1mm; height: 6mm; width: 100%; font-size: 9pt; }
   .omr-no { width: 7mm; text-align: right; font-weight: bold; }
   .omr-opts { display: flex; }
   .omr-opt { width: 6mm; height: 4mm; border: 0.3mm solid #000; margin-right: 1.5mm;
@@ -570,6 +589,32 @@ public static class AnswerSheetRenderer
 
     // ── 版面片段 ──────────────────────────────────────────────────────
 
+    /// <summary>尺寸覆盖（SizeOnly）：只改宽高、仍留在自动流里的题。空表表示没有任何尺寸改动。</summary>
+    private sealed record SizeOverrides(IReadOnlyDictionary<string, QuestionPlacement> Map)
+    {
+        public static readonly SizeOverrides None = new(new Dictionary<string, QuestionPlacement>());
+
+        public bool Has(string qid) => Map.ContainsKey(qid);
+        public double H(string qid, double fallback) => Map.TryGetValue(qid, out var pl) ? Math.Max(6, pl.Hmm) : fallback;
+        public double W(string qid, double fallback) => Map.TryGetValue(qid, out var pl) ? Math.Min(fallback, Math.Max(20, pl.Wmm)) : fallback;
+    }
+
+    /// <summary>主观题"一条"占位高度：覆盖时 = 框高 + 下间距 3mm（与模型 SubjMb 一致）。</summary>
+    private static double SubjectiveItemHeightMm(Question q, SizeOverrides sz)
+        => sz.Has(q.Id) ? sz.H(q.Id, 0) + 3.0 : SubjectiveHeightMm(q);
+
+    /// <summary>主观题作答框的正文高度（框高 − 题头 6mm − 上下边框）。</summary>
+    private static double SubjectiveBodyMmOf(Question q, SizeOverrides sz)
+        => sz.Has(q.Id) ? Math.Max(6.0, sz.H(q.Id, 0) - 6.53) : DefaultBodyMm(q.Type);
+
+    private static double DefaultBodyMm(QuestionType t) => t switch
+    {
+        QuestionType.Blank => 18.0,
+        QuestionType.ShortAnswer => 35.0,
+        QuestionType.Essay => 64.0,
+        _ => 30.0,
+    };
+
     private static bool IsObjective(QuestionType t)
         => t is QuestionType.SingleChoice or QuestionType.MultipleChoice or QuestionType.Judge;
 
@@ -593,22 +638,32 @@ public static class AnswerSheetRenderer
     /// 也不占主观题的大作答框。**四边框是刻意保留的**：识别端用"框在不在"做整页指纹，
     /// 纯横线没有四条边，整页就会认不出来（页码、答案都会跟着错）。
     /// </summary>
-    private static string BuildBlankBlock(IReadOnlyList<Question> questions, string title = BlankTitleFallback)
+    private static string BuildBlankBlock(IReadOnlyList<Question> questions, string title = BlankTitleFallback,
+        SizeOverrides? sizes = null, double blockContentW = 0)
     {
+        var sz = sizes ?? SizeOverrides.None;
         var sb = new StringBuilder();
         sb.Append("<div class=\"qblock\">");
         sb.Append($"<div class=\"block-title\">{title}</div>");
         sb.Append("<div class=\"qbody\">");
 
         var offsets = new List<double>();
-        for (var i = 0; i < questions.Count; i++) offsets.Add(i * (BlankRowMm + BlankRowGapMm));
-        if (questions.Count > 0) offsets.Add(questions.Count * (BlankRowMm + BlankRowGapMm) - BlankRowGapMm);
+        var acc = 0.0;
+        foreach (var q in questions)
+        {
+            offsets.Add(acc);
+            acc += sz.H(q.Id, BlankRowMm) + BlankRowGapMm;
+        }
+        if (questions.Count > 0) offsets.Add(Math.Max(0, acc - BlankRowGapMm));
         sb.Append(BuildTimingMarks(offsets));
 
         foreach (var q in questions)
         {
+            var rowH = sz.H(q.Id, BlankRowMm);
+            // 只改高度时宽度保持整栏（兜底 = 整栏内容宽）；.blank-row 是 border-box，宽度即外框宽
+            var w = sz.Has(q.Id) && blockContentW > 0 ? $" width:{sz.W(q.Id, blockContentW):0.##}mm;" : "";   // 分号不能少：否则 height 声明整条被浏览器丢掉
             sb.Append($$"""
-<div class="blank-row" data-qid="{{q.Id}}">
+<div class="blank-row" style="height:{{rowH:0.##}}mm;{{w}}" data-qid="{{q.Id}}">
   <div class="blank-no">第 {{q.Index + 1}} 题（{{q.Score:0.#}} 分）</div>
   <div class="blank-line"></div>
 </div>
@@ -720,8 +775,13 @@ public static class AnswerSheetRenderer
         IReadOnlyList<Question> questions,
         IReadOnlyDictionary<string, List<string>> options,
         int columnCount,
-        string title = ObjTitleFallback)
+        string title = ObjTitleFallback,
+        SizeOverrides? sizes = null)
     {
+        var sz = sizes ?? SizeOverrides.None;
+        // 客观题是统一网格：块内任一题被缩放时整块按该行高排（与版面模型同口径）
+        var rowH = ObjRowMm;
+        foreach (var q in questions) rowH = Math.Max(rowH, sz.H(q.Id, ObjRowMm));
         var sb = new StringBuilder();
         sb.Append("<div class=\"qblock\">");
         sb.Append($"<div class=\"block-title\">{title}</div>");
@@ -737,7 +797,7 @@ public static class AnswerSheetRenderer
         var perCol = Math.Max(1, (int)Math.Ceiling(questions.Count / (double)columnCount));
 
         var offsets = new List<double>();
-        for (var r = 0; r < perCol; r++) offsets.Add(r * ObjRowMm + (ObjRowMm - ObjTickMm) / 2);
+        for (var r = 0; r < perCol; r++) offsets.Add(r * rowH + (ObjRowMm - ObjTickMm) / 2);
         sb.Append(BuildTimingMarks(offsets));
 
         sb.Append("<div class=\"omr-cols\">");
@@ -752,7 +812,7 @@ public static class AnswerSheetRenderer
                         ? list
                         : ["A", "B", "C", "D"];
 
-                sb.Append("<div class=\"omr-item\"><div class=\"omr-row\">");
+                sb.Append($"<div class=\"omr-item\" style=\"height:{rowH:0.##}mm\"><div class=\"omr-row\">");
                 sb.Append($"<div class=\"omr-no\">{q.Index + 1}.</div><div class=\"omr-opts\">");
                 foreach (var k in keys)
                     sb.Append($"<div class=\"omr-opt\" data-q=\"{q.Index + 1}\" data-opt=\"{Escape(k)}\">{Escape(k)}</div>");
@@ -767,8 +827,10 @@ public static class AnswerSheetRenderer
     }
 
     /// <summary>主观题块：黑框 + 左右定时条（对齐每个作答框顶部）+ 作答框。</summary>
-    private static string BuildSubjectiveBlock(IReadOnlyList<Question> questions, string title = SubjTitleFallback)
+    private static string BuildSubjectiveBlock(IReadOnlyList<Question> questions, string title = SubjTitleFallback,
+        SizeOverrides? sizes = null, double blockContentW = 0)
     {
+        var sz = sizes ?? SizeOverrides.None;
         var sb = new StringBuilder();
         sb.Append("<div class=\"qblock\">");
         sb.Append($"<div class=\"block-title\">{title}</div>");
@@ -779,18 +841,20 @@ public static class AnswerSheetRenderer
         foreach (var q in questions)
         {
             offsets.Add(cursor);
-            cursor += SubjectiveHeightMm(q);
+            cursor += SubjectiveItemHeightMm(q, sz);
         }
         offsets.Add(cursor);
         sb.Append(BuildTimingMarks(offsets));
 
         foreach (var q in questions)
         {
-            var height = SubjectiveBodyHeight(q.Type);
+            // 被缩放过就用覆盖高度（单位 mm）；宽度覆盖写成行内宽（默认铺满整栏）
+            var body = SubjectiveBodyMmOf(q, sz);
+            var w = sz.Has(q.Id) && blockContentW > 0 ? $"width:{sz.W(q.Id, blockContentW):0.##}mm;" : "";
             var lines = q.Type is QuestionType.ShortAnswer or QuestionType.Essay ? " answer-lines" : "";
 
             sb.Append($$"""
-<div class="answer-box" style="--h:{{height}}">
+<div class="answer-box" style="{{w}}--h:{{body:0.##}}mm">
   <div class="answer-head">第 {{q.Index + 1}} 题（{{q.Score:0.#}} 分）</div>
   <div class="answer-body{{lines}}"></div>
 </div>

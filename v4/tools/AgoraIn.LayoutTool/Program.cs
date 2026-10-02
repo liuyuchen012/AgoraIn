@@ -83,11 +83,12 @@ if (placementsFile != null && File.Exists(placementsFile))
     {
         var pl = new QuestionPlacement(
             el.GetProperty("questionId").GetString() ?? "",
-            el.GetProperty("pageNo").GetInt32(),
-            el.GetProperty("xMm").GetDouble(),
-            el.GetProperty("yMm").GetDouble(),
+            el.TryGetProperty("pageNo", out var pn) ? pn.GetInt32() : 1,
+            el.TryGetProperty("xMm", out var xm) ? xm.GetDouble() : 0,
+            el.TryGetProperty("yMm", out var ym) ? ym.GetDouble() : 0,
             el.GetProperty("wMm").GetDouble(),
-            el.GetProperty("hMm").GetDouble());
+            el.GetProperty("hMm").GetDouble(),
+            el.TryGetProperty("sizeOnly", out var so) && so.GetBoolean());
         placements[pl.QuestionId] = pl;
     }
     Console.WriteLine($"覆盖项 {placements.Count} 条：{string.Join(", ", placements.Keys)}");

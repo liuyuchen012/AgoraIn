@@ -4,7 +4,7 @@
     <div class="wrap">
       <div class="toolbar">
         <span class="hint">
-          拖动题目框移动、拖右下角改大小；自动吸附 1mm，重叠会标红。
+          拖动题目框改位置、拖右下角改大小；自动吸附 1mm。**改大小会让下方题目自动让位/回收**（分页重排），重叠会标红。
           <b>松手即保存</b>，右侧预览就是打印出来的样子。
         </span>
         <span class="spacer"></span>
@@ -46,7 +46,8 @@ const frameEl = ref<HTMLIFrameElement>()
 const loading = ref(false)
 const savedHint = ref('')
 const items = ref<SheetPlacement[]>([])
-const modified = ref(new Set<string>())
+const modified = ref(new Set<string>())   // 拖动过（绝对定位）的题
+const sized = ref(new Set<string>())      // 只改过大小（仍在自动流、下方让位）的题
 const paperH = ref(297)
 const pageCount = ref(1)
 const sheetVersion = ref(0)
@@ -87,6 +88,7 @@ async function load() {
     paperH.value = data.paperHeightMm
     pageCount.value = data.pageCount
     modified.value = new Set(data.items.filter(i => i.pinned).map(i => i.questionId))
+    sized.value = new Set(data.items.filter(i => i.sizeOnly).map(i => i.questionId))
     savedHint.value = ''
   } catch {
     ElMessage.error('读取版面失败')
@@ -114,6 +116,8 @@ function startDrag(e: PointerEvent, it: SheetPlacement, mode: 'move' | 'resize')
     if (mode === 'move') {
       it.x = Math.max(0, snap(x0 + dx))
       it.y = Math.max(0, snap(y0 + dy))
+    } else if (it.kind === 'objective') {
+      it.h = Math.max(6, snap(h0 + dy))      // 客观题是统一网格：只调行高，宽度跟着栏宽
     } else {
       it.w = Math.max(20, snap(w0 + dx))
       it.h = Math.max(8, snap(h0 + dy))
@@ -126,7 +130,14 @@ function startDrag(e: PointerEvent, it: SheetPlacement, mode: 'move' | 'resize')
     target.classList.remove('dragging')
     // 与初始位置相同（只是点了一下）就不必写库
     if (it.x === x0 && it.y === y0 && it.w === w0 && it.h === h0) return
-    modified.value = new Set(modified.value).add(it.questionId)
+    if (mode === 'move') {
+      // 拖位置 = 钉住（绝对定位）；它同时脱离自动流，尺寸随当前框走
+      modified.value = new Set(modified.value).add(it.questionId)
+      sized.value = new Set([...sized.value].filter(id => id !== it.questionId))
+    } else {
+      // 只改大小 = 留在自动流：**下方题目自动让位/回收**（分页也跟着重排）
+      sized.value = new Set(sized.value).add(it.questionId)
+    }
     save()
   }
   window.addEventListener('pointermove', onMove)
@@ -142,12 +153,17 @@ function save() {
   saveTimer = window.setTimeout(async () => {
     try {
       // 只写拖动过的题：没动过的继续走自动排版（否则整卷都被钉死，加题后不会自动重排）
-      const payload = items.value.filter(i => modified.value.has(i.questionId))
-        .map(i => ({ questionId: i.questionId, pageNo: i.page, xMm: i.x, yMm: i.y, wMm: i.w, hMm: i.h }))
+      const payload = items.value
+        .filter(i => modified.value.has(i.questionId) || sized.value.has(i.questionId))
+        .map(i => ({
+          questionId: i.questionId, pageNo: i.page, xMm: i.x, yMm: i.y, wMm: i.w, hMm: i.h,
+          sizeOnly: !modified.value.has(i.questionId),   // 只缩放的题留在自动流里重排
+        }))
       await examApi.saveSheetLayout(props.paperId, payload as never)
-      savedHint.value = `已保存 ${new Date().toLocaleTimeString()}`
       await nextTick()
       reloadSheet()
+      await load()          // 重新拉版面：缩放过之后下方题目已让位，框要跟着移到新位置
+      savedHint.value = `已保存 ${new Date().toLocaleTimeString()}`
     } catch {
       savedHint.value = '保存失败'
     }
