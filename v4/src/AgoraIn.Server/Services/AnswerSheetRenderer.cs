@@ -97,8 +97,15 @@ public static class AnswerSheetRenderer
     // ── 版面容量常量（mm）─────────────────────────────────────────────
     // 必须与下方 CSS 中的显式高度严格一致；宁可留有余量，也不允许溢出
     // （.content 为 overflow:hidden，一旦高估容量就会静默裁切末尾题目）。
-    private const double BlockChromeMm = 12.0;   // .qblock 边框 1 + 内边距 3 + 标题 5 + 外边距 3
+    // 区块外框总开销（mm）：块高减内容高 + 块间距 = 12.24（DOM 实测）。
+    // 构成：渲染边框 0.53（CSS 标称 0.5mm 实际渲染约 0.265mm/条）+ 上下内边距 3 + 标题行盒 4.225
+    // + 标题下间距 1.5 + 块下间距 3。旧值 12.0 是按标称尺寸估的：同一页只放一种块时看不出来，
+    // 一旦块后面还紧跟别的块（客观题→填空题→主观题），后面的块就会累计偏 0.24mm/块。
+    private const double BlockChromeMm = 12.24;
     private const double ObjRowMm = 6.0;         // 客观题行距（与 .omr-item 高度一致）
+    /// <summary>填空题行高（mm）：每题一条横线的作答区——不需要主观题那么大的框。</summary>
+    private const double BlankRowMm = 9.0;
+    private const double BlankRowGapMm = 2.0;    // .blank-row 的 margin-bottom
     private const double ObjTickMm = 4.0;        // OMR 定时黑条高度（与选项框等高）
 
     private const int IdDigitRows = 10;          // 考号位数 0-9
@@ -125,24 +132,34 @@ public static class AnswerSheetRenderer
         AnswerSheetOptions? sheetOptions = null)
     {
         var opt = sheetOptions ?? AnswerSheetOptions.Default;
+        // 三个分组：客观题（选/判断，涂卡）→ 填空题（一条横线）→ 主观题（大作答框）。
+        // 填空题判分与客观题同一套（比标准答案对错），版面却要紧凑得多，故单独成节。
         var objective = questions.Where(q => IsObjective(q.Type)).ToList();
-        var subjective = questions.Where(q => !IsObjective(q.Type)).ToList();
+        var blanks = questions.Where(q => IsBlank(q.Type)).ToList();
+        var subjective = questions.Where(q => !IsObjective(q.Type) && !IsBlank(q.Type)).ToList();
+
+        // 只给实际存在的分组编号：没有填空题时"主观题"就是二
+        var ordinal = 0;
+        var objTitle = objective.Count > 0 ? SectionTitle(ObjTitleFallback, ++ordinal) : ObjTitleFallback;
+        var blankTitle = blanks.Count > 0 ? SectionTitle(BlankTitleFallback, ++ordinal) : BlankTitleFallback;
+        var subjTitle = subjective.Count > 0 ? SectionTitle(SubjTitleFallback, ++ordinal) : SubjTitleFallback;
 
         // ── 服务端分页 ──
-        // 顺序装箱：先排完客观题，再排主观题；满载就换下一个"槽位"——双栏时同页右栏，
+        // 顺序装箱：先排完客观题，再填空题，最后主观题；满载就换下一个"槽位"——双栏时同页右栏，
         // 单栏时下一页。单栏模式每页只有 1 个槽位，输出与旧版逐字节一致（A4 识别已验证过）。
         var pages = new List<List<string>>();
         var objIdx = 0;
+        var blankIdx = 0;
         var subIdx = 0;
 
-        while (objIdx < objective.Count || subIdx < subjective.Count)
+        while (objIdx < objective.Count || blankIdx < blanks.Count || subIdx < subjective.Count)
         {
             var capacity = opt.CapacityMm(pages.Count);
             var cols = new List<string>();
 
             for (var c = 0; c < opt.Columns; c++)
             {
-                if (objIdx >= objective.Count && subIdx >= subjective.Count) break;   // 排完了就别占空栏
+                if (objIdx >= objective.Count && blankIdx >= blanks.Count && subIdx >= subjective.Count) break;   // 排完了就别占空栏
                 var used = 0.0;
                 var blocks = new StringBuilder();
 
@@ -155,13 +172,28 @@ public static class AnswerSheetRenderer
                     {
                         var chunk = objective.Skip(objIdx).Take(take).ToList();
                         objIdx += take;
-                        blocks.Append(BuildObjectiveBlock(chunk, options, opt.ObjColumns));
+                        blocks.Append(BuildObjectiveBlock(chunk, options, opt.ObjColumns, objTitle));
                         used += BlockChromeMm + Math.Ceiling(take / (double)opt.ObjColumns) * ObjRowMm;
                     }
                 }
 
-                // 2) 主观题：客观题排完后，继续用本栏剩余容量装主观题
-                if (objIdx >= objective.Count && subIdx < subjective.Count)
+                // 2) 填空题：一题一行，行高固定（每行一条横线）
+                if (objIdx >= objective.Count && blankIdx < blanks.Count)
+                {
+                    var rowH = BlankRowMm + BlankRowGapMm;
+                    var rows = (int)Math.Floor((capacity - used - BlockChromeMm + BlankRowGapMm) / rowH);
+                    var take = Math.Min(blanks.Count - blankIdx, Math.Max(0, rows));
+                    if (take > 0)
+                    {
+                        var chunk = blanks.Skip(blankIdx).Take(take).ToList();
+                        blankIdx += take;
+                        blocks.Append(BuildBlankBlock(chunk, blankTitle));
+                        used += BlockChromeMm + take * rowH;   // 最后一行的 margin 也在块内（CSS 不会塌陷）
+                    }
+                }
+
+                // 3) 主观题：客观/填空排完后，继续用本栏剩余容量装主观题
+                if (objIdx >= objective.Count && blankIdx >= blanks.Count && subIdx < subjective.Count)
                 {
                     var availSub = capacity - used - BlockChromeMm;
                     var chunk = new List<Question>();
@@ -174,7 +206,7 @@ public static class AnswerSheetRenderer
                         chunkUsed += h;
                         subIdx++;
                     }
-                    if (chunk.Count > 0) blocks.Append(BuildSubjectiveBlock(chunk));
+                    if (chunk.Count > 0) blocks.Append(BuildSubjectiveBlock(chunk, subjTitle));
                 }
 
                 // 兜底：容量估算若异常（理论上不会）也必须有内容，避免死循环
@@ -184,13 +216,19 @@ public static class AnswerSheetRenderer
                     {
                         var one = objective.Skip(objIdx).Take(opt.ObjColumns).ToList();
                         objIdx += one.Count;
-                        blocks.Append(BuildObjectiveBlock(one, options, opt.ObjColumns));
+                        blocks.Append(BuildObjectiveBlock(one, options, opt.ObjColumns, objTitle));
+                    }
+                    else if (blankIdx < blanks.Count)
+                    {
+                        var one = blanks.Skip(blankIdx).Take(1).ToList();
+                        blankIdx += one.Count;
+                        blocks.Append(BuildBlankBlock(one, blankTitle));
                     }
                     else
                     {
                         var one = subjective.Skip(subIdx).Take(1).ToList();
                         subIdx += one.Count;
-                        blocks.Append(BuildSubjectiveBlock(one));
+                        blocks.Append(BuildSubjectiveBlock(one, subjTitle));
                     }
                 }
 
@@ -389,6 +427,13 @@ public static class AnswerSheetRenderer
   .answer-body { height: var(--h, 30mm); }
   .answer-lines { background-image: repeating-linear-gradient(transparent, transparent 7mm, #ccc 7mm, #ccc 7.2mm); }
 
+  /* ── 填空题：一题一行，行内一条横线（高度与 BlankRowMm / BlankRowGapMm 一致） ──
+     四边框不能省：识别端用"框在不在"做整页指纹，纯横线会让整页认不出来。 */
+  .blank-row { height: 9mm; border: 0.5mm solid #000; margin: 0 0 2mm;
+               display: flex; align-items: center; padding: 0 2mm; break-inside: avoid; }
+  .blank-no { font-size: 9pt; white-space: nowrap; margin-right: 2mm; }
+  .blank-line { flex: 1; height: 5mm; border-bottom: 0.3mm dashed #888; }
+
   /* ── 考号表 ── */
   .roster-title { font-size: 15pt; font-weight: bold; text-align: center; margin: 0 0 1.5mm; }
   .roster-sub { font-size: 9pt; text-align: center; margin: 0 0 4mm; color: #333; }
@@ -453,6 +498,52 @@ public static class AnswerSheetRenderer
 
     private static bool IsObjective(QuestionType t)
         => t is QuestionType.SingleChoice or QuestionType.MultipleChoice or QuestionType.Judge;
+
+    /// <summary>填空题：判分按"对/错"比标准答案（与客观题同一套自动判分），
+    /// 但作答是手写一行字，版面既不能像选择题那样挤成网格，也不需要主观题那种大框。</summary>
+    private static bool IsBlank(QuestionType t) => t == QuestionType.Blank;
+
+    /// <summary>填空/客观题的分节标题：只给实际存在的分组编号（没有填空时不出现"二、填空题"）。</summary>
+    private const string ObjTitleFallback = "客观题（请填涂所选选项）";
+    private const string BlankTitleFallback = "填空题（请在横线上作答）";
+    private const string SubjTitleFallback = "主观题（请在框内作答）";
+
+    private static string SectionTitle(string name, int ordinal)
+    {
+        var cn = ordinal switch { 1 => "一", 2 => "二", 3 => "三", _ => (ordinal).ToString() };
+        return $"{cn}、{name}";
+    }
+
+    /// <summary>
+    /// 填空题块：每题一条横线（9mm 高的窄框 + 中间虚线），一题一行，不挤成选择题那种网格，
+    /// 也不占主观题的大作答框。**四边框是刻意保留的**：识别端用"框在不在"做整页指纹，
+    /// 纯横线没有四条边，整页就会认不出来（页码、答案都会跟着错）。
+    /// </summary>
+    private static string BuildBlankBlock(IReadOnlyList<Question> questions, string title = BlankTitleFallback)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<div class=\"qblock\">");
+        sb.Append($"<div class=\"block-title\">{title}</div>");
+        sb.Append("<div class=\"qbody\">");
+
+        var offsets = new List<double>();
+        for (var i = 0; i < questions.Count; i++) offsets.Add(i * (BlankRowMm + BlankRowGapMm));
+        if (questions.Count > 0) offsets.Add(questions.Count * (BlankRowMm + BlankRowGapMm) - BlankRowGapMm);
+        sb.Append(BuildTimingMarks(offsets));
+
+        foreach (var q in questions)
+        {
+            sb.Append($$"""
+<div class="blank-row" data-qid="{{q.Id}}">
+  <div class="blank-no">第 {{q.Index + 1}} 题（{{q.Score:0.#}} 分）</div>
+  <div class="blank-line"></div>
+</div>
+""");
+        }
+
+        sb.Append("</div></div>");
+        return sb.ToString();
+    }
 
     /// <summary>
     /// 主观题作答框高度（mm，含边框、题头与下间距），必须与 CSS 中
@@ -554,11 +645,12 @@ public static class AnswerSheetRenderer
     private static string BuildObjectiveBlock(
         IReadOnlyList<Question> questions,
         IReadOnlyDictionary<string, List<string>> options,
-        int columnCount)
+        int columnCount,
+        string title = ObjTitleFallback)
     {
         var sb = new StringBuilder();
         sb.Append("<div class=\"qblock\">");
-        sb.Append("<div class=\"block-title\">一、客观题（请填涂所选选项）</div>");
+        sb.Append($"<div class=\"block-title\">{title}</div>");
         sb.Append("<div class=\"qbody\">");
 
         if (questions.Count == 0)
@@ -601,11 +693,11 @@ public static class AnswerSheetRenderer
     }
 
     /// <summary>主观题块：黑框 + 左右定时条（对齐每个作答框顶部）+ 作答框。</summary>
-    private static string BuildSubjectiveBlock(IReadOnlyList<Question> questions)
+    private static string BuildSubjectiveBlock(IReadOnlyList<Question> questions, string title = SubjTitleFallback)
     {
         var sb = new StringBuilder();
         sb.Append("<div class=\"qblock\">");
-        sb.Append("<div class=\"block-title\">二、主观题（请在框内作答）</div>");
+        sb.Append($"<div class=\"block-title\">{title}</div>");
         sb.Append("<div class=\"qbody\">");
 
         var offsets = new List<double>();

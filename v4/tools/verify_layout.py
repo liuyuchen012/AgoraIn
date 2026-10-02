@@ -37,7 +37,12 @@ JS = """
         const h = el.querySelector('.answer-head');
         const m = h ? h.textContent.match(/第\\s*(\\d+)\\s*题/) : null;
         return { q: m ? +m[1] : -1, r: rel(el) };
-      }),
+      }).concat([...pg.querySelectorAll('.blank-row')].map(el => {
+        // 填空题行：题号印在 .blank-no（"第 N 题（x 分）"）
+        const n = el.querySelector('.blank-no');
+        const m = n ? n.textContent.match(/第\\s*(\\d+)\\s*题/) : null;
+        return { q: m ? +m[1] : -1, r: rel(el) };
+      })),
       anchors: [...pg.querySelectorAll('.anchor')].map(el => ({ cls: el.className.replace('anchor ', ''), r: rel(el) })),
       cols: [...pg.querySelectorAll('.cols > .col')].map(el => rel(el))
     };

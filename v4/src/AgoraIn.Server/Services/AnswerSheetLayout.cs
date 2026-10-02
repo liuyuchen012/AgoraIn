@@ -132,6 +132,12 @@ public static class AnswerSheetLayout
     public static bool IsObjective(QuestionType t)
         => t is QuestionType.SingleChoice or QuestionType.MultipleChoice or QuestionType.Judge;
 
+    /// <summary>填空题：与客观题同一套"比标准答案对错"的判分，但版面是每行一条横线的窄框。</summary>
+    public static bool IsBlank(QuestionType t) => t == QuestionType.Blank;
+
+    /// <summary>填空题行高与行间距（mm）——必须与渲染 CSS 的 .blank-row 完全一致。</summary>
+    public const double BlankRowMm = 9.0, BlankRowGapMm = 2.0;
+
     /// <summary>定位标记边长与相对页容器的内缩（与 CSS 一致）。</summary>
     public const double MarkerMm = 6.0;
     public const double MarkerInsetMm = 7.0;
@@ -186,24 +192,27 @@ public static class AnswerSheetLayout
     {
         var opt = sheetOptions ?? AnswerSheetOptions.Default;
         var objective = questions.Where(q => IsObjective(q.Type)).ToList();
-        var subjective = questions.Where(q => !IsObjective(q.Type)).ToList();
+        var blanks = questions.Where(q => IsBlank(q.Type)).ToList();
+        var subjective = questions.Where(q => !IsObjective(q.Type) && !IsBlank(q.Type)).ToList();
         var columns = opt.ObjColumns;
 
         // ── 与渲染器相同的顺序装箱（槽位 = 页 × 栏），得到每页各栏的内容 ──
         // 单栏时每页 1 个槽位，与旧算法等价；双栏时左栏排满接右栏。
-        var pages = new List<(bool HasHeader, List<(List<Question> Obj, List<Question> Sub)> Cols)>();
+        var pages = new List<(bool HasHeader, List<(List<Question> Obj, List<Question> Blank, List<Question> Sub)> Cols)>();
         var objIdx = 0;
+        var blankIdx = 0;
         var subIdx = 0;
-        while (objIdx < objective.Count || subIdx < subjective.Count)
+        while (objIdx < objective.Count || blankIdx < blanks.Count || subIdx < subjective.Count)
         {
             var capacity = opt.CapacityMm(pages.Count);
-            var cols = new List<(List<Question>, List<Question>)>();
+            var cols = new List<(List<Question>, List<Question>, List<Question>)>();
 
             for (var c = 0; c < opt.Columns; c++)
             {
-                if (objIdx >= objective.Count && subIdx >= subjective.Count) break;   // 排完了不占空栏
+                if (objIdx >= objective.Count && blankIdx >= blanks.Count && subIdx >= subjective.Count) break;   // 排完了不占空栏
                 var used = 0.0;
                 var pageObj = new List<Question>();
+                var pageBlank = new List<Question>();
                 var pageSub = new List<Question>();
 
                 if (objIdx < objective.Count)
@@ -218,7 +227,20 @@ public static class AnswerSheetLayout
                     }
                 }
 
-                if (objIdx >= objective.Count && subIdx < subjective.Count)
+                if (objIdx >= objective.Count && blankIdx < blanks.Count)
+                {
+                    var rowH = BlankRowMm + BlankRowGapMm;
+                    var rows = (int)Math.Floor((capacity - used - BlockChromeMm + BlankRowGapMm) / rowH);
+                    var take = Math.Min(blanks.Count - blankIdx, Math.Max(0, rows));
+                    if (take > 0)
+                    {
+                        pageBlank = blanks.Skip(blankIdx).Take(take).ToList();
+                        blankIdx += take;
+                        used += BlockChromeMm + take * rowH;   // 最后一行的 margin 也在块内
+                    }
+                }
+
+                if (objIdx >= objective.Count && blankIdx >= blanks.Count && subIdx < subjective.Count)
                 {
                     var availSub = capacity - used - BlockChromeMm;
                     var subUsed = 0.0;
@@ -232,12 +254,17 @@ public static class AnswerSheetLayout
                     }
                 }
 
-                if (pageObj.Count == 0 && pageSub.Count == 0)
+                if (pageObj.Count == 0 && pageBlank.Count == 0 && pageSub.Count == 0)
                 {
                     if (objIdx < objective.Count)
                     {
                         pageObj = objective.Skip(objIdx).Take(columns).ToList();
                         objIdx += pageObj.Count;
+                    }
+                    else if (blankIdx < blanks.Count)
+                    {
+                        pageBlank = blanks.Skip(blankIdx).Take(1).ToList();
+                        blankIdx += pageBlank.Count;
                     }
                     else
                     {
@@ -246,13 +273,13 @@ public static class AnswerSheetLayout
                     }
                 }
 
-                cols.Add((pageObj, pageSub));
+                cols.Add((pageObj, pageBlank, pageSub));
             }
 
             pages.Add((pages.Count == 0, cols));
         }
 
-        if (pages.Count == 0) pages.Add((true, [([], [])]));
+        if (pages.Count == 0) pages.Add((true, [([], [], [])]));
 
         // ── 逐页逐栏算坐标 ──
         var result = new List<SheetPageLayout>();
@@ -280,7 +307,7 @@ public static class AnswerSheetLayout
             var colsTop = y;
             for (var c = 0; c < pageCols.Count; c++)
             {
-                var (pageObj, pageSub) = pageCols[c];
+                var (pageObj, pageBlank, pageSub) = pageCols[c];
                 var colLeft = PagePadSide + c * (opt.BlockWidthMm + AnswerSheetOptions.ColumnGapMm);
                 var blockW = opt.BlockWidthMm;
                 // 每栏的纵向游标都从列区顶部重新开始：右栏不受左栏排到哪儿的影响
@@ -314,6 +341,22 @@ public static class AnswerSheetLayout
                         }
                     }
                     colY = colsTop + BlockChromeMm + RowsOnPage(pageObj.Count, columns) * ObjRowH;
+                }
+
+                // 填空题块：一题一行、行高固定（与 .blank-row 的 9mm 一致）。
+                // 每行登记成"作答框"，切图与阅卷都按一题一块走，识别端的整页指纹也用它。
+                if (pageBlank.Count > 0)
+                {
+                    var rowTop = colY + QBlockTopInset;
+                    for (var i = 0; i < pageBlank.Count; i++)
+                    {
+                        frames.Add(new SubjectiveFrame(pageBlank[i].Index, new BubbleMark(
+                            colLeft + QBlockInsetX + QBodyPadX, rowTop,
+                            blockW - 2 * (QBlockInsetX + QBodyPadX),
+                            BlankRowMm)));
+                        rowTop += BlankRowMm + BlankRowGapMm;
+                    }
+                    colY += BlockChromeMm + pageBlank.Count * (BlankRowMm + BlankRowGapMm);
                 }
 
                 // 主观题块：作答框外框也是"这一页"的指纹（纯主观页没有选项气泡，
@@ -362,6 +405,6 @@ public static class AnswerSheetLayout
         }
     }
 
-    /// <summary>每个区块的外框开销：边框 1 + 上下内边距 3 + 标题 5 + 下间距 3（与渲染器 BlockChromeMm 一致）。</summary>
-    private const double BlockChromeMm = 12.0;
+    /// <summary>每个区块的外框开销：块高减内容高 + 块间距 = 12.24（DOM 实测校准，与渲染器 BlockChromeMm 一致）。</summary>
+    private const double BlockChromeMm = 12.24;
 }

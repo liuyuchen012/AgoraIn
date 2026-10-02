@@ -925,9 +925,9 @@ public class ExamsController : ControllerBase
 
                 lowestConfidence = Math.Min(lowestConfidence, ans.Confidence);
 
-                if (IsObjective(q.Type) && q.AiGradingEnabled != false && !string.IsNullOrEmpty(q.StandardAnswer))
+                if (IsAutoScored(q.Type) && q.AiGradingEnabled != false && !string.IsNullOrEmpty(q.StandardAnswer))
                 {
-                    // 客观题且教师未关闭 AI 判分：识别后与标准答案比对自动判分
+                    // 客观题/填空题且教师未关闭自动判分：识别后与标准答案比对自动判分
                     var correct = NormalizeAnswer(ans.Answer) == NormalizeAnswer(q.StandardAnswer);
                     _db.QuestionResults.Add(new QuestionResult
                     {
@@ -1120,7 +1120,8 @@ public class ExamsController : ControllerBase
         foreach (var q in questions)
         {
             // 教师配置：false = 分配教师手判，跳过 AI
-            if (q.AiGradingEnabled == false || IsObjective(q.Type)) continue;
+            // 客观题/填空题按标准答案自动判分，也不该再走 AI 评分要点
+            if (q.AiGradingEnabled == false || IsAutoScored(q.Type)) continue;
             if (string.IsNullOrWhiteSpace(q.Content)) continue;
 
             var existing = results.FirstOrDefault(r => r.QuestionId == q.Id);
@@ -1615,6 +1616,14 @@ public class ExamsController : ControllerBase
 
     private static bool IsObjective(QuestionType type)
         => type is QuestionType.SingleChoice or QuestionType.MultipleChoice or QuestionType.Judge;
+
+    /// <summary>
+    /// 按标准答案比对自动判分的题型：客观题（涂卡）+ 填空题。
+    /// 填空题虽由视觉模型读手写内容，但判分口径与客观题一致——对就是对、错就是错，
+    /// 不走主观题那套"评分要点"流程（教师真想让 AI 按要点给分，把题型改成简答即可）。
+    /// </summary>
+    private static bool IsAutoScored(QuestionType type)
+        => IsObjective(type) || type == QuestionType.Blank;
 
     /// <summary>客观题答案归一化：去空格、大写、多选题按字母排序后比较。</summary>
     /// <summary>
