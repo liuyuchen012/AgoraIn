@@ -1,6 +1,7 @@
 <template>
   <!-- 手机端嵌入式批改页（WebView 直接加载）：与网页端同一套批改面板 -->
   <div class="mobile-grading">
+    <div class="page">
     <div class="head">
       <span class="title">{{ header?.paperTitle || '逐题批改' }}</span>
       <span class="student">{{ header?.studentName || header?.studentRef || '未识别考生' }}</span>
@@ -27,6 +28,7 @@
         <el-button type="primary" size="small" :loading="confirming" @click="confirm">✔ 确认出分</el-button>
       </template>
     </GradingPanel>
+    </div>
   </div>
 </template>
 
@@ -127,6 +129,19 @@ function finish() {
   flex-direction: column;
   background: #fff;
 }
+.page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* 桌面（≥820px）：独立批改页在电脑浏览器里也能直接打开——居中卡片，不再贴边拉满 */
+@media (min-width: 820px) {
+  .mobile-grading { padding: 16px; background: #f5f7fa; }
+  .page {
+    max-width: 1280px; width: 100%; margin: 0 auto;
+    height: calc(100vh - 32px);
+    background: #fff; border-radius: 10px; box-shadow: 0 2px 12px rgba(0, 0, 0, .06);
+    padding: 14px 18px 10px; box-sizing: border-box;
+    display: flex; flex-direction: column;
+  }
+  .head { padding: 2px 4px 10px; }
+}
 .head {
   display: flex;
   align-items: center;
@@ -136,6 +151,7 @@ function finish() {
   flex-wrap: wrap;
 }
 .title { font-weight: 700; font-size: 15px; }
+.head :deep(.el-button) { margin: 0; }
 .student { color: #4285f4; font-size: 13px; }
 .status { color: #909399; font-size: 12px; margin-left: auto; }
 .error { padding: 40px 16px; text-align: center; color: #909399; }

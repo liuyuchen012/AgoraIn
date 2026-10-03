@@ -334,9 +334,10 @@
         <el-table-column prop="submittedAt" label="提交时间" width="170">
           <template #default="{row}">{{formatTime(row.submittedAt)}}</template>
         </el-table-column>
-        <el-table-column label="操作" width="380">
+        <el-table-column label="操作" width="430">
           <template #default="{row}">
             <el-button link type="primary" size="small" @click="openResults(row)">逐题</el-button>
+            <el-button link type="primary" size="small" @click="openStandalone(row)">整页</el-button>
             <el-button v-if="row.status<3" link type="warning" size="small" :loading="gradingId===row.id" @click="aiGradeAll(row)">AI批改</el-button>
             <el-button v-if="row.status!==3 && row.status!==2" link type="danger" size="small" @click="markReview(row)">待人工</el-button>
             <el-button v-if="row.status>=1" link type="success" size="small" @click="confirmGrade(row)">确认</el-button>
@@ -573,9 +574,10 @@
         <el-table-column prop="submittedAt" label="提交时间" width="170">
           <template #default="{row}">{{formatTime(row.submittedAt)}}</template>
         </el-table-column>
-        <el-table-column label="操作" width="380">
+        <el-table-column label="操作" width="430">
           <template #default="{row}">
             <el-button link type="primary" size="small" @click="openResults(row)">逐题</el-button>
+            <el-button link type="primary" size="small" @click="openStandalone(row)">整页</el-button>
             <el-button v-if="row.status<3" link type="warning" size="small" :loading="gradingId===row.id" @click="aiGradeAll(row)">AI批改</el-button>
             <el-button v-if="row.status!==3 && row.status!==2" link type="danger" size="small" @click="markReview(row)">待人工</el-button>
             <el-button v-if="row.status>=1" link type="success" size="small" @click="confirmGrade(row)">确认</el-button>
@@ -911,6 +913,12 @@ function previewSheet(row: any) {
   currentPreviewPaper.value = row
   previewUrl.value = examApi.sheetUrl(row.id, sheetQuery.value)
   previewVisible.value = true
+}
+
+/** 桌面/平板新窗口打开整页批改（与手机内嵌同一个 /grading 路由） */
+function openStandalone(row: any) {
+  if (!row?.id) return
+  window.open(`/grading/${row.id}`, '_blank')
 }
 
 function openLayoutEditor(row: any) {
