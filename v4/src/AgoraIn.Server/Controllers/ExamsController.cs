@@ -1401,13 +1401,27 @@ public class ExamsController : ControllerBase
     public async Task<IActionResult> OverrideResult(
         string submissionId, string questionId, [FromBody] OverrideResultRequest req)
     {
+        var submission = await _db.AnswerSheetSubmissions.FindAsync(submissionId);
+        if (submission == null) return NotFound(new { error = "答卷不存在（可能已被删除）" });
+        var question = await _db.Questions.FindAsync(questionId);
+        if (question == null)
+            return NotFound(new { error = "该题已不在试卷中（试卷可能被重新导入/删改），无法保存此题的分数" });
+
+        // 没有结果记录的题（试卷后加的题、或该题未参与识别）直接新建一条教师结果，而不是 404
         var existing = await _db.QuestionResults
             .FirstOrDefaultAsync(r => r.SubmissionId == submissionId && r.QuestionId == questionId);
-        if (existing == null) return NotFound();
-        var submission = await _db.AnswerSheetSubmissions.FindAsync(submissionId);
-        if (submission == null) return NotFound();
-        var question = await _db.Questions.FindAsync(questionId);
-        if (question == null) return NotFound();
+        if (existing == null)
+        {
+            existing = new QuestionResult
+            {
+                SubmissionId = submissionId,
+                QuestionId = questionId,
+                RecognizedAnswer = null,
+                Score = null,
+                Source = GradingSource.Teacher,
+            };
+            _db.QuestionResults.Add(existing);
+        }
 
         var (role, username) = CurrentRoleAndName();
         var isPrivileged = role is AppRoles.Admin or AppRoles.Owner;

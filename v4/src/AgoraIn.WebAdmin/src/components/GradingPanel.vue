@@ -75,6 +75,9 @@
         <div class="score-title">记分（间隔 {{ stepLabel }}）</div>
         <ScoreKeys :model-value="editScore ?? null" :max="current.fullScore" :step="0.5"
                    :visible-count="visibleCount" @update:model-value="editScore = $event ?? undefined" />
+        <el-button type="primary" style="margin-top:10px;width:100%" :loading="saving" @click="save()">
+          保存，下一题 →
+        </el-button>
         <el-input-number v-model="editScore" :min="0" :max="current.fullScore" :step="0.5"
                          size="small" style="width:76px;margin-top:8px" controls-position="right" />
         <el-input v-model="editComment" type="textarea" :rows="3" placeholder="评语（可选）"
@@ -82,12 +85,9 @@
       </div>
     </div>
 
-    <!-- 底栏：保存按钮常驻面板内（全屏也在）；嵌入方（手机批改页）可用 #actions 覆盖 -->
-    <div class="panel-foot">
-      <slot name="actions">
-        <el-button type="primary" :loading="saving" @click="save(false)">保存本题</el-button>
-        <el-button :disabled="index >= rows.length - 1" @click="save(true)">保存并下一题</el-button>
-      </slot>
+    <!-- 底栏：嵌入方（手机批改页）的 待人工/确认出分/完成；保存按钮在记分键下方 -->
+    <div v-if="$slots.actions" class="panel-foot">
+      <slot name="actions" />
     </div>
   </div>
 </template>
@@ -188,13 +188,15 @@ function revokeAll() {
   if (fullImageUrl.value) { URL.revokeObjectURL(fullImageUrl.value); fullImageUrl.value = '' }
 }
 
-function save(next = false) {
+function save(next = true) {
   const q = current.value
   if (!q) return
   if (editScore.value == null) { ElMessage.warning('请先给分（快捷键或输入框）'); return }
   q.editScore = editScore.value
   q.editComment = editComment.value
   emit('save', q, next)
+  // 保存后自动切到下一题（面板内部导航；最后一题停在原地）
+  if (next && index.value < props.rows.length - 1) index.value++
 }
 
 async function toggleFullscreen() {
@@ -355,9 +357,10 @@ defineExpose({ save })
     gap: 10px;
   }
   .right .score-title { width: 100%; }
-  .right > :nth-child(2) { flex: 0 0 150px; }        /* 记分键窗口 */
-  .right > :nth-child(3) { width: 110px !important; margin-top: 0 !important; }  /* 分数输入 */
-  .right > :nth-child(4) { flex: 1; min-width: 140px; margin-top: 0 !important; } /* 评语 */
+  .right > .score-keys { flex: 0 0 150px; }
+  .right > .el-button { width: 100% !important; margin: 10px 0 0 !important; }
+  .right > .el-input-number { width: 110px !important; margin-top: 0 !important; }
+  .right > .el-textarea { flex: 1; min-width: 140px; margin-top: 0 !important; }
 }
 .score-title { font-size: 12px; color: #909399; margin-bottom: 6px; text-align: center; }
 .full-fallback { max-width: 100%; max-height: 100%; object-fit: contain; }

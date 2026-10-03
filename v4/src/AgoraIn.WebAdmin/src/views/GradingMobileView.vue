@@ -19,9 +19,8 @@
                   @save="save">
       <!-- 按钮放在面板底栏（在面板元素内部）：进全屏后依然可见 —— 旧版在外部 div 里，
            全屏时整条 foot 被隐藏，手机上就"没有确认按钮"了 -->
+      <!-- 保存按钮在记分键下方（保存后自动下一题）；底栏只放批改流程动作 -->
       <template #actions>
-        <el-button size="small" :loading="saving" @click="panelEl?.save()">保存本题</el-button>
-        <el-button size="small" @click="panelEl?.save(true)">下一题</el-button>
         <span style="flex:1" />
         <el-button size="small" @click="markHuman">待人工</el-button>
         <el-button size="small" @click="finish">完成</el-button>
